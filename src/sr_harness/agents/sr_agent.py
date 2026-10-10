@@ -179,7 +179,8 @@ class SRAgent(Agent):
         self._last_model_route = None
 
         # 关键组件
-        self.skill_manager = skill_manager or SkillManager()
+        self.context = context if context is not None else AgentContext()
+        self.skill_manager = skill_manager or SkillManager(workspace=self.context.workspace)
         requested_tool_names = set(self.DEFAULT_TOOLS if tools is None else tools)
         initially_selected = [
             tool_cls for tool_cls in tool_cls_list
@@ -239,7 +240,6 @@ class SRAgent(Agent):
         self.money_counter = ParallelTimer(unit='$') # 费用统计
         self.tools_counter = ParallelTimer(unit='call') # 工具调用统计
         self.save_path = save_path
-        self.context = context if context is not None else AgentContext()
         self.context.args.validation_fraction = validation_fraction
         self.context.args.split_by = split_by
         self.context.args.split_ood_variable = split_ood_variable

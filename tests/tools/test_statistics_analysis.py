@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sr_harness.core import AgentContext
+
 import numpy as np
 
 from sr_harness.tools.statistics_analysis import StatisticsTool
@@ -61,7 +63,7 @@ class TestStatisticsToolExecution:
             "x2": np.array([10.0, 20.0, 30.0, 40.0]),
             "y": np.array([2.0, 4.0, 6.0, 8.0]),
         }
-        self.tool = StatisticsTool(data=self.data)
+        self.tool = StatisticsTool(context=AgentContext(data=self.data))
 
     def test_execute_analyzes_all_variables_by_default(self):
         result = self.tool.execute()
@@ -101,7 +103,7 @@ class TestStatisticsToolExecution:
     def test_multiple_invariant_expressions_include_nearly_constant_one(self):
         x = np.linspace(1, 2, 10)
         call = StatisticsTool(
-            data={"x1": x, "x2": 2 * x, "y": 3 / x}, target="y"
+            context=AgentContext(data={"x1": x, "x2": 2 * x, "y": 3 / x}, target="y")
         )(variables=["y*x1", "y*x1/x2"])
         assert call.ok is True
         assert call.result["exceptions"] == []
@@ -112,12 +114,13 @@ class TestStatisticsToolExecution:
 
 class TestStatisticsToolStats:
     def test_get_stats_computes_all_metrics(self):
-        tool = StatisticsTool(data={})
+        tool = StatisticsTool(context=AgentContext(data={}))
         stats = tool.get_stats(np.array([1.0, 2.0, 3.0, 4.0]))
 
-        assert {key: stats[key] for key in [
-            "n_samples", "min", "max", "mean", "variance", "std", "median", "q1", "q3"
-        ]} == {
+        assert {
+            key: stats[key]
+            for key in ["n_samples", "min", "max", "mean", "variance", "std", "median", "q1", "q3"]
+        } == {
             "n_samples": 4,
             "min": 1.0,
             "max": 4.0,
@@ -132,14 +135,19 @@ class TestStatisticsToolStats:
         assert stats["positive_ratio"] == 1.0
         assert stats["near_zero_ratio"] == 0.0
         assert stats["near_zero_threshold"] == 1e-8
-        assert (stats["n_negative"], stats["n_zero"], stats["n_positive"], stats["n_near_zero"]) == (0, 0, 4, 0)
+        assert (
+            stats["n_negative"],
+            stats["n_zero"],
+            stats["n_positive"],
+            stats["n_near_zero"],
+        ) == (0, 0, 4, 0)
         assert (stats["n_pos_inf"], stats["n_neg_inf"], stats["n_nan"]) == (0, 0, 0)
         assert [item["threshold"] for item in stats["near_zero_fractions"]] == [1e-8, 1e-6, 1e-4]
         assert sum(item["count"] for item in stats["distribution"]["bins"]) == 4
 
     def test_execute_returns_sign_ratios_and_distribution_without_correlations(self):
         x = np.array([-1.0, 0.0, 1.0, 2.0])
-        result = StatisticsTool(data={"x": x, "y": 2 * x}).execute(
+        result = StatisticsTool(context=AgentContext(data={"x": x, "y": 2 * x})).execute(
             n_bins=2,
             near_zero_threshold=0.01,
         )
@@ -151,14 +159,14 @@ class TestStatisticsToolStats:
         assert len(result["statistics"]["x"]["distribution"]["bins"]) == 2
 
     def test_get_stats_flattens_multidimensional_arrays(self):
-        tool = StatisticsTool(data={})
+        tool = StatisticsTool(context=AgentContext(data={}))
         stats = tool.get_stats(np.array([[1.0, 2.0], [3.0, 4.0]]))
 
         assert stats["n_samples"] == 4
         assert stats["mean"] == 2.5
 
     def test_get_stats_raises_for_empty_array(self):
-        tool = StatisticsTool(data={})
+        tool = StatisticsTool(context=AgentContext(data={}))
 
         try:
             tool.get_stats(np.array([]))
@@ -170,9 +178,11 @@ class TestStatisticsToolStats:
 
 class TestStatisticsToolFormatting:
     def test_format_result_dict_formats_each_variable(self):
-        tool = StatisticsTool(data={})
+        tool = StatisticsTool(context=AgentContext(data={}))
         stat = tool.get_stats(np.array([-1.0, 0.0, 1.0, 4.0]), n_bins=2, near_zero_threshold=0.01)
-        formatted = StatisticsTool.format_result_dict({"statistics": {"x1": stat}, "exceptions": []})
+        formatted = StatisticsTool.format_result_dict(
+            {"statistics": {"x1": stat}, "exceptions": []}
+        )
 
         assert "x1 (finite samples=4/4; finite ratio=100%):" in formatted
         assert "  Fractions:" in formatted
@@ -194,18 +204,21 @@ class TestStatisticsToolFormatting:
         assert "[-1.00, 1.50) | 3 | 75.0%" in formatted
 
     def test_format_result_dict_formats_multiple_variables_in_order(self):
-        tool = StatisticsTool(data={})
-        result = {"statistics": {
-            "x1": tool.get_stats(np.array([1.0]), n_bins=1),
-            "y": tool.get_stats(np.array([2.0]), n_bins=1),
-        }, "exceptions": []}
+        tool = StatisticsTool(context=AgentContext(data={}))
+        result = {
+            "statistics": {
+                "x1": tool.get_stats(np.array([1.0]), n_bins=1),
+                "y": tool.get_stats(np.array([2.0]), n_bins=1),
+            },
+            "exceptions": [],
+        }
 
         formatted = StatisticsTool.format_result_dict(result)
 
         assert formatted.index("x1 (finite samples=") < formatted.index("y (finite samples=")
 
     def test_format_result_dict_includes_every_get_stats_field(self):
-        tool = StatisticsTool(data={})
+        tool = StatisticsTool(context=AgentContext(data={}))
         stat = tool.get_stats(np.array([1.0, 2.0, np.nan]), n_bins=2)
         formatted = tool.format_result_dict({"statistics": {"x": stat}, "exceptions": []})
 
@@ -217,7 +230,7 @@ class TestStatisticsToolFormatting:
 
     def test_nonfinite_and_sign_fractions_use_total_sample_denominator(self):
         x = np.array([np.inf, -np.inf, np.nan, -1.0, 0.0, 1.0])
-        result = StatisticsTool(data={"x": x})(variables=["x"])
+        result = StatisticsTool(context=AgentContext(data={"x": x}))(variables=["x"])
         assert result.ok
         stat = result.result["statistics"]["x"]
         assert (stat["n_pos_inf"], stat["n_neg_inf"], stat["n_nan"]) == (1, 1, 1)

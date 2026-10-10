@@ -1,7 +1,7 @@
 """Validate a workspace ``context.data`` collection and explain repairs."""
+
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from ..core import inspect_context_data, load_context_data
@@ -13,31 +13,88 @@ def _repair_hint(error: str) -> str:
     rules = (
         ("directory does not exist", "Create the context.data directory before validating it."),
         ("missing manifest.json", "Create context.data/manifest.json with non-empty variables and an axes object."),
-        ("cannot read manifest.json", "Fix the JSON syntax, encoding, or duplicate keys in manifest.json."),
+        (
+            "cannot read manifest.json",
+            "Fix the JSON syntax, encoding, or duplicate keys in manifest.json.",
+        ),
         ("manifest root must be", "Make the top level of manifest.json a JSON object."),
-        ("manifest.variables must be a non-empty object", "Declare at least one variable under manifest.variables."),
-        ("manifest.axes must be an object", "Set manifest.axes to a JSON object, even when no axes are needed."),
+        (
+            "manifest.variables must be a non-empty object",
+            "Declare at least one variable under manifest.variables.",
+        ),
+        (
+            "manifest.axes must be an object",
+            "Set manifest.axes to a JSON object, even when no axes are needed.",
+        ),
         ("is missing fields", "Add every listed required field at the reported manifest location."),
-        ("contains unsupported fields", "Remove the listed fields; store scientific meaning and units in description."),
-        ("must contain exactly one of values, file, or size", "Choose exactly one axis representation: inline values, <axis>.npy, or a positive size."),
+        (
+            "contains unsupported fields",
+            "Remove the listed fields; store scientific meaning and units in description.",
+        ),
+        (
+            "must contain exactly one of values, file, or size",
+            "Choose exactly one axis representation: inline values, <axis>.npy, or a positive size.",
+        ),
         ("name must be non-empty", "Use a non-empty flat name without '/', '\\', '.' or '..'."),
-        ("file must be", "Rename the NPY file and set file to the exact <name>.npy value shown in the error."),
+        (
+            "file must be",
+            "Rename the NPY file and set file to the exact <name>.npy value shown in the error.",
+        ),
         ("missing array file", "Create the referenced NPY file in context.data using numpy.save."),
-        ("object dtype", "Convert object arrays to a numeric, Boolean, or fixed-width Unicode NumPy dtype."),
-        ("axes references missing axes", "Declare every referenced axis under manifest.axes or correct the variable's axes list."),
-        ("must be an array of non-empty axis names", "Set axes to a JSON array of non-empty axis-name strings in dimension order."),
-        ("dimensions but declares", "Make the number of declared axes equal to the array rank, in dimension order."),
-        ("axis length mismatch", "Make each array dimension equal to the size of its corresponding declared axis."),
+        (
+            "object dtype",
+            "Convert object arrays to a numeric, Boolean, or fixed-width Unicode NumPy dtype.",
+        ),
+        (
+            "axes references missing axes",
+            "Declare every referenced axis under manifest.axes or correct the variable's axes list.",
+        ),
+        (
+            "must be an array of non-empty axis names",
+            "Set axes to a JSON array of non-empty axis-name strings in dimension order.",
+        ),
+        (
+            "dimensions but declares",
+            "Make the number of declared axes equal to the array rank, in dimension order.",
+        ),
+        (
+            "axis length mismatch",
+            "Make each array dimension equal to the size of its corresponding declared axis.",
+        ),
         ("unreferenced axes", "Remove unused axes or reference them from at least one variable."),
-        ("num_nodes and relation metadata", "Provide num_nodes and mark each graph or hypergraph table with kind: relation, or omit both for ordinary data."),
-        ("must reference a variable with kind 'relation'", "Add kind: relation to the referenced edge-list or hyperedge-list variable."),
-        ("must have shape (E, 2) or (H, 3)", "Store graph edges as (E, 2) or hyperedges as (H, 3)."),
-        ("must end in a dimension", "Make the structured variable's final dimension match the number of edges or hyperedges."),
-        ("relation endpoints must use an integer dtype", "Save relation endpoints with an integer NumPy dtype."),
-        ("relation endpoints must be in", "Correct relation indices or num_nodes so every endpoint lies in the reported range."),
-        ("description must be a string", "Set description to a JSON string explaining meaning and units."),
+        (
+            "num_nodes and relation metadata",
+            "Provide num_nodes and mark each graph or hypergraph table with kind: relation, or omit both for ordinary data.",
+        ),
+        (
+            "must reference a variable with kind 'relation'",
+            "Add kind: relation to the referenced edge-list or hyperedge-list variable.",
+        ),
+        (
+            "must have shape (E, 2) or (H, 3)",
+            "Store graph edges as (E, 2) or hyperedges as (H, 3).",
+        ),
+        (
+            "must end in a dimension",
+            "Make the structured variable's final dimension match the number of edges or hyperedges.",
+        ),
+        (
+            "relation endpoints must use an integer dtype",
+            "Save relation endpoints with an integer NumPy dtype.",
+        ),
+        (
+            "relation endpoints must be in",
+            "Correct relation indices or num_nodes so every endpoint lies in the reported range.",
+        ),
+        (
+            "description must be a string",
+            "Set description to a JSON string explaining meaning and units.",
+        ),
     )
-    return next((hint for fragment, hint in rules if fragment in error), "Correct the reported manifest field or NPY file, then run validate_context_data again.")
+    return next(
+        (hint for fragment, hint in rules if fragment in error),
+        "Correct the reported manifest field or NPY file, then run validate_context_data again.",
+    )
 
 
 @BaseTool.register("validate_context_data")
@@ -61,19 +118,17 @@ class ValidateContextDataTool(BaseTool):
             Validation status, complete diagnostics, array summaries, and repair actions.
         """
         workspace = self.context.workspace
-        directory = (workspace / path).resolve()
-        if workspace not in directory.parents and directory != workspace:
-            raise ValueError("path must identify a directory inside the workspace")
+        if workspace is None:
+            raise RuntimeError("Workspace not initialized.")
+        directory = workspace.path / path
+
         try:
-            load_context_data(directory)
+            load_context_data(directory, workspace=workspace)
         except ValueError:
             pass
-        report = inspect_context_data(directory)
+        report = inspect_context_data(directory, workspace=workspace)
         errors = list(report.get("errors", []))
-        report["repairs"] = [
-            {"error": error, "action": _repair_hint(error)}
-            for error in errors
-        ]
+        report["repairs"] = [{"error": error, "action": _repair_hint(error)} for error in errors]
         report["next_action"] = (
             "Fix every reported error and run validate_context_data again."
             if errors else

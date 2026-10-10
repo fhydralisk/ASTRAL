@@ -1,9 +1,11 @@
 from __future__ import annotations
+from sr_harness.core import AgentContext
 
 import numpy as np
 import pytest
 
 from sr_harness.tools import BaseTool, HarmonicInteractionFitTool
+from tests.tools import tool_context
 
 
 def test_recovers_polynomial_plus_sinusoidal_interaction():
@@ -12,9 +14,11 @@ def test_recovers_polynomial_plus_sinusoidal_interaction():
     p = rng.uniform(1, 60, 2000)
     y = 0.7 * p - 0.01 * p**2 + 0.88 * p * np.sin(0.567 * t)
     tool = HarmonicInteractionFitTool(
-        data={"t": t[:1600], "p": p[:1600], "y": y[:1600]},
-        evaluation_data={"t": t[1600:], "p": p[1600:], "y": y[1600:]},
-        target="y",
+        context=tool_context(
+            data={"t": t[:1600], "p": p[:1600], "y": y[:1600]},
+            evaluation_data={"t": t[1600:], "p": p[1600:], "y": y[1600:]},
+            target="y",
+        )
     )
 
     result = tool.execute(carrier="p", oscillator="t", show_diagnostics=False)
@@ -29,7 +33,7 @@ def test_recovers_polynomial_plus_sinusoidal_interaction():
 def test_rejects_constant_oscillator():
     x = np.linspace(1, 3, 100)
     tool = HarmonicInteractionFitTool(
-        data={"t": np.ones_like(x), "x": x, "y": x}, target="y"
+        context=AgentContext(data={"t": np.ones_like(x), "x": x, "y": x}, target="y")
     )
     with pytest.raises(ValueError, match="Oscillator must vary"):
         tool.execute(carrier="x", oscillator="t")

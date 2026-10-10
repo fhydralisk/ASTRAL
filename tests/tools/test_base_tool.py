@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import argparse
+
+from sr_harness.core import AgentContext
+
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
 import sr_harness_engine as engine
@@ -10,6 +14,7 @@ import pytest
 
 from sr_harness.core import ToolCallResult, ToolMetadata
 from sr_harness.tools.base_tool import BaseTool, ToolRunAbort
+from tests.tools import tool_context
 
 
 @BaseTool.register("unit_sample_tool")
@@ -231,7 +236,7 @@ class TestBaseToolExportAndCall:
         assert BaseTool.format_result_dict({"value": 1}) == "{'value': 1}"
 
     def test_call_returns_tool_call_result_on_success(self):
-        tool = UnitSampleTool(session_id="abc")
+        tool = UnitSampleTool(context=AgentContext(args=argparse.Namespace(session_id="abc")))
         result = tool(required_text="hello", count=3)
 
         assert isinstance(result, ToolCallResult)
@@ -262,10 +267,7 @@ class TestBaseToolExportAndCall:
         assert "boom" in result.result_str
         assert "\x1b" not in result.result_str
         assert "Traceback" not in result.result_str
-        assert result.result_str == (
-            "Error executing unit_error_tool:\n"
-            "    RuntimeError: boom"
-        )
+        assert result.result_str == ("Error executing unit_error_tool:\n    RuntimeError: boom")
         assert result.meta_data["tool"] == "unit_error_tool"
 
     def test_call_removes_ansi_sequences_before_truncating(self, monkeypatch):
@@ -274,8 +276,7 @@ class TestBaseToolExportAndCall:
             "format_result_dict",
             classmethod(
                 lambda cls, result: (
-                    "\x1b[31mred\x1b[0m "
-                    "\x1b]8;;https://example.com\x07link\x1b]8;;\x07"
+                    "\x1b[31mred\x1b[0m \x1b]8;;https://example.com\x07link\x1b]8;;\x07"
                 )
             ),
         )
@@ -308,7 +309,7 @@ class TestBaseToolExportAndCall:
 class TestBaseToolEvaluate:
     def test_formula_constants_are_serialized_with_eight_significant_digits(self):
         x = np.arange(1.0, 5.0)
-        tool = UnitSampleTool(data={"x": x, "y": 2 * x}, target="y")
+        tool = UnitSampleTool(context=AgentContext(data={"x": x, "y": 2 * x}, target="y"))
 
         result = tool.evaluate(
             f=engine.parse("1.0582314356281874*x + 1.0029397100063842"),
@@ -320,8 +321,9 @@ class TestBaseToolEvaluate:
 
     def test_evaluates_required_symbols_and_computes_formula_complexity(self):
         tool = UnitSampleTool(
-            data={"x": np.arange(1.0, 5.0), "y": 2 * np.arange(1.0, 5.0)},
-            target="y",
+            context=AgentContext(
+                data={"x": np.arange(1.0, 5.0), "y": 2 * np.arange(1.0, 5.0)}, target="y"
+            )
         )
         f = engine.parse("2*x")
         y = engine.parse("y")
@@ -340,16 +342,18 @@ class TestBaseToolEvaluate:
 
     def test_calculate_metrics_reuses_external_predictions(self):
         f = engine.parse("missing_prediction")
-        metrics = UnitSampleTool.calculate_metrics(
-            f, np.array([1.0, 2.0]), np.array([1.0, 2.0])
-        )
+        metrics = UnitSampleTool.calculate_metrics(f, np.array([1.0, 2.0]), np.array([1.0, 2.0]))
         assert metrics["mse"] == 0.0
         assert metrics["complexity"] == len(f)
 
     def test_calculate_metrics_broadcasts_prediction_and_target_symmetrically(self):
         f = engine.parse("prediction")
-        assert UnitSampleTool.calculate_metrics(f, np.array([2.0, 2.0]), np.array(2.0))["mse"] == 0.0
-        assert UnitSampleTool.calculate_metrics(f, np.array(2.0), np.array([2.0, 2.0]))["mse"] == 0.0
+        assert (
+            UnitSampleTool.calculate_metrics(f, np.array([2.0, 2.0]), np.array(2.0))["mse"] == 0.0
+        )
+        assert (
+            UnitSampleTool.calculate_metrics(f, np.array(2.0), np.array([2.0, 2.0]))["mse"] == 0.0
+        )
 
     def test_incompatible_external_shapes_raise_clear_error(self):
         with pytest.raises(ValueError, match="cannot be broadcast"):
@@ -358,23 +362,25 @@ class TestBaseToolEvaluate:
     def test_aic_and_bic_use_number_of_fitted_constants(self):
         x = np.arange(1.0, 21.0)
         y_values = 2 * x + np.linspace(-0.2, 0.2, len(x))
-        tool = UnitSampleTool(data={"x": x, "y": y_values}, target="y")
+        tool = UnitSampleTool(context=AgentContext(data={"x": x, "y": y_values}, target="y"))
         f = engine.parse("param('slope', value=2)*x")
         y = engine.parse("y")
 
-        metrics = tool.evaluate(f=f, y=y, show_diagnostics=False)["data_split_results"]["train"]["metrics"]
+        metrics = tool.evaluate(f=f, y=y, show_diagnostics=False)["data_split_results"]["train"][
+            "metrics"
+        ]
         residuals = f.eval(tool.context.data) - y_values
         ss_res = float(np.sum(residuals**2))
-        expected_log_likelihood = -len(x) / 2 * (
-            np.log(2 * np.pi) + np.log(ss_res / len(x)) + 1
-        )
+        expected_log_likelihood = -len(x) / 2 * (np.log(2 * np.pi) + np.log(ss_res / len(x)) + 1)
 
         n_parameters = 1
         assert metrics["aic"] == pytest.approx(2 * n_parameters - 2 * expected_log_likelihood)
-        assert metrics["bic"] == pytest.approx(n_parameters * np.log(len(x)) - 2 * expected_log_likelihood)
+        assert metrics["bic"] == pytest.approx(
+            n_parameters * np.log(len(x)) - 2 * expected_log_likelihood
+        )
 
     def test_requires_nd2py_symbols(self):
-        tool = UnitSampleTool(data={})
+        tool = UnitSampleTool(context=AgentContext(data={}))
         with pytest.raises(TypeError, match="sr_harness_engine.Expression"):
             tool.evaluate(
                 f="x",
@@ -383,17 +389,26 @@ class TestBaseToolEvaluate:
 
     def test_formatted_evaluation_uses_equation_and_conditional_ineligibility_notes(self):
         x = np.arange(1.0, 6.0)
-        tool = UnitSampleTool(data={"x": x, "y": 2 * x, "z": x}, target="y")
+        tool = UnitSampleTool(context=AgentContext(data={"x": x, "y": 2 * x, "z": x}, target="y"))
         eligible = tool.evaluate(f=engine.parse("2*x"), y=engine.parse("y"))
         wrong_lhs = tool.evaluate(f=engine.parse("x"), y=engine.parse("z"))
         target_leak = tool.evaluate(f=engine.parse("y + x"), y=engine.parse("y"))
 
-        eligible_text = tool.format_evaluation_result(eligible, title="Best fitted rational formula")
-        wrong_lhs_text = tool.format_evaluation_result(wrong_lhs, title="Best fitted rational formula")
-        target_leak_text = tool.format_evaluation_result(target_leak, title="Best fitted rational formula")
+        eligible_text = tool.format_evaluation_result(
+            eligible, title="Best fitted rational formula"
+        )
+        wrong_lhs_text = tool.format_evaluation_result(
+            wrong_lhs, title="Best fitted rational formula"
+        )
+        target_leak_text = tool.format_evaluation_result(
+            target_leak, title="Best fitted rational formula"
+        )
         assert "Best fitted rational formula:\n    y = " in eligible_text
         assert "Fit quality (Train-set | Validation-set):\n    RMSE=0.00 | 0.00;" in eligible_text
-        assert "Error extremes (Top-10 sorted by |residual|):\n    (x | z | y | residual)" in eligible_text
+        assert (
+            "Error extremes (Top-10 sorted by |residual|):\n    (x | z | y | residual)"
+            in eligible_text
+        )
         assert "not eligible for submission" not in eligible_text
         assert "the left-hand side of the equation is not y" in wrong_lhs_text
         assert "the right-hand side of the equation depends on y" in target_leak_text
@@ -401,27 +416,42 @@ class TestBaseToolEvaluate:
     def test_formatted_evaluation_includes_independent_validation_when_supplied(self):
         x = np.arange(1.0, 6.0)
         tool = UnitSampleTool(
-            data={"x": x, "y": 2 * x},
-            evaluation_data={"x": x + 5, "y": 2 * (x + 5)},
-            target="y",
+            context=tool_context(
+                data={"x": x, "y": 2 * x},
+                evaluation_data={"x": x + 5, "y": 2 * (x + 5)},
+                target="y",
+            )
         )
         evaluation = tool.evaluate(f=engine.parse("2*x"), y=engine.parse("y"))
         text = tool.format_evaluation_result(evaluation)
-        assert "Fit quality (Train-set | Validation-set):\n    RMSE=0.00 | 0.00;\n    MAE=0.00 | 0.00;\n    R2=1.00 | 1.00;" in text
+        assert (
+            "Fit quality (Train-set | Validation-set):\n    RMSE=0.00 | 0.00;\n    MAE=0.00 | 0.00;\n    R2=1.00 | 1.00;"
+            in text
+        )
 
     def test_formatted_evaluation_exposes_evaluator_specific_metrics(self):
         result = {
             "formula": "x",
             "target_expression": "dx_dt",
             "data_split_results": {
-                "train": {"metrics": {
-                    "rmse": 0.1, "mae": 0.08, "r2": 0.9,
-                    "complexity": 1, "rollout_rmse": 0.25,
-                }},
-                "validation": {"metrics": {
-                    "rmse": 0.2, "mae": 0.16, "r2": 0.8,
-                    "complexity": 1, "rollout_rmse": 0.5,
-                }},
+                "train": {
+                    "metrics": {
+                        "rmse": 0.1,
+                        "mae": 0.08,
+                        "r2": 0.9,
+                        "complexity": 1,
+                        "rollout_rmse": 0.25,
+                    }
+                },
+                "validation": {
+                    "metrics": {
+                        "rmse": 0.2,
+                        "mae": 0.16,
+                        "r2": 0.8,
+                        "complexity": 1,
+                        "rollout_rmse": 0.5,
+                    }
+                },
             },
         }
 
@@ -450,9 +480,13 @@ class TestBaseToolEvaluate:
                                 "y_pred": 2,
                             },
                         ],
-                        "strongest_residual_correlations": [{
-                            "variable": "x", "pearson": -0.003459, "spearman": 0.01807,
-                        }],
+                        "strongest_residual_correlations": [
+                            {
+                                "variable": "x",
+                                "pearson": -0.003459,
+                                "spearman": 0.01807,
+                            }
+                        ],
                     },
                 },
             },

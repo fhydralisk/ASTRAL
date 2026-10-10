@@ -1,4 +1,5 @@
 from __future__ import annotations
+import argparse
 
 import threading
 
@@ -41,7 +42,7 @@ def test_sr_harness_engine_syntax_is_a_builtin_skill(tmp_path):
 
 
 def test_eic_is_reproducible_and_finite():
-    tool = EICTool(data={"x": np.linspace(1.0, 2.0, 64)})
+    tool = EICTool(context=AgentContext(data={"x": np.linspace(1.0, 2.0, 64)}))
     first = tool.execute("x + x**2", repeats=4, random_state=7)
     second = tool.execute("x + x**2", repeats=4, random_state=7)
     assert first["eic"] == second["eic"]
@@ -50,7 +51,7 @@ def test_eic_is_reproducible_and_finite():
 
 def test_eic_reports_unstable_masked_subtree_in_annotated_tree():
     x = np.logspace(-12, -2, 128)
-    tool = EICTool(data={"x": x})
+    tool = EICTool(context=AgentContext(data={"x": x}))
     result = tool.execute("0*(sqrt(1+x)-1)+x", repeats=4, random_state=7)
     assert result["eic"] > result["output_eic"] + 3
     assert result["worst_subtree"] != "root"
@@ -61,8 +62,7 @@ def test_eic_reports_unstable_masked_subtree_in_annotated_tree():
 def test_eic_result_can_reenter_candidate_search_state():
     values = np.linspace(1.0, 2.0, 32)
     result = EICTool(
-        data={"x": values, "y": values + values**2},
-        target="y",
+        context=AgentContext(data={"x": values, "y": values + values**2}, target="y")
     ).execute("x + x**2", repeats=2)
     assert result["is_candidate"] is True
     assert result["data_split_results"]["train"]["metrics"]["mse"] == 0.0
@@ -71,12 +71,12 @@ def test_eic_result_can_reenter_candidate_search_state():
 
 def test_new_candidate_is_not_automatically_audited_with_eic():
     values = np.linspace(1.0, 2.0, 32)
-    context = {"data": {"x": values, "y": values}, "target": "y"}
-    candidate = EvaluateTool(**context)(f="x", show_diagnostics=False)
+    context = AgentContext(data={"x": values, "y": values}, target="y")
+    candidate = EvaluateTool(context=context)(f="x", show_diagnostics=False)
     agent = object.__new__(SRAgent)
     agent.ranking_metric = "mse"
     agent.larger_is_better = False
-    agent.tools = [EICTool(**context)]
+    agent.tools = [EICTool(context=context)]
     agent.tools_counter = ParallelTimer(unit="call")
     agent.save_path = None
     agent.run_state = SearchRunState(
@@ -103,9 +103,11 @@ def test_subagent_uses_isolated_callback_prompt():
         return "independent result"
 
     result = SubagentTool(
-        data={"x": np.arange(3.0), "y": np.arange(3.0)},
-        target="y",
-        subagent_callback=callback,
+        context=AgentContext(
+            args=argparse.Namespace(subagent_callback=callback),
+            data={"x": np.arange(3.0), "y": np.arange(3.0)},
+            target="y",
+        )
     ).execute(
         "Critique this hypothesis.",
         mode="candidate_critique",
@@ -117,10 +119,16 @@ def test_subagent_uses_isolated_callback_prompt():
 
 
 def test_web_search_callback_is_bounded():
-    tool = WebSearchTool(web_search_callback=lambda query, limit: [
-        {"title": str(i), "url": f"https://example.com/{i}", "snippet": query}
-        for i in range(20)
-    ])
+    tool = WebSearchTool(
+        context=AgentContext(
+            args=argparse.Namespace(
+                web_search_callback=lambda query, limit: [
+                    {"title": str(i), "url": f"https://example.com/{i}", "snippet": query}
+                    for i in range(20)
+                ]
+            )
+        )
+    )
     result = tool.execute("symbolic regression", max_results=3)
     assert len(result["results"]) == 3
 
@@ -229,10 +237,13 @@ def test_sr4mdl_constructs_search_data_like_pysr(tmp_path, monkeypatch):
     monkeypatch.setattr(SR4MDLTool, "_run_sr4mdl", fake_search)
     values = np.linspace(0.0, 1.0, 32)
     result = SR4MDLTool(
-        data={"a": values, "b": values**2, "y": values + values**2},
-        target="y",
-        train_indices=np.arange(24),
-        validation_indices=np.arange(24, 32),
+        context=AgentContext(
+            args=argparse.Namespace(
+                train_indices=np.arange(24), validation_indices=np.arange(24, 32)
+            ),
+            data={"a": values, "b": values**2, "y": values + values**2},
+            target="y",
+        )
     ).execute(["+", "*"], [], x=["a", "b"], y="y", n_iter=7)
 
     assert set(captured["X"]) == {"x1", "x2"}
@@ -262,8 +273,9 @@ def test_nd2_returns_search_candidate_instead_of_export(tmp_path, monkeypatch):
     adjacency = np.array([[0, 1], [1, 0]])
     x = np.arange(12.0).reshape(6, 2)
     result = ND2Tool(
-        data={"A": adjacency, "x": x, "omega": np.ones_like(x), "dx": x},
-        target="dx",
+        context=AgentContext(
+            data={"A": adjacency, "x": x, "omega": np.ones_like(x), "dx": x}, target="dx"
+        )
     ).execute(vars_node=["x", "omega"], y="dx")
     assert result["is_candidate"] is True
     assert result["method"] == "ND2-NDformer-MCTS"
@@ -386,7 +398,9 @@ def test_model_router_escalates_stagnated_search_and_respects_disable():
     )
     route = router.route(task_score=0, task_reasons=[], refinement_step=3)
     assert (route.tier, route.provider, route.model) == (
-        "strong", "strong-provider", "strong-model"
+        "strong",
+        "strong-provider",
+        "strong-model",
     )
     router.enabled = False
     assert router.route(task_score=9, task_reasons=[], refinement_step=4).tier == "base"
@@ -399,7 +413,7 @@ def test_subagent_prompt_contains_grounded_sr_mandate():
         captured["messages"] = messages
         return "review"
 
-    SubagentTool(subagent_callback=callback).execute(
+    SubagentTool(context=AgentContext(args=argparse.Namespace(subagent_callback=callback))).execute(
         "Check floating-point cancellation and recommend a discriminating test.",
         mode="candidate_critique",
         candidate_formulas=["exp(x)-1", "x"],
@@ -414,9 +428,7 @@ def test_subagent_prompt_contains_grounded_sr_mandate():
 def test_interaction_manager_waits_at_boundary_and_resumes_with_message():
     manager = InteractionManager()
     manager.command("message", "initial guidance")
-    assert [message.content for message in manager.start_agent_execution()] == [
-        "initial guidance"
-    ]
+    assert [message.content for message in manager.start_agent_execution()] == ["initial guidance"]
     manager.command("pause")
     received = {}
 

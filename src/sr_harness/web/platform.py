@@ -1,4 +1,5 @@
 """Workspace and lifecycle HTTP endpoints for the interactive workbench."""
+
 from __future__ import annotations
 
 import os
@@ -6,11 +7,12 @@ import shutil
 import tempfile
 import zipfile
 from pathlib import Path
+from urllib.parse import quote
 
 import numpy as np
 import pandas as pd
 from fastapi import Body, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
 from ..core import json_value, update_context_data_descriptions
@@ -40,8 +42,11 @@ def mount_platform(app, session: InteractiveSession):
                 if not variables:
                     continue
                 groups.append({
-                    "id": f"axis:{axis}", "kind": "axis", "axis": axis,
-                    "axes": [axis], "variables": variables,
+                    "id": f"axis:{axis}",
+                    "kind": "axis",
+                    "axis": axis,
+                    "axes": [axis],
+                    "variables": variables,
                     "shape": [len(session.context.data[axis])],
                 })
             for name, dimensions in session.context.variable_axes.items():
@@ -52,30 +57,31 @@ def mount_platform(app, session: InteractiveSession):
                     "id": f"variable:{name}",
                     "kind": "relation" if name in session.context.relation_names else "variable",
                     "variable": name,
-                    "axes": list(dimensions), "shape": list(value.shape),
+                    "axes": list(dimensions),
+                    "shape": list(value.shape),
                     "dtype": str(value.dtype),
                 })
             return groups
 
-    @app.get('/api/session')
+    @app.get("/api/session")
     def status():
         return session.snapshot()
 
-    @app.get('/api/session/capabilities')
+    @app.get("/api/session/capabilities")
     def capabilities(agent: str = "search"):
         try:
             return session.capabilities(agent)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.get('/api/session/provider-credential')
+    @app.get("/api/session/provider-credential")
     def provider_credential(provider: str):
         try:
             return session.provider_credential(provider)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.put('/api/session/provider-credential')
+    @app.put("/api/session/provider-credential")
     def set_provider_credential(payload: dict = Body(...)):
         try:
             return session.set_provider_credential(
@@ -85,103 +91,103 @@ def mount_platform(app, session: InteractiveSession):
         except (OSError, ValueError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.post('/api/session/start')
+    @app.post("/api/session/start")
     def start(payload: dict = Body(...)):
         try:
             return session.start(payload)
         except (ValueError, OSError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.post('/api/data/agent')
+    @app.post("/api/data/agent")
     def prepare_data(payload: dict = Body(...)):
         try:
             return session.prepare_data(str(payload.get("message", "")))
         except (ValueError, OSError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.get('/api/data/agent/events')
+    @app.get("/api/data/agent/events")
     def data_agent_events(after_seq: int = 0):
         return session.data_interaction_manager.get_recent_events(max(0, after_seq))
 
-    @app.post('/api/data/agent/stop')
+    @app.post("/api/data/agent/stop")
     def stop_data_preparation():
         try:
             return session.stop_data_preparation()
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.put('/api/data/agent/settings')
+    @app.put("/api/data/agent/settings")
     def configure_data_agent(payload: dict = Body(...)):
         try:
             return session.configure_data_agent(payload)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.post('/api/data/agent/test')
+    @app.post("/api/data/agent/test")
     def test_data_agent_model(payload: dict = Body(...)):
         try:
             return session.test_data_agent_model(payload)
         except Exception as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.post('/api/session/test')
+    @app.post("/api/session/test")
     def test_model(payload: dict = Body(...)):
         try:
             return session.test_model(payload)
         except Exception as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.get('/api/evaluator')
+    @app.get("/api/evaluator")
     def evaluator_configuration():
         return session.evaluator_configuration()
 
-    @app.put('/api/evaluator')
+    @app.put("/api/evaluator")
     def configure_evaluator(payload: dict = Body(...)):
         try:
             return session.configure_evaluator(payload)
         except (TypeError, ValueError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.post('/api/evaluator/test')
+    @app.post("/api/evaluator/test")
     def test_evaluator(payload: dict = Body(...)):
         try:
             return session.test_evaluator(payload)
         except Exception as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.post('/api/evaluator/agent/start')
+    @app.post("/api/evaluator/agent/start")
     def start_evaluator_assistance(payload: dict = Body(...)):
         try:
             return session.start_evaluator_assistance(payload)
         except (OSError, ValueError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.get('/api/evaluator/agent/events')
+    @app.get("/api/evaluator/agent/events")
     def evaluator_agent_events(after_seq: int = 0):
         return session.evaluator_interaction_manager.get_recent_events(max(0, after_seq))
 
-    @app.post('/api/evaluator/agent/stop')
+    @app.post("/api/evaluator/agent/stop")
     def stop_evaluator_assistance():
         try:
             return session.stop_evaluator_assistance()
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.put('/api/evaluator/agent/settings')
+    @app.put("/api/evaluator/agent/settings")
     def configure_evaluator_agent(payload: dict = Body(...)):
         try:
             return session.configure_evaluator_agent(payload)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.post('/api/evaluator/agent/test')
+    @app.post("/api/evaluator/agent/test")
     def test_evaluator_agent_model(payload: dict = Body(...)):
         try:
             return session.test_evaluator_agent_model(payload)
         except Exception as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.get('/api/data/context')
+    @app.get("/api/data/context")
     def data_context(rows: int = 300):
         rows = max(1, min(rows, 1000))
         with session.lock:
@@ -243,7 +249,7 @@ def mount_platform(app, session: InteractiveSession):
             "truncated": total > count,
         }
 
-    @app.get('/api/data/context/preview')
+    @app.get("/api/data/context/preview")
     def data_context_preview(group: str, limit: int = 100):
         limit = max(1, min(limit, 300))
         with session.lock:
@@ -258,11 +264,10 @@ def mount_platform(app, session: InteractiveSession):
                 size = len(arrays[axis])
                 count = min(size, limit)
                 return {
-                    **selected, "dtype": str(arrays[axis].dtype),
+                    **selected,
+                    "dtype": str(arrays[axis].dtype),
                     "columns": columns,
-                    "column_kinds": {axis: "axis"} | {
-                        name: "variable" for name in selected["variables"]
-                    },
+                    "column_kinds": {axis: "axis"} | {name: "variable" for name in selected["variables"]},
                     "data": [
                         {name: json_value(arrays[name][index]) for name in columns}
                         for index in range(count)
@@ -319,36 +324,24 @@ def mount_platform(app, session: InteractiveSession):
                         for axis in axes if axis in session.context.data
                     },
                     "node_axis": node_axis,
-                    "nodes": [
-                        {"id": node, "label": json_value(labels[node])}
-                        for node in node_ids
-                    ],
+                    "nodes": [{"id": node, "label": json_value(labels[node])} for node in node_ids],
                     "coordinates": json_value(np.asarray(coordinates)),
                     "endpoint_count": int(value.shape[1]),
                     "relation_count": int(value.shape[0]),
-                    "truncated": (
-                        len(coordinates) < len(value) or len(node_ids) < num_nodes
-                    ),
+                    "truncated": (len(coordinates) < len(value) or len(node_ids) < num_nodes),
                 }
             result = {
                 **selected,
                 "description": session.context.variable_descriptions.get(name, ""),
-                "axis_values": {
-                    axis: json_value(session.context.data[axis][:limit])
-                    for axis in axes
-                },
-                "axis_truncated": {
-                    axis: len(session.context.data[axis]) > limit for axis in axes
-                },
+                "axis_values": {axis: json_value(session.context.data[axis][:limit]) for axis in axes},
+                "axis_truncated": {axis: len(session.context.data[axis]) > limit for axis in axes},
             }
             if value.ndim == 2:
                 row_count = min(value.shape[0], limit)
                 column_count = min(value.shape[1], limit)
                 result.update({
                     "values": json_value(value[:row_count, :column_count]),
-                    "truncated": [
-                        value.shape[0] > row_count, value.shape[1] > column_count,
-                    ],
+                    "truncated": [value.shape[0] > row_count, value.shape[1] > column_count],
                 })
             elif value.ndim >= 3:
                 flattened = value.reshape(-1)
@@ -360,17 +353,16 @@ def mount_platform(app, session: InteractiveSession):
                         result["value_range"] = [float(finite.min()), float(finite.max())]
             return result
 
-    @app.get('/api/data/context/plot')
+    @app.get("/api/data/context/plot")
     def data_context_plot(
-        x: str, y: str, hue: str | None = None, size: str | None = None,
-        limit: int = 2000,
+        x: str, y: str, hue: str | None = None, size: str | None = None, limit: int = 2000,
     ):
         limit = max(1, min(limit, 5000))
         with session.lock:
             selected = {
-                channel: name for channel, name in {
-                    "x": x, "y": y, "hue": hue, "size": size,
-                }.items() if name
+                channel: name
+                for channel, name in {"x": x, "y": y, "hue": hue, "size": size}.items()
+                if name
             }
             missing = sorted(set(selected.values()) - set(session.context.data))
             if missing:
@@ -381,22 +373,19 @@ def mount_platform(app, session: InteractiveSession):
                 for name in selected.values()
             }
             repeated = {
-                name: axes for name, axes in dimensions.items()
-                if len(set(axes)) != len(axes)
+                name: axes for name, axes in dimensions.items() if len(set(axes)) != len(axes)
             }
             if repeated:
                 raise HTTPException(400, f"Repeated axis names are not supported: {repeated}")
-            broadcast_axes = list(dict.fromkeys(
-                axis for name in selected.values() for axis in dimensions[name]
-            ))
-            broadcast_shape = tuple(
-                len(session.context.data[axis]) for axis in broadcast_axes
+            broadcast_axes = list(
+                dict.fromkeys(axis for name in selected.values() for axis in dimensions[name])
             )
+            broadcast_shape = tuple(len(session.context.data[axis]) for axis in broadcast_axes)
             total = int(np.prod(broadcast_shape, dtype=np.int64)) if broadcast_shape else 1
             count = min(total, limit)
             flat_indices = (
-                np.arange(total, dtype=np.int64) if total <= limit else
-                np.linspace(0, total - 1, count, dtype=np.int64)
+                np.arange(total, dtype=np.int64) if total <= limit
+                else np.linspace(0, total - 1, count, dtype=np.int64)
             )
             coordinates = np.unravel_index(flat_indices, broadcast_shape) if broadcast_shape else ()
             values = {}
@@ -405,7 +394,8 @@ def mount_platform(app, session: InteractiveSession):
                 value = session.context.data[name]
                 source_axes = dimensions[name]
                 permutation = sorted(
-                    range(len(source_axes)), key=lambda index: broadcast_axes.index(source_axes[index])
+                    range(len(source_axes)),
+                    key=lambda index: broadcast_axes.index(source_axes[index]),
                 )
                 ordered_axes = tuple(source_axes[index] for index in permutation)
                 aligned = np.transpose(value, permutation) if permutation else value
@@ -414,7 +404,9 @@ def mount_platform(app, session: InteractiveSession):
                     for axis in broadcast_axes
                 )
                 broadcast = np.broadcast_to(aligned.reshape(aligned_shape), broadcast_shape)
-                sampled = broadcast[coordinates] if broadcast_shape else np.asarray([broadcast.item()])
+                sampled = (
+                    broadcast[coordinates] if broadcast_shape else np.asarray([broadcast.item()])
+                )
                 values[name] = json_value(sampled)
                 numeric[name] = value.dtype.kind in "iufcb"
             return {
@@ -428,7 +420,7 @@ def mount_platform(app, session: InteractiveSession):
                 "numeric": numeric,
             }
 
-    @app.post('/api/data/context/heatmap')
+    @app.post("/api/data/context/heatmap")
     def data_context_heatmap(payload: dict = Body(...)):
         with session.lock:
             raw_row = payload.get("row", [])
@@ -460,32 +452,47 @@ def mount_platform(app, session: InteractiveSession):
                 if len(column) != 1 or column[0] not in axis_names:
                     raise HTTPException(400, "Column must contain exactly one axis")
                 row_axis, column_axis = row[0], column[0]
-                if row_axis == column_axis or row_axis not in color_axes or column_axis not in color_axes:
-                    raise HTTPException(400, "Row and column must be different axes of the color variable")
+                if (
+                    row_axis == column_axis
+                    or row_axis not in color_axes
+                    or column_axis not in color_axes
+                ):
+                    raise HTTPException(
+                        400, "Row and column must be different axes of the color variable"
+                    )
                 remaining = [axis for axis in color_axes if axis not in {row_axis, column_axis}]
                 if remaining:
                     if z != remaining[0]:
-                        raise HTTPException(400, f"Z must be the remaining color axis {remaining[0]!r}")
+                        raise HTTPException(
+                            400, f"Z must be the remaining color axis {remaining[0]!r}"
+                        )
                     z_size = len(session.context.data[z])
                     if not 0 <= z_index < z_size:
                         raise HTTPException(400, f"z_index must be in [0, {z_size})")
                     matrix = np.take(
-                        session.context.data[color], z_index,
+                        session.context.data[color],
+                        z_index,
                         axis=color_axes.index(z),
                     )
                     remaining_axes = tuple(axis for axis in color_axes if axis != z)
                     z_value = json_value(session.context.data[z][z_index])
                 else:
                     if z:
-                        raise HTTPException(400, "Z is only used with a three-dimensional color variable")
+                        raise HTTPException(
+                            400, "Z is only used with a three-dimensional color variable"
+                        )
                     matrix = session.context.data[color]
                     remaining_axes = color_axes
                     z_size = 0
                     z_value = None
                 if remaining_axes != (row_axis, column_axis):
-                    matrix = np.transpose(matrix, (
-                        remaining_axes.index(row_axis), remaining_axes.index(column_axis),
-                    ))
+                    matrix = np.transpose(
+                        matrix,
+                        (
+                            remaining_axes.index(row_axis),
+                            remaining_axes.index(column_axis),
+                        ),
+                    )
                 row_labels = session.context.data[row_axis]
                 column_labels = session.context.data[column_axis]
                 mode = "tensor"
@@ -494,14 +501,16 @@ def mount_platform(app, session: InteractiveSession):
                 column_is_axis = len(column) == 1 and column[0] in axis_names
                 if row_is_axis == column_is_axis:
                     raise HTTPException(
-                        400, "Place one axis in row or column and aligned one-dimensional variables on the other side",
+                        400,
+                        "Place one axis in row or column and aligned one-dimensional variables on the other side",
                     )
                 axis = row[0] if row_is_axis else column[0]
                 variables = column if row_is_axis else row
                 if not variables:
                     raise HTTPException(400, "Select at least one aligned one-dimensional variable")
                 invalid = [
-                    name for name in variables
+                    name
+                    for name in variables
                     if name in axis_names or session.context.variable_axes[name] != (axis,)
                 ]
                 if invalid:
@@ -539,14 +548,14 @@ def mount_platform(app, session: InteractiveSession):
                 "z_size": z_size,
             }
 
-    @app.post('/api/data/context/reload')
+    @app.post("/api/data/context/reload")
     def reload_data_context():
         try:
             return session.reload_context_data()
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.put('/api/data/selection')
+    @app.put("/api/data/selection")
     def update_data_selection(payload: dict = Body(...)):
         with session.lock:
             if session.data_state in {"running", "stopping"}:
@@ -555,12 +564,12 @@ def mount_platform(app, session: InteractiveSession):
                     "Wait for the data-preparation agent to finish before changing variable roles",
                 )
             if session.state not in {"idle", "running"}:
-                raise HTTPException(409, "Variable roles cannot be changed in the current run state")
+                raise HTTPException(
+                    409, "Variable roles cannot be changed in the current run state"
+                )
             if session.state == "running":
                 control_status = session.sr_interaction_manager.status()
-                if not (
-                    control_status["interaction_state"] == "paused"
-                ):
+                if not (control_status["interaction_state"] == "paused"):
                     raise HTTPException(
                         409,
                         "Pause symbolic regression and wait for the safe-boundary acknowledgement "
@@ -578,16 +587,14 @@ def mount_platform(app, session: InteractiveSession):
                     not isinstance(name, str) or not isinstance(value, str)
                     for name, value in descriptions.items()
                 ):
-                    raise ValueError(
-                        "variable_descriptions must map variable names to text"
-                    )
-                descriptions = {
-                    name: value.strip() for name, value in descriptions.items()
-                }
+                    raise ValueError("variable_descriptions must map variable names to text")
+                descriptions = {name: value.strip() for name, value in descriptions.items()}
                 manifest_path = session.workspace / "context.data" / "manifest.json"
                 if manifest_path.is_file():
                     update_context_data_descriptions(
-                        manifest_path.parent, descriptions,
+                        manifest_path.parent,
+                        descriptions,
+                        workspace=session.workspace_manager,
                     )
                 change = session.context.update_selection(
                     target=target,
@@ -596,15 +603,13 @@ def mount_platform(app, session: InteractiveSession):
                 )
             except (OSError, ValueError) as exc:
                 raise HTTPException(400, str(exc)) from exc
-            session.variable_descriptions = dict(
-                session.context.variable_descriptions
-            )
+            session.variable_descriptions = dict(session.context.variable_descriptions)
             return {
                 **change,
                 "context": session.context.schema(),
             }
 
-    @app.put('/api/data/descriptions')
+    @app.put("/api/data/descriptions")
     def update_data_descriptions(payload: dict = Body(...)):
         with session.lock:
             if session.data_state in {"running", "stopping"}:
@@ -614,9 +619,7 @@ def mount_platform(app, session: InteractiveSession):
                 )
             if session.state == "running":
                 control_status = session.sr_interaction_manager.status()
-                if not (
-                    control_status["interaction_state"] == "paused"
-                ):
+                if not (control_status["interaction_state"] == "paused"):
                     raise HTTPException(
                         409,
                         "Pause symbolic regression and wait for the safe-boundary acknowledgement "
@@ -628,21 +631,20 @@ def mount_platform(app, session: InteractiveSession):
                 for name, value in descriptions.items()
             ):
                 raise HTTPException(
-                    400, "variable_descriptions must map variable names to text",
+                    400,
+                    "variable_descriptions must map variable names to text",
                 )
-            descriptions = {
-                name: value.strip() for name, value in descriptions.items()
-            }
+            descriptions = {name: value.strip() for name, value in descriptions.items()}
             manifest_path = session.workspace / "context.data" / "manifest.json"
             try:
                 if manifest_path.is_file():
                     update_context_data_descriptions(
-                        manifest_path.parent, descriptions,
+                        manifest_path.parent,
+                        descriptions,
+                        workspace=session.workspace_manager,
                     )
                 elif unknown := set(descriptions) - set(session.context.data):
-                    raise ValueError(
-                        f"unknown context variables: {sorted(unknown)}"
-                    )
+                    raise ValueError(f"unknown context variables: {sorted(unknown)}")
             except (OSError, ValueError) as exc:
                 raise HTTPException(400, str(exc)) from exc
             changed = False
@@ -655,12 +657,10 @@ def mount_platform(app, session: InteractiveSession):
                     changed = True
             if changed:
                 session.context.args.data_revision += 1
-            session.variable_descriptions = dict(
-                session.context.variable_descriptions
-            )
+            session.variable_descriptions = dict(session.context.variable_descriptions)
             return session.context.schema()
 
-    @app.post('/api/session/settings')
+    @app.post("/api/session/settings")
     def settings(payload: dict = Body(...)):
         try:
             return session.configure(payload)
@@ -673,15 +673,13 @@ def mount_platform(app, session: InteractiveSession):
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.get('/api/workspace')
-    def files(path: str = '', recursive: bool = False):
+    @app.get("/api/workspace")
+    def files(path: str = "", recursive: bool = False):
         with session.lock:
             directory = resolve(path)
             if not directory.is_dir():
-                raise HTTPException(404, 'Directory not found')
-            readonly_roots = {
-                logical.name for logical in session.workspace_manager.mount_map
-            }
+                raise HTTPException(404, "Directory not found")
+            readonly_roots = {logical.name for logical in session.workspace_manager.mount_map}
 
             def list_entries(logical_directory, resolved_directory, ancestors=frozenset()):
                 try:
@@ -697,40 +695,48 @@ def mount_platform(app, session: InteractiveSession):
                     try:
                         resolved = resolve(str(logical))
                         is_directory = resolved.is_dir()
-                        mounted = bool(
-                            logical.parts and logical.parts[0] in readonly_roots
-                        )
+                        mounted = bool(logical.parts and logical.parts[0] in readonly_roots)
                         locked = not mounted and session.workspace_manager.is_locked(logical)
-                        entry = {'name': item.name, 'path': str(logical),
-                                 'directory': is_directory,
-                                 'read_only': mounted or locked,
-                                 'mounted': mounted,
-                                 'locked': locked}
+                        entry = {
+                            "name": item.name,
+                            "path": str(logical),
+                            "directory": is_directory,
+                            "read_only": mounted or locked,
+                            "mounted": mounted,
+                            "locked": locked,
+                        }
                         if is_directory:
                             children = list_entries(logical, resolved, descendants)
-                            entry['size'] = None
+                            entry["size"] = None
                             if recursive:
-                                entry['children'] = children
+                                entry["children"] = children
                         else:
-                            entry['size'] = resolved.stat().st_size
+                            with session.workspace_manager.safe_open(resolved, "rb") as stream:
+                                entry["size"] = os.fstat(stream.fileno()).st_size
                         entries.append(entry)
                     except (FileNotFoundError, HTTPException):
                         continue
-                return sorted(entries, key=lambda entry: (
-                    not entry['directory'], entry['name'].lower(), entry['name'],
-                ))
+                return sorted(
+                    entries,
+                    key=lambda entry: (
+                        not entry["directory"],
+                        entry["name"].lower(),
+                        entry["name"],
+                    ),
+                )
 
             entries = list_entries(Path(path), directory)
-            return {'path': path, 'entries': entries}
+            return {"path": path, "entries": entries}
 
-    @app.get('/api/workspace/size')
+    @app.get("/api/workspace/size")
     def workspace_item_size(path: str):
         with session.lock:
             item = resolve(path)
             if item.is_file():
-                return {'path': path, 'size': item.stat().st_size}
+                with session.workspace_manager.safe_open(item, "rb") as stream:
+                    return {"path": path, "size": os.fstat(stream.fileno()).st_size}
             if not item.is_dir():
-                raise HTTPException(404, 'File or directory not found')
+                raise HTTPException(404, "File or directory not found")
             total = 0
             for current, _, filenames in os.walk(item):
                 relative_directory = Path(current).relative_to(item)
@@ -741,32 +747,42 @@ def mount_platform(app, session: InteractiveSession):
                     except HTTPException:
                         continue
                     if source.is_file():
-                        total += source.stat().st_size
-            return {'path': path, 'size': total}
+                        with session.workspace_manager.safe_open(source, "rb") as stream:
+                            total += os.fstat(stream.fileno()).st_size
+            return {"path": path, "size": total}
 
-    @app.get('/api/workspace/download')
+    @app.get("/api/workspace/download")
     def download(path: str):
         with session.lock:
             item = resolve(path)
             if item.is_file():
-                return FileResponse(
-                    item, filename=item.name, media_type='application/octet-stream',
+                stream = session.workspace_manager.safe_open(item, "rb")
+                return StreamingResponse(
+                    iter(lambda: stream.read(1024 * 1024), b""),
+                    media_type="application/octet-stream",
+                    headers={
+                        "Content-Disposition": ("attachment; filename*=UTF-8''" + quote(item.name)),
+                    },
+                    background=BackgroundTask(stream.close),
                 )
             if not item.is_dir():
-                raise HTTPException(404, 'File or directory not found')
-            descriptor, archive_name = tempfile.mkstemp(suffix='.zip')
+                raise HTTPException(404, "File or directory not found")
+            descriptor, archive_name = tempfile.mkstemp(suffix=".zip")
             os.close(descriptor)
             archive = Path(archive_name)
             try:
                 with zipfile.ZipFile(
-                    archive, mode='w', compression=zipfile.ZIP_DEFLATED,
+                    archive,
+                    mode="w",
+                    compression=zipfile.ZIP_DEFLATED,
                 ) as output:
                     for current, directories, filenames in os.walk(item):
                         current_path = Path(current)
                         relative_directory = current_path.relative_to(item)
                         if not directories and not filenames:
                             output.writestr(
-                                str(Path(item.name) / relative_directory) + '/', '',
+                                str(Path(item.name) / relative_directory) + "/",
+                                "",
                             )
                         for filename in filenames:
                             relative = relative_directory / filename
@@ -775,29 +791,30 @@ def mount_platform(app, session: InteractiveSession):
                             except HTTPException:
                                 continue
                             if source.is_file():
-                                output.write(source, Path(item.name) / relative)
+                                archive_path = (Path(item.name) / relative).as_posix()
+                                with session.workspace_manager.safe_open(source, "rb") as input_stream:
+                                    with output.open(archive_path, "w") as output_stream:
+                                        shutil.copyfileobj(input_stream, output_stream)
             except Exception:
                 archive.unlink(missing_ok=True)
                 raise
             return FileResponse(
-                archive, filename=f'{item.name}.zip', media_type='application/zip',
+                archive,
+                filename=f"{item.name}.zip",
+                media_type="application/zip",
                 background=BackgroundTask(archive.unlink, missing_ok=True),
             )
 
-    @app.get('/api/workspace/preview')
+    @app.get("/api/workspace/preview")
     def preview(path: str):
         with session.lock:
             file = resolve(path)
             if not file.is_file():
-                raise HTTPException(404, 'File not found')
-            if file.suffix.lower() == '.npy':
+                raise HTTPException(404, "File not found")
+            if file.suffix.lower() == ".npy":
                 try:
-                    try:
-                        array = np.load(file, mmap_mode='r', allow_pickle=False)
-                    except ValueError as exc:
-                        if 'shape is empty' not in str(exc):
-                            raise
-                        array = np.load(file, allow_pickle=False)
+                    with session.workspace_manager.safe_open(file, "rb") as stream:
+                        array = np.load(stream, allow_pickle=False)
                     text = np.array2string(
                         array,
                         threshold=1000,
@@ -807,142 +824,140 @@ def mount_platform(app, session: InteractiveSession):
                 except (OSError, TypeError, ValueError) as exc:
                     raise HTTPException(
                         400,
-                        f'Unable to preview NPY file safely: {exc}',
+                        f"Unable to preview NPY file safely: {exc}",
                     ) from exc
                 truncated = array.size > 1000 or len(text) > 65536
                 return {
-                    'kind': 'npy',
-                    'shape': list(array.shape),
-                    'dtype': str(array.dtype),
-                    'size': int(array.size),
-                    'text': text[:65536],
-                    'truncated': truncated,
+                    "kind": "npy",
+                    "shape": list(array.shape),
+                    "dtype": str(array.dtype),
+                    "size": int(array.size),
+                    "text": text[:65536],
+                    "truncated": truncated,
                 }
-            with file.open('rb') as stream:
+            with session.workspace_manager.safe_open(file, "rb") as stream:
                 data = stream.read(65537)
             return {
-                'kind': 'text',
-                'text': data[:65536].decode('utf-8', errors='replace'),
-                'truncated': len(data) > 65536,
+                "kind": "text",
+                "text": data[:65536].decode("utf-8", errors="replace"),
+                "truncated": len(data) > 65536,
             }
 
-    @app.post('/api/workspace/directory')
+    @app.post("/api/workspace/directory")
     def create_directory(payload: dict = Body(...)):
-        path = str(payload.get('path', '')).strip()
+        path = str(payload.get("path", "")).strip()
         if not path:
-            raise HTTPException(400, 'Directory path is required')
+            raise HTTPException(400, "Directory path is required")
         with session.lock:
             try:
-                directory = resolve(path, access="create")
-                if directory.exists():
-                    raise HTTPException(409, 'A file or directory already exists at this path')
-                directory.mkdir(parents=False)
+                session.workspace_manager.create_directory(path)
+            except FileExistsError as exc:
+                raise HTTPException(409, "A file or directory already exists at this path") from exc
             except HTTPException:
                 raise
             except (OSError, ValueError) as exc:
                 raise HTTPException(400, str(exc)) from exc
-        return {'path': path}
+        return {"path": path}
 
-    @app.put('/api/workspace/lock')
+    @app.put("/api/workspace/lock")
     def set_workspace_item_lock(payload: dict = Body(...)):
-        path = str(payload.get('path', '')).strip()
-        locked = payload.get('locked')
+        path = str(payload.get("path", "")).strip()
+        locked = payload.get("locked")
         if not path:
-            raise HTTPException(400, 'The workspace root cannot be locked')
+            raise HTTPException(400, "The workspace root cannot be locked")
         if not isinstance(locked, bool):
-            raise HTTPException(400, 'locked must be a boolean')
+            raise HTTPException(400, "locked must be a boolean")
         with session.lock:
             try:
                 session.workspace_manager.set_locked(path, locked)
             except (OSError, ValueError) as exc:
                 raise HTTPException(400, str(exc)) from exc
-        return {'path': path, 'locked': locked}
+        return {"path": path, "locked": locked}
 
-    @app.patch('/api/workspace')
+    @app.patch("/api/workspace")
     def move_workspace_item(payload: dict = Body(...)):
-        source_path = str(payload.get('source', '')).strip()
-        destination_path = str(payload.get('destination', '')).strip()
+        source_path = str(payload.get("source", "")).strip()
+        destination_path = str(payload.get("destination", "")).strip()
         if not source_path or not destination_path:
-            raise HTTPException(400, 'Source and destination paths are required')
+            raise HTTPException(400, "Source and destination paths are required")
         with session.lock:
             try:
-                source = session.resolve(source_path, access="remove")
-                destination = session.resolve(destination_path, access="create")
-                if not source.exists():
-                    raise HTTPException(404, 'Source file or directory not found')
-                if destination.exists():
-                    raise HTTPException(409, 'A file or directory already exists at the destination')
-                if source.is_dir() and destination.is_relative_to(source):
-                    raise HTTPException(400, 'A directory cannot be moved inside itself')
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                source.rename(destination)
+                session.workspace_manager.move(source_path, destination_path)
+            except FileNotFoundError as exc:
+                raise HTTPException(404, "Source file or directory not found") from exc
+            except FileExistsError as exc:
+                raise HTTPException(
+                    409, "A file or directory already exists at the destination"
+                ) from exc
             except HTTPException:
                 raise
             except (OSError, ValueError) as exc:
                 raise HTTPException(400, str(exc)) from exc
-        return {'source': source_path, 'destination': destination_path}
+        return {"source": source_path, "destination": destination_path}
 
-    @app.delete('/api/workspace')
+    @app.delete("/api/workspace")
     def delete_workspace_item(path: str):
         path = path.strip()
         if not path:
-            raise HTTPException(400, 'The workspace root cannot be deleted')
+            raise HTTPException(400, "The workspace root cannot be deleted")
         with session.lock:
             try:
-                item = session.resolve(path, access="remove")
-                if not item.exists():
-                    raise HTTPException(404, 'File or directory not found')
-                if item.is_dir():
-                    shutil.rmtree(item)
-                else:
-                    item.unlink()
+                session.workspace_manager.remove(path, recursive=True)
+            except FileNotFoundError as exc:
+                raise HTTPException(404, "File or directory not found") from exc
             except HTTPException:
                 raise
             except (OSError, ValueError) as exc:
                 raise HTTPException(400, str(exc)) from exc
-        return {'path': path}
+        return {"path": path}
 
-    @app.get('/api/data/csv-files')
+    @app.get("/api/data/csv-files")
     def csv_files():
         with session.lock:
-            files = [str(relative) for relative, path in session.workspace_manager.iter_files()
-                     if path.suffix.lower() in {'.csv', '.xlsx'}]
-            return {'files': sorted(files)}
+            files = [
+                str(relative)
+                for relative, path in session.workspace_manager.iter_files()
+                if path.suffix.lower() in {".csv", ".xlsx"}
+            ]
+            return {"files": sorted(files)}
 
-    @app.get('/api/data/preview')
+    @app.get("/api/data/preview")
     def data_preview(path: str, rows: int = 300):
         rows = max(5, min(rows, 1000))
         with session.lock:
             file = resolve(path)
-            if file.suffix.lower() not in {'.csv', '.xlsx'} or not file.is_file():
-                raise HTTPException(400, 'Select an existing CSV or Excel file')
+            if file.suffix.lower() not in {".csv", ".xlsx"} or not file.is_file():
+                raise HTTPException(400, "Select an existing CSV or Excel file")
             try:
-                frame = (
-                    pd.read_excel(file, nrows=rows + 1)
-                    if file.suffix.lower() == '.xlsx'
-                    else pd.read_csv(file, nrows=rows + 1)
-                )
+                with session.workspace_manager.safe_open(file, "rb") as stream:
+                    frame = (
+                        pd.read_excel(stream, nrows=rows + 1)
+                        if file.suffix.lower() == ".xlsx"
+                        else pd.read_csv(stream, nrows=rows + 1)
+                    )
             except Exception as exc:
-                raise HTTPException(400, f'Unable to read table: {exc}') from exc
+                raise HTTPException(400, f"Unable to read table: {exc}") from exc
         if frame.empty or len(frame.columns) < 2:
-            raise HTTPException(400, 'CSV needs at least two columns and one row')
+            raise HTTPException(400, "CSV needs at least two columns and one row")
         columns = [str(column) for column in frame.columns]
         if len(set(columns)) != len(columns):
-            raise HTTPException(400, 'CSV column names must be unique')
+            raise HTTPException(400, "CSV column names must be unique")
         frame.columns = columns
         truncated = len(frame) > rows
         frame = frame.iloc[:rows]
-        numeric = {
-            column: bool(pd.api.types.is_numeric_dtype(frame[column]))
-            for column in columns
-        }
+        numeric = {column: bool(pd.api.types.is_numeric_dtype(frame[column])) for column in columns}
         serializable = frame.astype(object).where(frame.notna(), None)
-        serializable = serializable.replace([float('inf'), float('-inf')], None)
-        records = serializable.to_dict(orient='records')
-        return {'path': path, 'columns': columns, 'numeric': numeric,
-                'rows': records, 'truncated': truncated}
+        serializable = serializable.replace([float("inf"), float("-inf")], None)
+        records = serializable.to_dict(orient="records")
+        return {
+            "path": path,
+            "columns": columns,
+            "numeric": numeric,
+            "rows": records,
+            "truncated": truncated,
+        }
 
-    @app.post('/api/data/demo')
+    @app.post("/api/data/demo")
     def create_demo(payload: dict | None = Body(default=None)):
         try:
             path = session.create_demo(str((payload or {}).get("kind", "polynomial")))
@@ -952,19 +967,24 @@ def mount_platform(app, session: InteractiveSession):
             raise HTTPException(400, str(exc)) from exc
         relative = str(path.relative_to(session.workspace))
         size = sum(file.stat().st_size for file in path.iterdir() if file.is_file())
-        session.data_interaction_manager.publish_event('workspace_changed', {
-            'operation': 'created', 'path': relative, 'size': size,
-        })
-        return {'path': relative}
+        session.data_interaction_manager.publish_event(
+            "workspace_changed",
+            {
+                "operation": "created",
+                "path": relative,
+                "size": size,
+            },
+        )
+        return {"path": relative}
 
-    @app.post('/api/data/prompts')
+    @app.post("/api/data/prompts")
     def initial_prompts(payload: dict = Body(...)):
         try:
             return session.preview_initial_prompts(payload)
         except (ValueError, OSError, pd.errors.ParserError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.put('/api/workspace/upload')
+    @app.put("/api/workspace/upload")
     async def upload(request: Request, path: str):
         # Keep the staging file beside its destination so the final atomic
         # replace also works when the run directory and workspace are on
@@ -975,33 +995,45 @@ def mount_platform(app, session: InteractiveSession):
             with session.lock:
                 destination = resolve(path, access="create")
                 if destination.exists():
-                    raise HTTPException(409, 'File already exists; rename it before uploading')
-                destination.parent.mkdir(parents=True, exist_ok=True)
+                    raise HTTPException(409, "File already exists; rename it before uploading")
+                parent = str(Path(path).parent)
+                if parent != ".":
+                    session.workspace_manager.create_directory(
+                        parent,
+                        parents=True,
+                        exist_ok=True,
+                    )
                 fd, temp_name = tempfile.mkstemp(
-                    prefix='.sr-harness-upload-', dir=destination.parent,
+                    prefix=".sr-harness-upload-",
+                    dir=session.workspace,
                 )
                 temp = Path(temp_name)
-            with os.fdopen(fd, 'wb') as output:
+            with os.fdopen(fd, "wb") as output:
                 async for chunk in request.stream():
                     size += len(chunk)
                     if size > MAX_UPLOAD:
-                        raise HTTPException(413, 'Maximum file size is 256 MiB')
+                        raise HTTPException(413, "Maximum file size is 256 MiB")
                     output.write(chunk)
             with session.lock:
                 current_destination = resolve(path, access="create")
                 if current_destination != destination:
-                    raise HTTPException(409, 'Workspace changed while the file was uploading')
+                    raise HTTPException(409, "Workspace changed while the file was uploading")
                 if destination.exists():
-                    raise HTTPException(409, 'File already exists; rename it before uploading')
-                os.replace(temp, destination)
-            session.data_interaction_manager.publish_event('workspace_changed', {
-                'operation': 'created', 'path': path, 'size': size,
-            })
-            return {'path': path, 'size': size}
+                    raise HTTPException(409, "File already exists; rename it before uploading")
+                session.workspace_manager.replace_file(temp, path)
+            session.data_interaction_manager.publish_event(
+                "workspace_changed",
+                {
+                    "operation": "created",
+                    "path": path,
+                    "size": size,
+                },
+            )
+            return {"path": path, "size": size}
         except HTTPException:
             raise
         except OSError as exc:
-            raise HTTPException(400, f'Unable to upload file: {exc}') from exc
+            raise HTTPException(400, f"Unable to upload file: {exc}") from exc
         finally:
             if temp is not None:
                 temp.unlink(missing_ok=True)

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from sr_harness.core import AgentContext
 
 import numpy as np
 
@@ -8,7 +9,9 @@ from sr_harness.tools.relationship_analysis import RelationshipAnalysisTool
 def test_relationships_and_conditional_collapse():
     x = np.linspace(0, 10, 200)
     y = 3 * x + 1
-    result = RelationshipAnalysisTool(data={"x": x, "y": y}, target="y").execute(n_bins=10)
+    result = RelationshipAnalysisTool(
+        context=AgentContext(data={"x": x, "y": y}, target="y")
+    ).execute(n_bins=10)
     rel = result["relationships"]["x"]
     assert rel["pearson"] > 0.999
     assert rel["spearman"] > 0.999
@@ -19,17 +22,24 @@ def test_relationships_and_conditional_collapse():
 
 def test_expressions_and_optional_pairwise_matrix():
     x = np.linspace(1, 5, 50)
-    result = RelationshipAnalysisTool(data={"x": x, "y": x**2}, target="y").execute(
-        variables=["x", "x**2"], pairwise=True, n_bins=5
-    )
+    result = RelationshipAnalysisTool(
+        context=AgentContext(data={"x": x, "y": x**2}, target="y")
+    ).execute(variables=["x", "x**2"], pairwise=True, n_bins=5)
     matrix = result["pairwise_correlations"]
     assert matrix["variables"] == ["x", "x**2", "y"]
     assert np.asarray(matrix["pearson"]).shape == (3, 3)
-    assert result["relationships"]["x"]["strongest_residual_association_after_one_variable_fit"]["variable"] == "x**2"
+    assert (
+        result["relationships"]["x"]["strongest_residual_association_after_one_variable_fit"][
+            "variable"
+        ]
+        == "x**2"
+    )
 
 
 def test_invalid_binning_is_wrapped_by_base_tool():
-    tool = RelationshipAnalysisTool(data={"x": np.arange(4), "y": np.arange(4)}, target="y")
+    tool = RelationshipAnalysisTool(
+        context=AgentContext(data={"x": np.arange(4), "y": np.arange(4)}, target="y")
+    )
     result = tool(binning="bad")
     assert result.ok is False
     assert "binning" in result.result_str
@@ -39,9 +49,9 @@ def test_validated_collapse_rejects_many_bin_noise_overfit():
     rng = np.random.default_rng(7)
     x = rng.normal(size=400)
     y = rng.normal(size=400)
-    result = RelationshipAnalysisTool(data={"x": x, "y": y}, target="y").execute(
-        n_bins=80, n_folds=5
-    )
+    result = RelationshipAnalysisTool(
+        context=AgentContext(data={"x": x, "y": y}, target="y")
+    ).execute(n_bins=80, n_folds=5)
     rel = result["relationships"]["x"]
     assert rel["one_variable_test_r2_mean"] < 0.3
     assert np.isfinite(rel["one_variable_test_r2_std"])
@@ -50,16 +60,16 @@ def test_validated_collapse_rejects_many_bin_noise_overfit():
 def test_spline_collapse_generalizes_for_smooth_curve():
     x = np.linspace(-2, 2, 500)
     y = x**3 - x
-    result = RelationshipAnalysisTool(data={"x": x, "y": y}, target="y").execute(
-        collapse_model="spline", n_folds=5
-    )
+    result = RelationshipAnalysisTool(
+        context=AgentContext(data={"x": x, "y": y}, target="y")
+    ).execute(collapse_model="spline", n_folds=5)
     assert result["relationships"]["x"]["one_variable_test_r2_mean"] > 0.95
 
 
 def test_formatted_output_reports_methods_and_values_without_shape_advice():
     x = np.linspace(0, 4, 40)
     y = x**2
-    tool = RelationshipAnalysisTool(data={"x": x, "y": y}, target="y")
+    tool = RelationshipAnalysisTool(context=AgentContext(data={"x": x, "y": y}, target="y"))
     call = tool(n_bins=4, pairwise=True)
     assert call.ok
     assert call.result["analysis_settings"]["binning"] == "quantile"
@@ -91,7 +101,9 @@ def test_five_folds_each_hold_out_distinct_samples(monkeypatch):
         return predicted
 
     monkeypatch.setattr(RelationshipAnalysisTool, "_fit_predict_1d", staticmethod(capture))
-    result = RelationshipAnalysisTool(data={"x": x, "y": y}, target="y").execute(n_folds=5)
+    result = RelationshipAnalysisTool(
+        context=AgentContext(data={"x": x, "y": y}, target="y")
+    ).execute(n_folds=5)
     assert result["relationships"]["x"]["one_variable_test_success_folds"] == 5
     assert len(observed) == 5
     held_out = [set(test) for _, test, _, _ in observed]
@@ -110,7 +122,9 @@ def test_five_folds_each_hold_out_distinct_samples(monkeypatch):
 def test_float_display_has_three_significant_digits():
     x = np.linspace(0, 54, 100)
     y = 1.23e-8 * x
-    output = RelationshipAnalysisTool(data={"x": x, "y": y}, target="y")().result_str
+    output = RelationshipAnalysisTool(
+        context=AgentContext(data={"x": x, "y": y}, target="y")
+    )().result_str
     assert "x range=[0, 54.0]" in output
     assert "y range=[0, 6.64e-07]" in output
 
@@ -118,11 +132,14 @@ def test_float_display_has_three_significant_digits():
 def test_default_five_quantile_bins_merge_duplicate_cut_points():
     x = np.concatenate([np.zeros(600), np.linspace(0, 1, 401)[1:]])
     y = 2 * x + 1
-    result = RelationshipAnalysisTool(data={"x": x, "y": y}, target="y")()
+    result = RelationshipAnalysisTool(context=AgentContext(data={"x": x, "y": y}, target="y"))()
     assert result.ok
     assert result.result["analysis_settings"]["n_bins"] == 5
     bins = result.result["relationships"]["x"]["conditional_bins"]
     assert len(bins) == 3
     assert [item["sample_count"] for item in bins] == [600, 200, 200]
-    assert "Binning analysis (n_bins=5, method=quantile; duplicate quantile cut points removed)" in result.result_str
+    assert (
+        "Binning analysis (n_bins=5, method=quantile; duplicate quantile cut points removed)"
+        in result.result_str
+    )
     assert "0 <= x < 0.00100 | 600" in result.result_str

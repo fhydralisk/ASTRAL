@@ -21,9 +21,24 @@ RUN groupadd --gid "${APP_GID}" srharness \
 WORKDIR /app
 
 COPY pyproject.toml README.md LICENSE ./
+
+RUN --mount=type=cache,target=/root/.cache/pip python - <<'PY'
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+
+project = tomllib.loads(Path("pyproject.toml").read_text())["project"]
+requirements = [
+    *project["dependencies"],
+    *project["optional-dependencies"]["tools"],
+]
+subprocess.check_call([sys.executable, "-m", "pip", "install", *requirements])
+PY
+
 COPY src ./src
 
-RUN python -m pip install --no-cache-dir '.[tools]' \
+RUN --mount=type=cache,target=/root/.cache/pip python -m pip install --no-deps . \
     && python -m pip check
 
 RUN install -d -o "${APP_UID}" -g "${APP_GID}" \

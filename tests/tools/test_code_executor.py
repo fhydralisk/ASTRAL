@@ -1,6 +1,8 @@
 # Copyright (c) 2026-present, Yumeow. Licensed under the MIT License.
 """代码执行工具的测试。"""
 
+from sr_harness.core import AgentContext
+
 import pytest
 import numpy as np
 
@@ -11,7 +13,7 @@ class TestCodeExecutorTool:
     """测试代码执行工具。"""
 
     def setup_method(self):
-        self.tool = CodeExecutorTool(data={})
+        self.tool = CodeExecutorTool(context=AgentContext(data={}))
 
     def test_basic_print(self):
         result = self.tool.execute('print("Hello, World!")')
@@ -161,11 +163,13 @@ except Exception:
 
     def test_context_data_is_available_from_stdin_as_dict(self):
         tool = CodeExecutorTool(
-            data={
-                "x1": np.array([1.0, 2.0, 3.0]),
-                "x2": np.array([0.5, 1.5, 2.5]),
-                "y": np.array([0.5, 0.5, 0.5]),
-            }
+            context=AgentContext(
+                data={
+                    "x1": np.array([1.0, 2.0, 3.0]),
+                    "x2": np.array([0.5, 1.5, 2.5]),
+                    "y": np.array([0.5, 0.5, 0.5]),
+                }
+            )
         )
         result = tool.execute(
             """
@@ -184,7 +188,7 @@ print(data_dict["y"][-1])
         assert "0.5" in result["stdout"]
 
     def test_stdin_loader_can_use_llm_chosen_variable_names(self):
-        tool = CodeExecutorTool(data={"x": [1, 2], "y": [3, 4]})
+        tool = CodeExecutorTool(context=AgentContext(data={"x": [1, 2], "y": [3, 4]}))
         result = tool.execute(
             """
 import json

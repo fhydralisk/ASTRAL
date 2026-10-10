@@ -44,7 +44,7 @@ def test_split_data_is_cached_and_split_contexts_share_arrays_and_runtime_state(
         data={"x": np.arange(4), "y": np.arange(4) * 2},
         target="y",
         evaluator=splitter,
-        workspace=tmp_path,
+        workspace=Workspace(tmp_path),
     )
 
     train_data = context.train_split.data

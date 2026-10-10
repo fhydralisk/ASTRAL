@@ -5,7 +5,8 @@ import numpy as np
 import pytest
 
 import sr_harness
-from sr_harness import AgentContext, DefaultEvaluator, GraphEvaluator, load_custom_evaluator
+from sr_harness import AgentContext, DefaultEvaluator, GraphEvaluator
+from sr_harness.evaluator import load_custom_evaluator
 from sr_harness.evaluator import utils
 from sr_harness.tools.evaluate_formula import EvaluateTool
 import sr_harness_engine as engine

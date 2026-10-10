@@ -3,6 +3,7 @@
 
 继承自 SRAgent，以 L（对话轮次）为搜索主体，支持人类实时干预和工作区文件操作。
 """
+
 from __future__ import annotations
 import logging
 import tempfile
@@ -18,7 +19,7 @@ from ..skills import SkillManager
 from .sr_agent import Message, ModelResponse, SRAgent, Usage
 from ..parser import BaseParser
 
-_logger = logging.getLogger(f'sr_harness.{__name__}')
+_logger = logging.getLogger(f"sr_harness.{__name__}")
 
 
 class SRAgentInteractive(SRAgent):
@@ -45,7 +46,7 @@ class SRAgentInteractive(SRAgent):
         tools: list[str] | None = None,
         skills: List[str] | None = None,
         verbose: bool = False,
-        tool_parser: str | BaseParser = 'openai',
+        tool_parser: str | BaseParser = "openai",
         save_path: Optional[str] = None,
         run_id: str | None = None,
         local_sample_size: int = 1,
@@ -205,8 +206,7 @@ class SRAgentInteractive(SRAgent):
             yield tool_context
             return
 
-        workspace_manager = getattr(tool_context.args, "workspace_manager", None)
-        if workspace_manager is not None:
+        if tool_context.workspace is not None:
             yield tool_context
             return
 
@@ -216,8 +216,7 @@ class SRAgentInteractive(SRAgent):
         for source in self.workspace_files or ():
             workspace.mount(source)
         _logger.note(f"Workspace initialized at: {workspace.path}")
-        tool_context.workspace = workspace.path
-        tool_context.args.workspace_manager = workspace
+        tool_context.workspace = workspace
         yield tool_context
 
     # Interactive search-boundary hooks
@@ -297,9 +296,7 @@ class SRAgentInteractive(SRAgent):
             ])
             available_skills = self.skill_manager.load_skills()
             skill_names = settings.get("skills")
-            requested_skills = (
-                set(available_skills) if skill_names is None else set(skill_names)
-            )
+            requested_skills = set(available_skills) if skill_names is None else set(skill_names)
             if unknown_skills := requested_skills - available_skills.keys():
                 raise ValueError(f"Unknown skills: {', '.join(sorted(unknown_skills))}")
             requested_skills.update(
@@ -389,10 +386,7 @@ class SRAgentInteractive(SRAgent):
             self._append_buffer_messages(buffer, [prompt], R=R, C=C, L=L)
             self._forced_interruption_pending = False
             return None
-        if (
-            not self._last_iteration_had_tool_calls
-            and not self._last_response_was_truncated
-        ):
+        if not self._last_iteration_had_tool_calls and not self._last_response_was_truncated:
             self.interaction_manager.request_pause()
         self._last_response_was_truncated = False
         return None
@@ -534,10 +528,7 @@ class SRAgentInteractive(SRAgent):
             if self.interaction_manager.is_interrupting:
                 raise InterruptedError("用户强制中止")
             now = time.monotonic()
-            if (
-                update.get("type") == "delta"
-                and now - last_stream_emit.get(K, 0.0) < 0.08
-            ):
+            if update.get("type") == "delta" and now - last_stream_emit.get(K, 0.0) < 0.08:
                 return
             last_stream_emit[K] = now
             self.interaction_manager.publish_event("assistant_delta", {
@@ -632,18 +623,18 @@ class SRAgentInteractive(SRAgent):
             self.interaction_manager.publish_event(
                 "assistant_failed" if response_error else "assistant_completed",
                 {
-                "response_id": response_ids[K],
-                "content": content,
-                "reasoning": message.get("reasoning", ""),
-                "message": message,
-                "tool_calls": calls,
-                "tool_schemas": tool_schemas,
-                "coord": coord | {"K": K},
-                "usage": usage,
-                "cumulative_usage": cumulative_usage,
-                "provider": route.provider,
-                "model": route.model,
-                **({"error": response_error, "interrupted": interrupted} if response_error else {}),
+                    "response_id": response_ids[K],
+                    "content": content,
+                    "reasoning": message.get("reasoning", ""),
+                    "message": message,
+                    "tool_calls": calls,
+                    "tool_schemas": tool_schemas,
+                    "coord": coord | {"K": K},
+                    "usage": usage,
+                    "cumulative_usage": cumulative_usage,
+                    "provider": route.provider,
+                    "model": route.model,
+                    **({"error": response_error, "interrupted": interrupted} if response_error else {}),
                 },
             )
         return responses, usage
@@ -712,7 +703,15 @@ class SRAgentInteractive(SRAgent):
         self.interaction_manager.publish_event("topk_updated", {"records": [record.display_dict() for record in records]})
         return records
 
-    def record_tool_calls(self, tool_calls: list[ToolCall], results: list[ToolCallResult], R: int, L: int, C: int, forced: bool = False) -> None:
+    def record_tool_calls(
+        self,
+        tool_calls: list[ToolCall],
+        results: list[ToolCallResult],
+        R: int,
+        L: int,
+        C: int,
+        forced: bool = False,
+    ) -> None:
         """Persist tool calls and expose framework-enforced calls to the UI.
 
         Args:

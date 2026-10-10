@@ -3,13 +3,15 @@
 
 from __future__ import annotations
 
+from sr_harness.core import AgentContext
+
 import numpy as np
 
 from sr_harness.tools.polynomial_fit import PolynomialFitTool
 
 
 def make_tool(x: dict[str, np.ndarray], y: np.ndarray) -> PolynomialFitTool:
-    return PolynomialFitTool(data=x | {"y": y}, target="y")
+    return PolynomialFitTool(context=AgentContext(data=x | {"y": y}, target="y"))
 
 
 def train_metrics(result):
@@ -25,9 +27,14 @@ class TestPolynomialFitTool:
     def test_linear_fit_returns_new_contract(self):
         result = self.tool.execute(max_degree=1)
         assert set(result) == {
-            "formula", "target_expression", "is_candidate",
-            "candidate_ineligibility_reasons", "data_split_results",
-            "fit_configuration", "simplification", "exceptions",
+            "formula",
+            "target_expression",
+            "is_candidate",
+            "candidate_ineligibility_reasons",
+            "data_split_results",
+            "fit_configuration",
+            "simplification",
+            "exceptions",
         }
         assert result["is_candidate"] is True
         assert result["exceptions"] == []
@@ -77,7 +84,8 @@ class TestPolynomialFitTool:
         x2 = rng.normal(size=100)
         y = 2 * x1 + 3 * x2 + 1.5 * x1 * x2
         result = make_tool({"x1": x1, "x2": x2}, y).execute(
-            max_degree=2, include_interactions=True,
+            max_degree=2,
+            include_interactions=True,
         )
         assert train_metrics(result)["r2"] > 0.99
 
@@ -96,7 +104,8 @@ class TestPolynomialFitTool:
         x2 = rng.normal(size=100)
         x3 = rng.normal(size=100)
         result = make_tool({"x1": x1, "x2": x2, "x3": x3}, 2 * x1 + 3 * x2).execute(
-            x=["x1", "x2"], max_degree=1,
+            x=["x1", "x2"],
+            max_degree=1,
         )
         assert train_metrics(result)["r2"] > 0.99
         assert "x3" not in result["formula"]
@@ -115,7 +124,9 @@ class TestPolynomialFitTool:
     def test_quoted_y_parameter_is_stripped(self):
         x = np.arange(1.0, 6.0)
         omega = 3 * x + 2
-        tool = PolynomialFitTool(data={"x": x, "omega": omega}, target="omega")
+        tool = PolynomialFitTool(
+            context=AgentContext(data={"x": x, "omega": omega}, target="omega")
+        )
         result = tool.execute(y='"omega"', max_degree=1)
         assert train_metrics(result)["r2"] > 0.99
         assert result["is_candidate"] is True

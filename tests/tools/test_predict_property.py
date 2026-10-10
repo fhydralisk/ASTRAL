@@ -1,5 +1,7 @@
 """PropertyPredictorTool 的单元测试。"""
+
 from __future__ import annotations
+from sr_harness.core import AgentContext
 
 import numpy as np
 import pytest
@@ -29,6 +31,7 @@ class TestPropertyPredictorMetadata:
 
     def test_not_registered_while_unready(self):
         from sr_harness.tools.base_tool import BaseTool
+
         assert "predict_property" not in BaseTool.REGISTRY_DICT
 
 
@@ -95,7 +98,7 @@ class TestPropertyPredictorExecution:
         return {"x1": x1, "y": y}
 
     def test_execute_returns_expected_keys(self, simple_data, fake_checkpoint, fake_model):
-        tool = PropertyPredictorTool(data=simple_data, target="y")
+        tool = PropertyPredictorTool(context=AgentContext(data=simple_data, target="y"))
         result = tool.execute()
         assert "periodicity" in result
         assert "multiplicative_separable" in result
@@ -103,7 +106,7 @@ class TestPropertyPredictorExecution:
         assert "n_samples_used" in result
 
     def test_periodicity_keys_match_input_vars(self, periodic_data, fake_checkpoint, fake_model):
-        tool = PropertyPredictorTool(data=periodic_data, target="y")
+        tool = PropertyPredictorTool(context=AgentContext(data=periodic_data, target="y"))
         result = tool.execute()
         assert set(result["periodicity"].keys()) == {"x1", "x2"}
         for var_info in result["periodicity"].values():
@@ -113,7 +116,7 @@ class TestPropertyPredictorExecution:
             assert 0.0 <= var_info["confidence"] <= 1.0
 
     def test_separability_structure(self, separable_data, fake_checkpoint, fake_model):
-        tool = PropertyPredictorTool(data=separable_data, target="y")
+        tool = PropertyPredictorTool(context=AgentContext(data=separable_data, target="y"))
         result = tool.execute()
         sep = result["multiplicative_separable"]
         assert "prediction" in sep
@@ -124,7 +127,7 @@ class TestPropertyPredictorExecution:
         )
 
     def test_call_wrapper(self, simple_data, fake_checkpoint, fake_model):
-        tool = PropertyPredictorTool(data=simple_data, target="y")
+        tool = PropertyPredictorTool(context=AgentContext(data=simple_data, target="y"))
         result = tool()
         assert result.ok is True
         assert result.meta_data["tool"] == "predict_property"
@@ -132,17 +135,19 @@ class TestPropertyPredictorExecution:
         assert "not statistical proof" in result.result_str
 
     def test_format_result_dict(self, simple_data, fake_checkpoint, fake_model):
-        tool = PropertyPredictorTool(data=simple_data, target="y")
+        tool = PropertyPredictorTool(context=AgentContext(data=simple_data, target="y"))
         result = tool.execute()
         formatted = PropertyPredictorTool.format_result_dict(result)
         assert "Periodicity" in formatted
         assert "Multiplicative Separability" in formatted
 
-    def test_missing_checkpoint_raises_tool_run_abort_with_manual_download_message(self, simple_data, tmp_path, monkeypatch):
+    def test_missing_checkpoint_raises_tool_run_abort_with_manual_download_message(
+        self, simple_data, tmp_path, monkeypatch
+    ):
         missing_path = tmp_path / "missing.pth"
         monkeypatch.setenv("SR_AGENT_PROPERTY_MODEL_CHECKPOINT", str(missing_path))
         monkeypatch.setattr(PropertyPredictorTool, "AUTO_DOWNLOAD", False)
-        tool = PropertyPredictorTool(data=simple_data, target="y")
+        tool = PropertyPredictorTool(context=AgentContext(data=simple_data, target="y"))
         with pytest.raises(ToolRunAbort) as exc_info:
             tool.execute()
         message = str(exc_info.value)
@@ -150,24 +155,27 @@ class TestPropertyPredictorExecution:
         assert "download the asset named" in message
         assert str(missing_path) in message
 
-    def test_call_wrapper_does_not_catch_missing_checkpoint_abort(self, simple_data, tmp_path, monkeypatch):
+    def test_call_wrapper_does_not_catch_missing_checkpoint_abort(
+        self, simple_data, tmp_path, monkeypatch
+    ):
         missing_path = tmp_path / "missing.pth"
         monkeypatch.setenv("SR_AGENT_PROPERTY_MODEL_CHECKPOINT", str(missing_path))
         monkeypatch.setattr(PropertyPredictorTool, "AUTO_DOWNLOAD", False)
-        tool = PropertyPredictorTool(data=simple_data, target="y")
+        tool = PropertyPredictorTool(context=AgentContext(data=simple_data, target="y"))
         with pytest.raises(ToolRunAbort, match="GitHub Release page"):
             tool()
 
     def test_single_variable(self, simple_data, fake_checkpoint, fake_model):
-        tool = PropertyPredictorTool(data=simple_data, target="y")
+        tool = PropertyPredictorTool(context=AgentContext(data=simple_data, target="y"))
         result = tool.execute()
         assert result["n_variables_analyzed"] == 1
         assert "x1" in result["periodicity"]
 
     def test_periodic_data_detection(self, periodic_data, fake_checkpoint, fake_model):
         """Smoke test: periodic data should ideally be detected as periodic."""
-        tool = PropertyPredictorTool(data=periodic_data, target="y")
+        tool = PropertyPredictorTool(context=AgentContext(data=periodic_data, target="y"))
         result = tool.execute()
-        periodic_vars = [v for v, info in result["periodicity"].items()
-                         if info["prediction"] == "periodic"]
+        periodic_vars = [
+            v for v, info in result["periodicity"].items() if info["prediction"] == "periodic"
+        ]
         assert len(periodic_vars) >= 0  # no strict assertion, just check it runs

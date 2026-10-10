@@ -56,9 +56,7 @@ def load_array_groups(root: Path) -> dict[str, dict[str, np.ndarray]]:
     manifest = json.loads((root / "arrays.json").read_text(encoding="utf-8"))
     return {
         group_name: {
-            name: np.load(
-                root / "arrays" / filename, mmap_mode="c", allow_pickle=False
-            )
+            name: np.load(root / "arrays" / filename, mmap_mode="c", allow_pickle=False)
             for name, filename in values.items()
         }
         for group_name, values in manifest.items()
@@ -331,7 +329,7 @@ def _build_tool_context(request: dict[str, Any], data: dict[str, np.ndarray], ev
         relation_names=set(metadata.get("relation_names", [])),
         num_nodes=metadata.get("num_nodes"),
         evaluator=evaluator,
-        workspace=Path.cwd(),
+        workspace=None,
     )
 
 
@@ -385,7 +383,7 @@ def _build_evaluator_context(request: dict[str, Any], data: dict[str, np.ndarray
         relation_names=set(metadata.get("relation_names", [])),
         num_nodes=metadata.get("num_nodes"),
         evaluator=evaluator,
-        workspace=Path("/tmp"),
+        workspace=None,
     )
 
 
@@ -485,9 +483,7 @@ def _configure_sandbox() -> tuple[Path, Path, Path]:
     output_root = Path(os.environ.pop("SRH_SANDBOX_OUTPUT"))
     readable = json.loads(os.environ.pop("SRH_SANDBOX_READABLE"))
     writable = json.loads(os.environ.pop("SRH_SANDBOX_WRITABLE"))
-    nonremovable_writable = json.loads(
-        os.environ.pop("SRH_SANDBOX_NONREMOVABLE_WRITABLE")
-    )
+    nonremovable_writable = json.loads(os.environ.pop("SRH_SANDBOX_NONREMOVABLE_WRITABLE"))
     executable = json.loads(os.environ.pop("SRH_SANDBOX_EXECUTABLE"))
     working_directory = Path(os.environ.pop("SRH_SANDBOX_CWD"))
     from sr_harness.runtime.landlock import restrict_filesystem, restrict_system_calls

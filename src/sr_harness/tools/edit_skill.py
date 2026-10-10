@@ -40,7 +40,7 @@ class EditSkill(BaseTool):
         manager = self.context.args.skill_manager
         if name not in manager.load_skills():
             raise ValueError(f"Skill '{name}' does not exist and cannot be edited.")
-        elif (skill := manager.get_skill(name)).readonly:
+        elif manager.get_skill(name).readonly:
             raise ValueError(f"Skill '{name}' is read-only and cannot be edited.")
         else:
             old_content = manager.read_skill(name)

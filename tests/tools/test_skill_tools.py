@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 from sr_harness.skills import SkillManager
+from sr_harness.runtime.workspace import Workspace
 from sr_harness.tools.create_skill import CreateSkill
 from sr_harness.tools.edit_skill import EditSkill
 from sr_harness.tools.edit_tool import EditTool
@@ -83,8 +84,12 @@ def _create_authored_skill(
     draft = _draft(**draft_kwargs)
     draft["skill_type"] = skill_type
     tool = CreateSkill(
-        skill_manager=_test_manager(skills_dir),
-        skill_authoring_callback=lambda messages: draft,
+        context=AgentContext(
+            args=argparse.Namespace(
+                skill_manager=_test_manager(skills_dir),
+                skill_authoring_callback=lambda messages: draft,
+            )
+        )
     )
     return tool.execute(request="Create a reusable test skill.", force=force)
 
@@ -116,8 +121,12 @@ class _SkillCreatorHarness:
         response["draft"]["description"] = description
         response["skill_type"] = tool_type
         creator = CreateSkill(
-            skill_manager=self.skill_manager,
-            skill_authoring_callback=lambda messages: response,
+            context=AgentContext(
+                args=argparse.Namespace(
+                    skill_manager=self.skill_manager,
+                    skill_authoring_callback=lambda messages: response,
+                )
+            )
         )
         return creator.execute(request="Create a custom tool skill.", force=force)
 
@@ -152,6 +161,22 @@ class TestSkillManager:
 
         assert (custom / "created-lazily" / "SKILL.md").is_file()
 
+    def test_workspace_is_used_for_custom_skill_reads(self, tmp_path):
+        workspace = Workspace(tmp_path / "workspace")
+        custom = workspace.path / "skills"
+        outside = tmp_path / "outside"
+        _write_skill(outside, "escaped-skill", "# Outside")
+        custom.mkdir()
+        (custom / "escaped-skill").symlink_to(outside / "escaped-skill", target_is_directory=True)
+        manager = SkillManager(
+            built_in_directory=tmp_path / "empty-built-in-skills",
+            custom_directory=custom,
+            workspace=workspace,
+        )
+
+        with pytest.raises(PermissionError):
+            manager.load_skills()
+
     def test_directories_are_paths_and_tool_docs_are_runtime_skills(self, tmp_path):
         registry = _test_manager(tmp_path / "custom")
         assert all(isinstance(path, Path) for path in registry.skill_directories.values())
@@ -174,8 +199,10 @@ class TestSkillManager:
         for name in ("built-in-tool", "custom-tool", "workspace-shell"):
             (manager.get_skill(name).skill_directory / "tool.py").write_text("# tool\n")
 
-        assert {skill.name for skill in manager.discover_tool_skills()} == {
-            "built-in-tool", "custom-tool", "workspace-shell",
+        assert {skill.name for skill, _ in manager.load_tool_skills()} == {
+            "built-in-tool",
+            "custom-tool",
+            "workspace-shell",
         }
 
     def test_set_skill_requires_force_and_never_overwrites_readonly(self, tmp_path):
@@ -220,22 +247,31 @@ class ExampleProposer(BaseTool):
 
     def test_execute_creates_formula_tool_and_registers_it(self, tmp_path: Path):
         result = _create_authored_skill(
-            tmp_path / "skills", skill_type="formula_proposer",
-            name="example-formula-proposer", tool_code=self.FORMULA_TOOL_CODE,
+            tmp_path / "skills",
+            skill_type="formula_proposer",
+            name="example-formula-proposer",
+            tool_code=self.FORMULA_TOOL_CODE,
         )
         assert result["tool_name"] == "example_proposer"
 
     def test_execute_passes_buffer_to_authoring_callback(self, tmp_path: Path):
         captured = {}
+
         def author(messages):
             captured["messages"] = messages
             return _draft()
+
         tool = CreateSkill(
-            skill_manager=_test_manager(tmp_path / "skills"), skill_authoring_callback=author,
-            messages=[
-                {"role": "system", "content": "System context"},
-                {"role": "assistant", "content": "I will call create_skill now."},
-            ],
+            context=AgentContext(
+                args=argparse.Namespace(
+                    skill_manager=_test_manager(tmp_path / "skills"),
+                    skill_authoring_callback=author,
+                    messages=[
+                        {"role": "system", "content": "System context"},
+                        {"role": "assistant", "content": "I will call create_skill now."},
+                    ],
+                )
+            )
         )
         tool.execute(request="Capture this reusable workflow.")
         serialized = json.dumps(captured["messages"], ensure_ascii=False)
@@ -248,7 +284,11 @@ class TestReadSkillTool:
     def test_execute_returns_wrapped_skill_content(self, tmp_path: Path):
         _write_skill(tmp_path / "skills", "readable-skill", "# Readable Skill\n\nRead me.")
 
-        tool = ReadSkill(skill_manager=_test_manager(tmp_path / "skills"))
+        tool = ReadSkill(
+            context=AgentContext(
+                args=argparse.Namespace(skill_manager=_test_manager(tmp_path / "skills"))
+            )
+        )
         result = tool.execute(name="readable-skill")
 
         assert result["content"].startswith('<skill_content name="readable-skill">')
@@ -263,7 +303,11 @@ class TestReadSkillTool:
             "# Callable Skill\n\nRead me through BaseTool.",
         )
 
-        result = ReadSkill(skill_manager=_test_manager(tmp_path / "skills"))(name="callable-skill")
+        result = ReadSkill(
+            context=AgentContext(
+                args=argparse.Namespace(skill_manager=_test_manager(tmp_path / "skills"))
+            )
+        )(name="callable-skill")
 
         assert result.ok is True
         assert set(result.result) == {"content"}
@@ -272,7 +316,11 @@ class TestReadSkillTool:
         assert "# Callable Skill" in result.result_str
 
     def test_execute_rejects_missing_skill(self, tmp_path: Path):
-        tool = ReadSkill(skill_manager=_test_manager(tmp_path / "skills"))
+        tool = ReadSkill(
+            context=AgentContext(
+                args=argparse.Namespace(skill_manager=_test_manager(tmp_path / "skills"))
+            )
+        )
 
         with pytest.raises(ValueError, match="not found"):
             tool.execute(name="missing-skill")
@@ -282,16 +330,14 @@ class TestEditSkillTool:
     def test_execute_applies_search_replace_patch(self, tmp_path: Path):
         _write_skill(tmp_path / "skills", "editable-skill", "# Editable Skill\n\nOld text.\n")
 
-        tool = EditSkill(skill_manager=_test_manager(tmp_path / "skills"))
+        tool = EditSkill(
+            context=AgentContext(
+                args=argparse.Namespace(skill_manager=_test_manager(tmp_path / "skills"))
+            )
+        )
         result = tool.execute(
             name="editable-skill",
-            patch=(
-                "<<<<<<< SEARCH\n"
-                "Old text.\n"
-                "=======\n"
-                "New text.\n"
-                ">>>>>>> REPLACE\n"
-            ),
+            patch=("<<<<<<< SEARCH\nOld text.\n=======\nNew text.\n>>>>>>> REPLACE\n"),
         )
 
         skill_path = tmp_path / "skills" / "editable-skill" / "SKILL.md"
@@ -304,18 +350,16 @@ class TestEditSkillTool:
         assert "Old text." not in content
 
     def test_execute_rejects_missing_skill(self, tmp_path: Path):
-        tool = EditSkill(skill_manager=_test_manager(tmp_path / "skills"))
+        tool = EditSkill(
+            context=AgentContext(
+                args=argparse.Namespace(skill_manager=_test_manager(tmp_path / "skills"))
+            )
+        )
 
         with pytest.raises(ValueError, match="does not exist"):
             tool.execute(
                 name="missing-skill",
-                patch=(
-                    "<<<<<<< SEARCH\n"
-                    "Old text.\n"
-                    "=======\n"
-                    "New text.\n"
-                    ">>>>>>> REPLACE\n"
-                ),
+                patch=("<<<<<<< SEARCH\nOld text.\n=======\nNew text.\n>>>>>>> REPLACE\n"),
             )
 
     def test_execute_rejects_read_only_skill(self, tmp_path: Path):
@@ -326,17 +370,15 @@ class TestEditSkillTool:
             readonly=True,
         )
 
-        tool = EditSkill(skill_manager=_test_manager(tmp_path / "skills"))
+        tool = EditSkill(
+            context=AgentContext(
+                args=argparse.Namespace(skill_manager=_test_manager(tmp_path / "skills"))
+            )
+        )
         with pytest.raises(ValueError, match="read-only"):
             tool.execute(
                 name="readonly-skill",
-                patch=(
-                    "<<<<<<< SEARCH\n"
-                    "Old text.\n"
-                    "=======\n"
-                    "New text.\n"
-                    ">>>>>>> REPLACE\n"
-                ),
+                patch=("<<<<<<< SEARCH\nOld text.\n=======\nNew text.\n>>>>>>> REPLACE\n"),
             )
 
     def test_execute_rejects_patch_with_ambiguous_search_text(self, tmp_path: Path):
@@ -346,16 +388,14 @@ class TestEditSkillTool:
             "# Ambiguous Skill\n\nSame.\nSame.\n",
         )
 
-        tool = EditSkill(skill_manager=_test_manager(tmp_path / "skills"))
+        tool = EditSkill(
+            context=AgentContext(
+                args=argparse.Namespace(skill_manager=_test_manager(tmp_path / "skills"))
+            )
+        )
         result = tool.execute(
             name="ambiguous-skill",
-            patch=(
-                "<<<<<<< SEARCH\n"
-                "Same.\n"
-                "=======\n"
-                "Different.\n"
-                ">>>>>>> REPLACE\n"
-            ),
+            patch=("<<<<<<< SEARCH\nSame.\n=======\nDifferent.\n>>>>>>> REPLACE\n"),
         )
 
         assert result["applied_replacements"] == 0
@@ -364,16 +404,15 @@ class TestEditSkillTool:
     def test_execute_rejects_missing_search_marker(self, tmp_path: Path):
         _write_skill(tmp_path / "skills", "marker-skill", "# Marker Skill\n\nOld text.\n")
 
-        tool = EditSkill(skill_manager=_test_manager(tmp_path / "skills"))
+        tool = EditSkill(
+            context=AgentContext(
+                args=argparse.Namespace(skill_manager=_test_manager(tmp_path / "skills"))
+            )
+        )
         with pytest.raises(ValueError, match="Expected '<<<<<<< SEARCH'"):
             tool.execute(
                 name="marker-skill",
-                patch=(
-                    "Old text.\n"
-                    "=======\n"
-                    "New text.\n"
-                    ">>>>>>> REPLACE\n"
-                ),
+                patch=("Old text.\n=======\nNew text.\n>>>>>>> REPLACE\n"),
             )
 
 
@@ -404,6 +443,7 @@ class DoubleValue(BaseTool):
 
     def test_execute_creates_tool_and_registers(self, tmp_path):
         from sr_harness.tools import BaseTool
+
         tool = _SkillCreatorHarness(skills_dir=tmp_path / "skills")
         result = tool.execute(
             tool_type="data_analysis",
@@ -421,6 +461,7 @@ class DoubleValue(BaseTool):
 
     def test_execute_registered_tool_can_be_called(self, tmp_path):
         from sr_harness.tools import BaseTool
+
         _SkillCreatorHarness(skills_dir=tmp_path / "skills").execute(
             tool_type="data_analysis",
             name="double-value",
@@ -428,7 +469,7 @@ class DoubleValue(BaseTool):
             content="# Double Skill\\n\\nDoubles numbers.",
             tool_code=self.TOOL_CODE,
         )
-        ready = BaseTool.create("double_value", skills_dir=tmp_path / "skills")
+        ready = BaseTool.create("double_value")
         assert ready.execute(value=21)["value"] == 42
 
     def test_custom_tool_runs_in_sandbox_with_sanitized_context(self, tmp_path, monkeypatch):
@@ -440,7 +481,7 @@ class DoubleValue(BaseTool):
         outside.write_text("host-secret", encoding="utf-8")
         tool_path = workspace / "probe.py"
         tool_path.write_text(
-            '''import os
+            """import os
 from pathlib import Path
 from sr_harness.tools import BaseTool, ToolMetadata
 
@@ -479,10 +520,10 @@ class SandboxProbe(BaseTool):
                 "split_ood_variable"
             } <= names,
         }
-''',
+""",
             encoding="utf-8",
         )
-        result = BaseTool.load_custom_tool(str(tool_path))
+        result = BaseTool.load_custom_tool(tool_path.read_text(), path=tool_path)
         args = argparse.Namespace(
             validation_fraction=0,
             split_by="random",
@@ -499,7 +540,7 @@ class SandboxProbe(BaseTool):
             args=args,
             data={"x": np.arange(3.0), "y": np.arange(3.0)},
             target="y",
-            workspace=workspace,
+            workspace=Workspace(workspace),
         )
 
         call = result["tool_class"](context=context)()
@@ -521,6 +562,7 @@ class SandboxProbe(BaseTool):
 
     def test_execute_rejects_duplicate_tool_name(self, tmp_path):
         from sr_harness.tools import BaseTool
+
         tool = _SkillCreatorHarness(skills_dir=tmp_path / "skills")
         tool.execute(
             tool_type="data_analysis",
@@ -543,6 +585,7 @@ class SandboxProbe(BaseTool):
 
     def test_execute_rolls_back_on_bad_syntax(self, tmp_path):
         from sr_harness.tools import BaseTool
+
         tool = _SkillCreatorHarness(skills_dir=tmp_path / "skills")
         bad = "def execute(self):\\n    return {  # unterminated\\n"
         for name in ("bad-skill",):
@@ -665,6 +708,7 @@ class TripleValue(BaseTool):
 
     def test_execute_edits_and_reloads_tool(self, tmp_path):
         from sr_harness.tools import BaseTool
+
         create = _SkillCreatorHarness(skills_dir=tmp_path / "skills")
         create.execute(
             tool_type="data_analysis",
@@ -673,17 +717,15 @@ class TripleValue(BaseTool):
             content="# Triple Skill",
             tool_code=self.TOOL_CODE,
         )
-        edit = EditTool(skill_manager=_test_manager(tmp_path / "skills"))
-        patch = (
-            "<<<<<<< SEARCH\n"
-            "value * 3}\n"
-            "=======\n"
-            "value * 4}\n"
-            ">>>>>>> REPLACE\n"
+        edit = EditTool(
+            context=AgentContext(
+                args=argparse.Namespace(skill_manager=_test_manager(tmp_path / "skills"))
+            )
         )
+        patch = "<<<<<<< SEARCH\nvalue * 3}\n=======\nvalue * 4}\n>>>>>>> REPLACE\n"
         result = edit.execute(name="triple-skill", tool_patch=patch)
         assert result["success"] is True
-        ready = BaseTool.create("triple_value", skills_dir=tmp_path / "skills")
+        ready = BaseTool.create("triple_value")
         assert ready.execute(value=21)["value"] == 84
 
     def test_execute_rejects_ambiguous_search(self, tmp_path):
@@ -698,9 +740,9 @@ class TripleValue(BaseTool):
                 [
                     "from sr_harness.tools import BaseTool, ToolMetadata",
                     "class AmbigTool(BaseTool):",
-                    "    metadata = ToolMetadata(name=\"ambig_tool\", description=\"d\")",
+                    '    metadata = ToolMetadata(name="ambig_tool", description="d")',
                     "    def execute(self):",
-                    "        \"\"\"doc\"\"\"",
+                    '        """doc"""',
                     "        # placeholder",
                     "        # placeholder",
                     "        return {}",
@@ -708,14 +750,12 @@ class TripleValue(BaseTool):
                 ]
             ),
         )
-        edit = EditTool(skill_manager=_test_manager(tmp_path / "skills"))
-        patch = (
-            "<<<<<<< SEARCH\n"
-            "# placeholder\n"
-            "=======\n"
-            "# replaced\n"
-            ">>>>>>> REPLACE\n"
+        edit = EditTool(
+            context=AgentContext(
+                args=argparse.Namespace(skill_manager=_test_manager(tmp_path / "skills"))
+            )
         )
+        patch = "<<<<<<< SEARCH\n# placeholder\n=======\n# replaced\n>>>>>>> REPLACE\n"
         result = edit.execute(name="ambig-skill", tool_patch=patch)
         assert result["success"] is False
         assert any("more than once" in w for w in result["warnings"])
@@ -735,7 +775,11 @@ class TripleValue(BaseTool):
         tool_path = tmp_path / "skills" / "triple-skill" / "tool.py"
 
         with pytest.raises(ValueError, match="BaseTool subclass"):
-            EditTool(skill_manager=_test_manager(tmp_path / "skills")).execute(
+            EditTool(
+                context=AgentContext(
+                    args=argparse.Namespace(skill_manager=_test_manager(tmp_path / "skills"))
+                )
+            ).execute(
                 name="triple-skill",
                 tool_patch=(
                     "<<<<<<< SEARCH\n"
@@ -753,6 +797,7 @@ class TripleValue(BaseTool):
 class TestReadSkillFile:
     def test_execute_reads_tool_file_and_tree(self, tmp_path):
         from sr_harness.tools import BaseTool
+
         code = '''
 from sr_harness.tools import BaseTool, ToolMetadata
 class FileTool(BaseTool):
@@ -768,7 +813,11 @@ class FileTool(BaseTool):
             content="# File Skill",
             tool_code=code,
         )
-        read = ReadSkill(skill_manager=_test_manager(tmp_path / "skills"))
+        read = ReadSkill(
+            context=AgentContext(
+                args=argparse.Namespace(skill_manager=_test_manager(tmp_path / "skills"))
+            )
+        )
         result = read.execute(name="file-skill", file_path="tool.py", show_tree=True)
         assert result["file_path"] == "tool.py"
         assert "FileTool" in result["file_content"]
@@ -778,6 +827,7 @@ class FileTool(BaseTool):
 
     def test_execute_rejects_path_traversal(self, tmp_path):
         from sr_harness.tools import BaseTool
+
         code = '''
 from sr_harness.tools import BaseTool, ToolMetadata
 class TravTool(BaseTool):
@@ -793,7 +843,11 @@ class TravTool(BaseTool):
             content="# Trav Skill",
             tool_code=code,
         )
-        read = ReadSkill(skill_manager=_test_manager(tmp_path / "skills"))
+        read = ReadSkill(
+            context=AgentContext(
+                args=argparse.Namespace(skill_manager=_test_manager(tmp_path / "skills"))
+            )
+        )
         with pytest.raises(ValueError, match="stay inside"):
             read.execute(name="trav-skill", file_path="../other.md")
 
@@ -806,15 +860,16 @@ class TestDiscoverToolSkills:
         code = (
             f"from sr_harness.tools import BaseTool, ToolMetadata\n"
             f"class Tool(BaseTool):\n"
-            f"    metadata = ToolMetadata(name=\"{reg_name}\", description=\"d\")\n"
+            f'    metadata = ToolMetadata(name="{reg_name}", description="d")\n'
             f"    def execute(self, x: float):\n"
-            f"        \"\"\"doc\"\"\"\n"
-            f"        return {{\"result\": {expr}}}\n"
+            f'        """doc"""\n'
+            f'        return {{"result": {expr}}}\n'
         )
         skill_dir = tmp_path / "skills" / name
         skill_dir.mkdir(parents=True, exist_ok=True)
         (skill_dir / "SKILL.md").write_text(
-            f"---\nname: {name}\ndescription: d\n---\n# S\n", encoding="utf-8")
+            f"---\nname: {name}\ndescription: d\n---\n# S\n", encoding="utf-8"
+        )
         (skill_dir / "tool.py").write_text(code, encoding="utf-8")
 
     def test_discover_registers_saved_tools(self, tmp_path):
@@ -833,7 +888,7 @@ class TestDiscoverToolSkills:
         monkeypatch.setattr(
             sr_agent_module,
             "SkillManager",
-            lambda: _test_manager(custom_directory),
+            lambda **_: _test_manager(custom_directory),
         )
 
         agents = [
@@ -912,7 +967,9 @@ class TestDiscoverToolSkills:
         self._write_saved_tool(tmp_path, "ok-skill", "ok_tool", "x + 1")
         bad = skills / "bad-skill"
         bad.mkdir(parents=True, exist_ok=True)
-        (bad / "tool.py").write_text("def this_is_not_a_valid_tool():\n    pass\n", encoding="utf-8")
+        (bad / "tool.py").write_text(
+            "def this_is_not_a_valid_tool():\n    pass\n", encoding="utf-8"
+        )
         loaded = _discover_and_load_tools(skills)
         assert [d["tool_name"] for d in loaded] == ["ok_tool"]
         assert "ok_tool" in BaseTool.REGISTRY_DICT
@@ -921,13 +978,17 @@ class TestDiscoverToolSkills:
         code = (
             "from sr_harness.tools import BaseTool, ToolMetadata\n"
             "class Tool(BaseTool):\n"
-            "    metadata = ToolMetadata(name=\"create_discovered\", description=\"d\")\n"
+            '    metadata = ToolMetadata(name="create_discovered", description="d")\n'
             "    def execute(self):\n"
-            "        \"\"\"doc\"\"\"\n"
+            '        """doc"""\n'
             "        return {}\n"
         )
         _SkillCreatorHarness(skills_dir=tmp_path / "skills").execute(
-            tool_type="data_analysis", name="auto-skill", description="d", content="# S", tool_code=code,
+            tool_type="data_analysis",
+            name="auto-skill",
+            description="d",
+            content="# S",
+            tool_code=code,
         )
         # create_skill registers the new tool in the current process immediately
         assert "create_discovered" in BaseTool.REGISTRY_DICT

@@ -641,8 +641,6 @@ def test_workspace_items_can_be_locked_and_unlocked(platform):
     source = directory['children'][0]
     assert directory['locked'] and directory['read_only'] and not directory['mounted']
     assert source['locked'] and source['read_only'] and not source['mounted']
-    assert not (session.workspace / 'research').stat().st_mode & 0o222
-    assert not (session.workspace / 'research' / 'source.csv').stat().st_mode & 0o222
     assert client.delete(
         '/api/workspace', params={'path': 'research/source.csv'},
     ).status_code == 400
@@ -654,8 +652,6 @@ def test_workspace_items_can_be_locked_and_unlocked(platform):
         'path': 'research', 'locked': False,
     })
     assert response.status_code == 200, response.text
-    assert (session.workspace / 'research').stat().st_mode & 0o200
-    assert (session.workspace / 'research' / 'source.csv').stat().st_mode & 0o200
     assert client.delete(
         '/api/workspace', params={'path': 'research/source.csv'},
     ).status_code == 200
@@ -663,13 +659,6 @@ def test_workspace_items_can_be_locked_and_unlocked(platform):
 
 def test_workspace_upload_stages_on_destination_filesystem(platform, monkeypatch):
     client, session = platform
-    replace = os.replace
-
-    def same_directory_replace(source, destination):
-        assert os.path.dirname(os.fspath(source)) == os.path.dirname(os.fspath(destination))
-        return replace(source, destination)
-
-    monkeypatch.setattr('sr_harness.web.platform.os.replace', same_directory_replace)
     response = client.put(
         '/api/workspace/upload', params={'path': 'context.data.zip'}, content=b'PK\x03\x04',
     )
@@ -679,7 +668,7 @@ def test_workspace_upload_stages_on_destination_filesystem(platform, monkeypatch
     def failed_replace(source, destination):
         raise OSError('simulated storage failure')
 
-    monkeypatch.setattr('sr_harness.web.platform.os.replace', failed_replace)
+    monkeypatch.setattr(session.workspace_manager, 'replace_file', failed_replace)
     response = client.put(
         '/api/workspace/upload', params={'path': 'failed.zip'}, content=b'PK\x03\x04',
     )
@@ -1113,7 +1102,7 @@ def test_sandboxed_custom_tool_is_visible_and_optional_in_all_agent_settings(pla
         '        return {"visible": True}\n',
         encoding='utf-8',
     )
-    BaseTool.load_custom_tool(str(tool_path))
+    BaseTool.load_custom_tool(tool_path.read_text(), path=tool_path)
     try:
         for agent in ('search', 'data', 'evaluator'):
             payload = client.get(
@@ -1419,6 +1408,14 @@ def test_evaluator_configuration_test_and_restricted_agent(platform, monkeypatch
     assert configuration.json()['selected'] == 'default'
     assert {item['id'] for item in configuration.json()['evaluators']} == {'default', 'graph'}
     assert not session.evaluator_workspace.exists()
+    outside_evaluators = session.run_dir / 'outside-evaluators'
+    outside_evaluators.mkdir()
+    (outside_evaluators / 'outside_name.py').write_text('outside')
+    session.evaluator_workspace.symlink_to(outside_evaluators, target_is_directory=True)
+    assert {
+        item['id'] for item in client.get('/api/evaluator').json()['evaluators']
+    } == {'default', 'graph'}
+    session.evaluator_workspace.unlink()
     session.evaluator_workspace.mkdir()
     invalid_file = session.evaluator_workspace / 'broken_evaluator.py'
     invalid_file.write_text(

@@ -3,13 +3,12 @@ from __future__ import annotations
 
 import argparse
 import threading
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
-
 import numpy as np
 
 if TYPE_CHECKING:
     from ..evaluator import DefaultEvaluator
+    from ..runtime.workspace import Workspace
 
 _DEFAULT_EVALUATOR = object()
 
@@ -27,10 +26,10 @@ class AgentContext:
         relation_names: Names of graph or hypergraph relation arrays.
         num_nodes: Number of nodes for graph or hypergraph data.
         evaluator: Evaluator instance used to fit, score, and split formulas.
-        workspace: Workspace path or an object exposing a ``path`` attribute.
+        workspace: Optional managed workspace available to tools.
     """
 
-    def __init__(self, *, args: argparse.Namespace | None = None, data: dict[str, Any] | None = None, target: str | None = None, variable_descriptions: dict[str, str] | None = None, variable_axes: dict[str, tuple[str, ...]] | None = None, variable_structures: dict[str, str] | None = None, relation_names: set[str] | None = None, num_nodes: int | None = None, evaluator: DefaultEvaluator | object = _DEFAULT_EVALUATOR, workspace: str | Path | Any | None = None) -> None:
+    def __init__(self, *, args: argparse.Namespace | None = None, data: dict[str, Any] | None = None, target: str | None = None, variable_descriptions: dict[str, str] | None = None, variable_axes: dict[str, tuple[str, ...]] | None = None, variable_structures: dict[str, str] | None = None, relation_names: set[str] | None = None, num_nodes: int | None = None, evaluator: DefaultEvaluator | object = _DEFAULT_EVALUATOR, workspace: Workspace | None = None) -> None:
         if args is not None and not isinstance(args, argparse.Namespace):
             raise TypeError("args must be an argparse.Namespace")
         self.args = args if args is not None else argparse.Namespace()
@@ -44,10 +43,7 @@ class AgentContext:
         for name, value in defaults.items():
             if not hasattr(self.args, name):
                 setattr(self.args, name, value)
-        if workspace is not None and hasattr(workspace, "path"):
-            self.args.workspace_manager = workspace
-            workspace = workspace.path
-        self.workspace = Path(workspace).resolve() if workspace is not None else Path.cwd().resolve()
+        self.workspace = workspace
         if any(not isinstance(name, str) or not name for name in (data or {})):
             raise TypeError("data keys must be non-empty strings")
         self.data = {name: np.asarray(value) for name, value in (data or {}).items()}
@@ -317,3 +313,4 @@ class AgentContext:
     def __setstate__(self, state: dict[str, Any]) -> None:
         self.__dict__.update(state)
         self._lock = threading.RLock()
+

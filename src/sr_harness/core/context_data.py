@@ -1,13 +1,17 @@
 """Manifest-backed NumPy data stored in a workspace directory."""
+
 from __future__ import annotations
 
 import json
 import os
 from pathlib import Path
 import tempfile
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from ..runtime.workspace import Workspace
 
 
 class ContextManifestError(ValueError):
@@ -25,8 +29,9 @@ class _ContextDataReader:
     AXIS_SOURCE_FIELDS = {"values", "file", "size"}
     AXIS_FIELDS = {"description", *AXIS_SOURCE_FIELDS}
 
-    def __init__(self, directory: str | Path):
+    def __init__(self, directory: str | Path, *, workspace: Workspace | None = None):
         self.directory = Path(directory).resolve()
+        self.workspace = workspace
 
     def inspect(self) -> dict[str, Any]:
         """Validate the store and return diagnostics without raising.
@@ -37,7 +42,11 @@ class _ContextDataReader:
         errors: list[str] = []
         warnings: list[str] = []
         manifest = self._read_manifest(errors)
-        loaded = self._validate_manifest(manifest, errors, warnings) if manifest is not None else None
+        loaded = (
+            self._validate_manifest(manifest, errors, warnings)
+            if manifest is not None
+            else None
+        )
         report: dict[str, Any] = {
             "valid": not errors,
             "path": str(self.directory),
@@ -87,7 +96,10 @@ class _ContextDataReader:
         errors: list[str] = []
         warnings: list[str] = []
         manifest = self._read_manifest(errors)
-        loaded = self._validate_manifest(manifest, errors, warnings) if manifest is not None else None
+        loaded = (
+            self._validate_manifest(manifest, errors, warnings)
+            if manifest is not None else None
+        )
         if errors or loaded is None:
             raise ContextManifestError("Invalid context.data:\n- " + "\n- ".join(errors))
         return loaded
@@ -110,8 +122,9 @@ class _ContextDataReader:
             return result
 
         try:
-            with manifest_path.open(encoding="utf-8") as stream:
-                manifest = json.load(stream, object_pairs_hook=reject_duplicates)
+            opener = self.workspace.safe_open if self.workspace is not None else open
+            with opener(manifest_path, "r", encoding="utf-8") as f:
+                manifest = json.load(f, object_pairs_hook=reject_duplicates)
         except (ContextManifestError, json.JSONDecodeError, OSError) as exc:
             errors.append(f"cannot read {self.MANIFEST_NAME}: {exc}")
             return None
@@ -280,15 +293,12 @@ class _ContextDataReader:
                 continue
             if relation.ndim != 2 or relation.shape[1] not in {2, 3}:
                 errors.append(
-                    f"{location}: relation must have shape (E, 2) or (H, 3), "
-                    f"got {relation.shape}"
+                    f"{location}: relation must have shape (E, 2) or (H, 3), got {relation.shape}"
                 )
                 continue
             if relation.dtype.kind not in "iu":
                 errors.append(f"{location}: relation endpoints must use an integer dtype")
-            elif num_nodes is not None and (
-                np.any(relation < 0) or np.any(relation >= num_nodes)
-            ):
+            elif num_nodes is not None and (np.any(relation < 0) or np.any(relation >= num_nodes)):
                 errors.append(f"{location}: relation endpoints must be in [0, {num_nodes})")
         for variable, structure in variable_structures.items():
             location = f"variables.{variable}.structure"
@@ -318,9 +328,7 @@ class _ContextDataReader:
                 )
             if relation.dtype.kind not in "iu":
                 errors.append(f"{location}: relation endpoints must use an integer dtype")
-            elif num_nodes is not None and (
-                np.any(relation < 0) or np.any(relation >= num_nodes)
-            ):
+            elif num_nodes is not None and (np.any(relation < 0) or np.any(relation >= num_nodes)):
                 errors.append(f"{location}: relation endpoints must be in [0, {num_nodes})")
         actual_npy = {path.name for path in self.directory.glob("*.npy") if path.is_file()}
         untracked = sorted(actual_npy - referenced_files)
@@ -344,7 +352,9 @@ class _ContextDataReader:
         path = self.directory / filename
         if not path.is_file() or path.parent != self.directory:
             raise ValueError(f"missing array file: {filename}")
-        value = np.load(path, allow_pickle=False)
+        opener = self.workspace.safe_open if self.workspace is not None else open
+        with opener(path, "rb") as f:
+            value = np.load(f, allow_pickle=False)
         if not isinstance(value, np.ndarray):
             raise ValueError(f"{filename} does not contain one NPY array")
         if value.dtype.hasobject:
@@ -388,18 +398,37 @@ class _ContextDataReader:
             errors.append(f"{location} contains unsupported fields: {extra}")
 
 
-def load_context_data(directory: str | Path) -> dict[str, Any]:
-    """Validate and load one manifest-backed ``context.data`` directory."""
-    return _ContextDataReader(directory).load()
+def load_context_data(directory: str | Path, *, workspace: Workspace | None = None) -> dict[str, Any]:
+    """Validate and load one manifest-backed ``context.data`` directory.
+
+    Args:
+        directory: Directory containing ``manifest.json`` and array files.
+        workspace: Workspace enforcing safe reads, when available.
+
+    Returns:
+        An AgentContext-ready mapping containing arrays and metadata.
+    """
+    return _ContextDataReader(directory, workspace=workspace).load()
 
 
-def inspect_context_data(directory: str | Path) -> dict[str, Any]:
-    """Return validation diagnostics without raising for manifest errors."""
-    return _ContextDataReader(directory).inspect()
+def inspect_context_data(directory: str | Path, *, workspace: Workspace | None = None) -> dict[str, Any]:
+    """Return validation diagnostics without raising for manifest errors.
+
+    Args:
+        directory: Directory containing ``manifest.json`` and array files.
+        workspace: Workspace enforcing safe reads, when available.
+
+    Returns:
+        A serializable validation report.
+    """
+    return _ContextDataReader(directory, workspace=workspace).inspect()
 
 
 def update_context_data_descriptions(
-    directory: str | Path, descriptions: dict[str, str],
+    directory: str | Path,
+    descriptions: dict[str, str],
+    *,
+    workspace: Workspace | None = None,
 ) -> dict[str, Any]:
     """Update variable and axis descriptions in ``manifest.json``.
 
@@ -412,7 +441,8 @@ def update_context_data_descriptions(
     """
     directory = Path(directory).resolve()
     manifest_path = directory / _ContextDataReader.MANIFEST_NAME
-    loaded = load_context_data(directory)
+    loaded = load_context_data(directory, workspace=workspace)
+    opener = workspace.safe_open if workspace is not None else open
     if not isinstance(descriptions, dict) or any(
         not isinstance(name, str) or not isinstance(value, str)
         for name, value in descriptions.items()
@@ -421,19 +451,49 @@ def update_context_data_descriptions(
     unknown = set(descriptions) - set(loaded["data"])
     if unknown:
         raise ValueError(f"unknown context.data variables: {sorted(unknown)}")
-    with manifest_path.open(encoding="utf-8") as stream:
-        manifest = json.load(stream)
+    with opener(manifest_path, "r", encoding="utf-8") as f:
+        manifest = json.load(f)
     for section in ("variables", "axes"):
         for name, spec in manifest[section].items():
             if name in descriptions:
                 spec["description"] = descriptions[name].strip()
     serialized = json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
+    if workspace is not None:
+        relative_manifest = str(manifest_path.relative_to(workspace.path))
+        temporary_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=workspace.path,
+                prefix=".manifest-",
+                suffix=".json.tmp",
+                delete=False,
+            ) as stream:
+                temporary_path = Path(stream.name)
+                stream.write(serialized)
+                stream.flush()
+                os.fsync(stream.fileno())
+            workspace.replace_file(temporary_path, relative_manifest)
+            temporary_path = None
+        finally:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
+        updated = dict(loaded)
+        updated["variable_descriptions"] = loaded["variable_descriptions"] | {
+            name: value.strip() for name, value in descriptions.items()
+        }
+        return updated
     temporary_path = None
     try:
         try:
             with tempfile.NamedTemporaryFile(
-                mode="w", encoding="utf-8", dir=directory, prefix=".manifest-",
-                suffix=".json.tmp", delete=False,
+                mode="w",
+                encoding="utf-8",
+                dir=directory,
+                prefix=".manifest-",
+                suffix=".json.tmp",
+                delete=False,
             ) as stream:
                 temporary_path = Path(stream.name)
                 stream.write(serialized)

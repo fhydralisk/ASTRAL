@@ -1,6 +1,8 @@
 # Copyright (c) 2026-present, Yumeow. Licensed under the MIT License.
 """公式评估工具的单元测试。"""
 
+from sr_harness.core import AgentContext
+
 import numpy as np
 import pytest
 
@@ -13,7 +15,7 @@ class TestEvaluateTool:
 
     @staticmethod
     def make_tool(X, y):
-        return EvaluateTool(data=X | {"y": y}, target="y")
+        return EvaluateTool(context=AgentContext(data=X | {"y": y}, target="y"))
 
     def test_perfect_fit(self):
         """测试完美拟合情况：y = 2*x1 + 3。"""
@@ -41,7 +43,7 @@ class TestEvaluateTool:
 
     def test_trigonometric_formula(self):
         """测试三角函数公式：y = sin(x1)。"""
-        X = {"x1": np.array([0.0, np.pi/2, np.pi, 3*np.pi/2])}
+        X = {"x1": np.array([0.0, np.pi / 2, np.pi, 3 * np.pi / 2])}
         y = np.array([0.0, 1.0, 0.0, -1.0])
 
         tool = self.make_tool(X, y)
@@ -165,7 +167,9 @@ class TestEvaluateTool:
         assert "diagnostics" not in concise["data_split_results"]["train"]
         diagnostics = detailed["data_split_results"]["train"]["diagnostics"]
         assert set(diagnostics) == {
-            "error_profile", "worst_samples", "strongest_residual_correlations"
+            "error_profile",
+            "worst_samples",
+            "strongest_residual_correlations",
         }
         assert diagnostics["error_profile"]["max_absolute_error"] == 2.0
         assert len(diagnostics["worst_samples"]) == 4
@@ -182,20 +186,20 @@ class TestEvaluateTool:
     def test_transformed_target_is_included_once_in_residual_correlations(self):
         x = np.arange(1.0, 5.0)
         y = np.exp(x)
-        diagnostics = EvaluateTool(data={"x": x, "y": y}, target="y").execute(
+        diagnostics = EvaluateTool(context=AgentContext(data={"x": x, "y": y}, target="y")).execute(
             "0.5*x",
             y="log(y)",
             show_diagnostics=True,
         )["data_split_results"]["train"]["diagnostics"]
 
-        names = {
-            item["variable"] for item in diagnostics["strongest_residual_correlations"]
-        }
+        names = {item["variable"] for item in diagnostics["strongest_residual_correlations"]}
         assert names == {"x", "y", "log(y)"}
 
     def test_metadata_exists(self):
         """测试元数据存在。"""
-        tool = EvaluateTool(data={"x": np.array([1.0]), "y": np.array([1.0])}, target="y")
+        tool = EvaluateTool(
+            context=AgentContext(data={"x": np.array([1.0]), "y": np.array([1.0])}, target="y")
+        )
         assert tool.metadata is not None
         assert tool.metadata.name == "evaluate_formula"
 
@@ -219,7 +223,9 @@ class TestSubmitFormulaTool:
     """测试 SubmitFormulaTool 与 EvaluateTool 的接口一致性。"""
 
     def test_metadata_emphasizes_submit(self):
-        tool = SubmitFormulaTool(data={"x": np.array([1.0]), "y": np.array([1.0])}, target="y")
+        tool = SubmitFormulaTool(
+            context=AgentContext(data={"x": np.array([1.0]), "y": np.array([1.0])}, target="y")
+        )
 
         assert tool.metadata.name == "submit_formula"
         assert "submit" in tool.metadata.description.lower()
@@ -229,8 +235,12 @@ class TestSubmitFormulaTool:
         X = {"x1": np.array([1.0, 2.0, 3.0])}
         y = np.array([3.0, 5.0, 7.0])
 
-        submit_result = SubmitFormulaTool(data=X | {"y": y}, target="y").execute("2 * x1 + 1")
-        evaluate_result = EvaluateTool(data=X | {"y": y}, target="y").execute("2 * x1 + 1")
+        submit_result = SubmitFormulaTool(
+            context=AgentContext(data=X | {"y": y}, target="y")
+        ).execute("2 * x1 + 1")
+        evaluate_result = EvaluateTool(context=AgentContext(data=X | {"y": y}, target="y")).execute(
+            "2 * x1 + 1"
+        )
 
         assert submit_result == evaluate_result
 

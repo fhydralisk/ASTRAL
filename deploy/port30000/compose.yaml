@@ -4,9 +4,12 @@ services:
     build:
       context: ../..
       dockerfile: Dockerfile
+      network: host
       args:
         APP_UID: "1015"
         APP_GID: "1015"
+        HTTP_PROXY: ${SRH_BUILD_HTTP_PROXY:-}
+        HTTPS_PROXY: ${SRH_BUILD_HTTPS_PROXY:-}
     command:
       - run
       - --save-path

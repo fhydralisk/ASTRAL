@@ -1,4 +1,6 @@
 # Copyright (c) 2026-present, Yumeow. Licensed under the MIT License.
+from sr_harness.core import AgentContext
+
 """WorkspaceShellTool 的测试。
 
 重点覆盖：
@@ -10,8 +12,11 @@
 """
 
 import io
+import os
+import stat
 import tarfile
 import tempfile
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -150,9 +155,13 @@ class TestWorkspace:
         self.ws.set_locked("context.data/manifest.json", False)
 
         assert self.ws.resolve("context.data/manifest.json", access="write") == manifest
-        assert self.ws.resolve(
-            "context.data/manifest.json", access="remove",
-        ) == manifest
+        assert (
+            self.ws.resolve(
+                "context.data/manifest.json",
+                access="remove",
+            )
+            == manifest
+        )
         assert self.ws.is_locked("context.data") is True
         assert self.ws.is_locked("context.data/manifest.json") is False
 
@@ -166,6 +175,75 @@ class TestWorkspace:
         assert self.ws.resolve("results/new.txt", access="create") == directory / "new.txt"
         assert self.ws.resolve("results", access="remove") is None
 
+    def test_mutations_do_not_follow_workspace_symlinks(self):
+        target = self.ws.path / "target"
+        target.mkdir()
+        (self.ws.path / "alias").symlink_to(target, target_is_directory=True)
+
+        assert self.ws.resolve("alias/file.txt") == target / "file.txt"
+        assert self.ws.resolve("alias/file.txt", access="create") is None
+        assert self.ws.resolve("alias", access="write") is None
+        assert self.ws.resolve("alias", access="remove") == self.ws.path / "alias"
+
+    def test_descriptor_based_move_rejects_parent_replaced_after_policy_check(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        inside = self.ws.path / "inside"
+        outside = tmp_path / "outside"
+        inside.mkdir()
+        outside.mkdir()
+        (inside / "value.txt").write_text("inside")
+        sentinel = outside / "value.txt"
+        sentinel.write_text("outside")
+        original = self.ws._mutation_route
+        replaced = False
+
+        def replace_after_check(relative_path, *, access):
+            nonlocal replaced
+            result = original(relative_path, access=access)
+            if relative_path == "inside/value.txt" and not replaced:
+                inside.rename(self.ws.path / "inside-original")
+                inside.symlink_to(outside, target_is_directory=True)
+                replaced = True
+            return result
+
+        monkeypatch.setattr(self.ws, "_mutation_route", replace_after_check)
+
+        with pytest.raises((OSError, PermissionError)):
+            self.ws.move("inside/value.txt", "moved.txt")
+        assert sentinel.read_text() == "outside"
+        assert not (self.ws.path / "moved.txt").exists()
+
+    def test_descriptor_based_mutations_respect_locks(self):
+        protected = self.ws.path / "protected.txt"
+        protected.write_text("keep")
+        self.ws.set_locked("protected.txt", True)
+
+        with pytest.raises(PermissionError):
+            self.ws.open_for_write("protected.txt")
+        with pytest.raises(PermissionError):
+            self.ws.remove("protected.txt")
+        with pytest.raises(PermissionError):
+            self.ws.move("protected.txt", "moved.txt")
+        assert protected.read_text() == "keep"
+
+    def test_descriptor_based_mutations_reject_readonly_mounts(self, tmp_path):
+        source = tmp_path / "mounted"
+        source.mkdir()
+        (source / "value.txt").write_text("keep")
+        self.ws.mount(source)
+
+        with pytest.raises(PermissionError):
+            self.ws.open_for_write("mounted/value.txt")
+        with pytest.raises(PermissionError):
+            self.ws.remove("mounted/value.txt")
+        with pytest.raises(PermissionError):
+            self.ws.create_directory("mounted/new")
+        assert (source / "value.txt").read_text() == "keep"
+
+
 class TestWorkspaceShellTool:
     """测试 WorkspaceShellTool 命令执行。"""
 
@@ -177,7 +255,7 @@ class TestWorkspaceShellTool:
         (self.ws.path / "numbers.txt").write_text("5\n3\n8\n1\n4\n")
         (self.ws.path / "subdir").mkdir()
         (self.ws.path / "subdir" / "nested.txt").write_text("nested content")
-        self.tool = WorkspaceShellTool(workspace=self.ws)
+        self.tool = WorkspaceShellTool(context=AgentContext(workspace=self.ws))
 
     def teardown_method(self):
         self.workspace_directory.cleanup()
@@ -273,6 +351,16 @@ class TestWorkspaceShellTool:
         assert result.get("success") is False
         assert "Invalid path" in result.get("error", "")
 
+    def test_cat_rejects_external_symlink(self, tmp_path):
+        outside = tmp_path / "outside.txt"
+        outside.write_text("secret")
+        (self.ws.path / "leak.txt").symlink_to(outside)
+
+        result = self.tool.execute("cat leak.txt")
+
+        assert result.get("success") is False
+        assert "secret" not in result.get("stdout", "")
+
     def test_head_rejects_traversal(self):
         """head 路径逃逸被拒绝。"""
         result = self.tool.execute("head ../../etc/passwd")
@@ -299,6 +387,17 @@ class TestWorkspaceShellTool:
         result = self.tool.execute("ls subdir")
         assert result.get("success") is True
         assert "nested.txt" in result["stdout"]
+
+    def test_ls_does_not_follow_child_symlinks(self, tmp_path):
+        outside = tmp_path / "outside.txt"
+        outside.write_text("sensitive metadata")
+        (self.ws.path / "external-link").symlink_to(outside)
+
+        result = self.tool.execute("ls -l .")
+
+        assert result.get("success") is True, result
+        line = next(line for line in result["stdout"].splitlines() if "external-link@" in line)
+        assert line.startswith("l")
 
     def test_ls_nonexistent(self):
         """ls 不存在的路径报错。"""
@@ -517,6 +616,81 @@ class TestWorkspaceShellTool:
             self.ws.path / "data.csv"
         ).read_text()
 
+    def test_cp_recursive_uses_safe_copy_function(self):
+        source = self.ws.path / "source"
+        source.mkdir()
+        (source / "value.txt").write_text("value")
+
+        result = self.tool.execute("cp -r source copied")
+
+        assert result.get("success") is True, result
+        assert (self.ws.path / "copied" / "value.txt").read_text() == "value"
+
+    def test_cp_rejects_same_file_and_recursive_self_copy(self):
+        original = (self.ws.path / "data.csv").read_text()
+
+        same_file = self.tool.execute("cp data.csv data.csv")
+        recursive_self = self.tool.execute("cp -r subdir subdir")
+
+        assert same_file.get("success") is False
+        assert recursive_self.get("success") is False
+        assert (self.ws.path / "data.csv").read_text() == original
+        assert not (self.ws.path / "subdir" / "subdir").exists()
+
+    def test_cp_recursive_rejects_source_symlink(self, tmp_path):
+        outside = tmp_path / "outside.txt"
+        outside.write_text("secret")
+        source = self.ws.path / "source"
+        source.mkdir()
+        (source / "leak.txt").symlink_to(outside)
+
+        result = self.tool.execute("cp -r source copied")
+
+        assert result.get("success") is False
+        assert "symbolic links" in result.get("error", "")
+
+    def test_cp_recursive_rejects_destination_symlink(self, tmp_path):
+        outside = tmp_path / "outside.txt"
+        outside.write_text("unchanged")
+        source = self.ws.path / "source"
+        source.mkdir()
+        (source / "value.txt").write_text("replacement")
+        destination = self.ws.path / "destination"
+        destination.mkdir()
+        copied_source = destination / "source"
+        copied_source.mkdir()
+        (copied_source / "value.txt").symlink_to(outside)
+
+        result = self.tool.execute("cp -rf source destination")
+
+        assert result.get("success") is False
+        assert outside.read_text() == "unchanged"
+
+    def test_mutating_commands_do_not_follow_internal_symlink_paths(self):
+        target = self.ws.path / "target"
+        target.mkdir()
+        (target / "value.txt").write_text("keep")
+        (self.ws.path / "alias").symlink_to(target, target_is_directory=True)
+
+        assert self.tool.execute("mkdir alias/new").get("success") is False
+        assert self.tool.execute("gzip alias/value.txt").get("success") is False
+        assert self.tool.execute("rm alias").get("success") is True
+        assert (target / "value.txt").read_text() == "keep"
+        assert not (target / "new").exists()
+        assert not (self.ws.path / "alias").exists()
+
+    def test_mv_moves_symlink_without_moving_its_target(self):
+        target = self.ws.path / "target.txt"
+        target.write_text("keep")
+        alias = self.ws.path / "alias.txt"
+        alias.symlink_to(target)
+
+        result = self.tool.execute("mv alias.txt moved.txt")
+
+        assert result.get("success") is True, result
+        assert target.read_text() == "keep"
+        assert (self.ws.path / "moved.txt").is_symlink()
+
     def test_mv_file(self):
         """mv 移动/重命名文件。"""
         (self.ws.path / "temp.txt").write_text("temp content")
@@ -535,11 +709,34 @@ class TestWorkspaceShellTool:
         assert not (self.ws.path / "source.txt").exists()
         assert (self.ws.path / "destination.txt").read_text() == "source"
 
+    def test_mv_rejects_same_file_and_recursive_self_move(self):
+        same_file = self.tool.execute("mv data.csv data.csv")
+        recursive_self = self.tool.execute("mv subdir subdir")
+
+        assert same_file.get("success") is False
+        assert recursive_self.get("success") is False
+        assert (self.ws.path / "data.csv").exists()
+        assert (self.ws.path / "subdir" / "nested.txt").exists()
+
     def test_cp_rejects_traversal(self):
         """cp 目标路径逃逸被拒绝。"""
         result = self.tool.execute("cp data.csv ../../escaped.csv")
         assert result.get("success") is False
         assert "Invalid" in result.get("error", "")
+
+    def test_readonly_mount_can_be_read_but_not_modified(self, tmp_path):
+        mounted = tmp_path / "mounted"
+        mounted.mkdir()
+        (mounted / "raw.txt").write_text("raw")
+        self.ws.mount(mounted)
+
+        assert self.tool.execute("cat mounted/raw.txt").get("success") is True
+        assert self.tool.execute("cp mounted/raw.txt local.txt").get("success") is True
+        assert self.tool.execute("cp data.csv mounted/new.csv").get("success") is False
+        assert self.tool.execute("rm mounted/raw.txt").get("success") is False
+        assert self.tool.execute("gzip -k mounted/raw.txt").get("success") is False
+        assert (mounted / "raw.txt").read_text() == "raw"
+        assert not (mounted / "new.csv").exists()
 
     # ─── 压缩/解压 ───
 
@@ -556,6 +753,29 @@ class TestWorkspaceShellTool:
         assert (self.ws.path / "compress_me.txt").exists()
         assert (self.ws.path / "compress_me.txt").read_text() == "compress this content"
 
+    def test_gzip_removes_input_symlink_without_removing_its_target(self):
+        target = self.ws.path / "target.txt"
+        target.write_text("keep")
+        alias = self.ws.path / "alias.txt"
+        alias.symlink_to(target)
+
+        result = self.tool.execute("gzip alias.txt")
+
+        assert result.get("success") is True, result
+        assert target.read_text() == "keep"
+        assert not alias.exists()
+        assert (self.ws.path / "alias.txt.gz").exists()
+
+    def test_gzip_rejects_output_hardlinked_to_input(self):
+        source = self.ws.path / "same.txt"
+        source.write_text("keep")
+        os.link(source, self.ws.path / "same.txt.gz")
+
+        result = self.tool.execute("gzip -f same.txt")
+
+        assert result.get("success") is False
+        assert source.read_text() == "keep"
+
     def test_tar_accepts_grouped_flags_and_destination(self):
         """tar -xzf 和 -C 由声明式参数解析器处理。"""
         source = self.ws.path / "source.txt"
@@ -570,6 +790,29 @@ class TestWorkspaceShellTool:
             "archive content"
         )
 
+    def test_unzip_rejects_path_traversal(self):
+        archive = self.ws.path / "unsafe.zip"
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("../escaped.txt", "unsafe")
+
+        result = self.tool.execute("unzip unsafe.zip")
+
+        assert result.get("success") is False
+        assert not (self.ws.path.parent / "escaped.txt").exists()
+
+    def test_unzip_rejects_symlinks(self):
+        archive = self.ws.path / "links.zip"
+        member = zipfile.ZipInfo("link.txt")
+        member.create_system = 3
+        member.external_attr = (stat.S_IFLNK | 0o777) << 16
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr(member, "target.txt")
+
+        result = self.tool.execute("unzip links.zip")
+
+        assert result.get("success") is False
+        assert "Symbolic links" in result.get("error", "")
+
     def test_tar_rejects_path_traversal(self):
         """data extraction filter 阻止归档成员逃出目标目录。"""
         archive = self.ws.path / "unsafe.tar"
@@ -582,6 +825,19 @@ class TestWorkspaceShellTool:
         result = self.tool.execute("tar -xf unsafe.tar")
         assert result.get("success") is False
         assert not (self.ws.path.parent / "escaped.txt").exists()
+
+    def test_tar_rejects_links(self):
+        archive = self.ws.path / "links.tar"
+        with tarfile.open(archive, "w") as tf:
+            member = tarfile.TarInfo("link.txt")
+            member.type = tarfile.SYMTYPE
+            member.linkname = "target.txt"
+            tf.addfile(member)
+
+        result = self.tool.execute("tar -xf links.tar")
+
+        assert result.get("success") is False
+        assert "Links and special files" in result.get("error", "")
 
     # ─── format_result_dict ───
 

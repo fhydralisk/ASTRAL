@@ -69,7 +69,7 @@ class RationalFitTool(BaseTool):
                 exceptions.append(f"Failed to compute '{expression}': {exc}")
         if not symbols:
             raise ValueError("No valid input variables available for fitting.")
-        helper = PolynomialFitTool(data=data, target=self.context.target)
+        helper = PolynomialFitTool(context=self.context)
         allowed = helper._get_allowed_interactions(symbols, include_interactions, None, None)
         finite_target = np.isfinite(target)
         finite_indices = np.flatnonzero(finite_target)

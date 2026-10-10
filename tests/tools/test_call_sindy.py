@@ -3,13 +3,15 @@
 
 from __future__ import annotations
 
+from sr_harness.core import AgentContext
+
 import numpy as np
 
 from sr_harness.tools.call_sindy import SINDyTool
 
 
 def make_tool(x: dict[str, np.ndarray], y: np.ndarray) -> SINDyTool:
-    return SINDyTool(data=x | {"y": y}, target="y")
+    return SINDyTool(context=AgentContext(data=x | {"y": y}, target="y"))
 
 
 def train_result(result):
@@ -154,18 +156,31 @@ class TestSINDyTool:
         assert any("SINDy fitting failed" in item for item in result["exceptions"])
 
     def test_format_result_uses_method_from_config(self):
-        rendered = SINDyTool.format_result_dict({
-            "formula": "x",
-            "target_expression": "y",
-            "data_split_results": {
-                "train": {
-                    "metrics": {"mse": 0.0, "rmse": 0.0, "mae": 0.0, "r2": 1.0, "complexity": 1},
+        rendered = SINDyTool.format_result_dict(
+            {
+                "formula": "x",
+                "target_expression": "y",
+                "data_split_results": {
+                    "train": {
+                        "metrics": {
+                            "mse": 0.0,
+                            "rmse": 0.0,
+                            "mae": 0.0,
+                            "r2": 1.0,
+                            "complexity": 1,
+                        },
+                    },
                 },
-            },
-            "is_candidate": True,
-            "config": {"method": "SINDy", "poly_degree": 2, "include_trig": False, "threshold": 0.1},
-            "exceptions": [],
-        })
+                "is_candidate": True,
+                "config": {
+                    "method": "SINDy",
+                    "poly_degree": 2,
+                    "include_trig": False,
+                    "threshold": 0.1,
+                },
+                "exceptions": [],
+            }
+        )
 
         assert "polynomial degree up to 2" in rendered
         assert "coefficient sparsity threshold=0.1" in rendered
@@ -189,7 +204,7 @@ class TestSINDyTool:
         """LLM sometimes passes y with extra quotes like '"omega"'."""
         x = np.linspace(-2.0, 2.0, 20)
         omega = 2 * x + 1
-        tool = SINDyTool(data={"x": x, "omega": omega}, target="omega")
+        tool = SINDyTool(context=AgentContext(data={"x": x, "omega": omega}, target="omega"))
 
         def fake_run_sindy(self, X, y_fit, x_names, poly_degree, include_trig, threshold):
             return "2*x1 + 1"

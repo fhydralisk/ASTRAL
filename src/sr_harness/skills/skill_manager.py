@@ -6,9 +6,12 @@ import re
 from dataclasses import dataclass
 from logging import getLogger
 from pathlib import Path
-from typing import Any, Iterable
+from typing import IO, TYPE_CHECKING, Any, Callable, Iterable
 
 import yaml
+
+if TYPE_CHECKING:
+    from ..runtime.workspace import Workspace
 
 _logger = getLogger(f"sr_harness.{__name__}")
 
@@ -29,6 +32,7 @@ class SkillManager:
         self,
         built_in_directory: str | Path | None = None,
         custom_directory: str | Path | None = None,
+        workspace: Workspace | None = None,
     ):
         package_directory = Path(__file__).parent
         runtime_directory = Path(tempfile.mkdtemp(prefix="sr_agent_runtime_skills_"))
@@ -41,6 +45,7 @@ class SkillManager:
                 else runtime_directory / "custom"
             ),
         }
+        self.workspace = workspace
 
     def register_tool_docs(self, tool_cls_list: Iterable[type]) -> None:
         """Materialize documentation from enabled tools as read-only runtime skills.
@@ -73,17 +78,20 @@ class SkillManager:
             skill_dir.mkdir(parents=True, exist_ok=False)
             (skill_dir / "SKILL.md").write_text(content, encoding="utf-8")
 
-    def discover_tool_skills(self) -> list[Skill]:
-        """Return all registered skills that contain a ``tool.py`` file.
+    def load_tool_skills(self) -> list[tuple[Skill, str]]:
+        """Return registered tool skills together with their Python source.
 
         Returns:
-            list[Skill]: The operation result.
+            Pairs containing the skill metadata and ``tool.py`` source.
         """
-        return [
-            skill
-            for skill in self.load_skills().values()
-            if (skill.skill_directory / "tool.py").is_file()
-        ]
+        loaded = []
+        for skill in self.load_skills().values():
+            path = skill.skill_directory / "tool.py"
+            if path.is_file():
+                opener = self._skill_opener(skill)
+                with opener(path, "r", encoding="utf-8") as f:
+                    loaded.append((skill, f.read()))
+        return loaded
 
     def load_skills(self) -> dict[str, Skill]:
         """Load skills.
@@ -94,7 +102,14 @@ class SkillManager:
         skills: dict[str, Skill] = {}
         for scope, root in self.skill_directories.items():
             for skill_path in sorted(root.glob("*/SKILL.md")):
-                metadata, _ = self._load_skill_file(skill_path)
+                opener = (
+                    self.workspace.safe_open
+                    if scope == "custom" and self.workspace is not None
+                    else open
+                )
+                with opener(skill_path, "r", encoding="utf-8") as f:
+                    text = f.read()
+                metadata, _ = self._parse_skill_text(text, skill_path)
                 name = str(metadata.get("name", "")).strip()
                 description = str(metadata.get("description", "")).strip()
                 if not name:
@@ -111,7 +126,7 @@ class SkillManager:
                 if name in skills:
                     raise ValueError(f"Skill {name!r} is provided by more than one skill directory.")
                 readonly = scope != "custom" or self._as_bool(metadata.get("readonly", False))
-                skills[name] = Skill(name, description, readonly, skill_path.parent.resolve())
+                skills[name] = Skill(name, description, readonly, skill_path.parent.absolute())
         return skills
 
     def get_skill(self, name: str) -> Skill:
@@ -165,7 +180,8 @@ class SkillManager:
         path = self._resolve_skill_file(skill, file_path)
         if not path.is_file():
             raise ValueError(f"Skill file not found: {file_path}")
-        return path.read_text(encoding="utf-8")
+        with self._skill_opener(skill)(path, "r", encoding="utf-8") as f:
+            return f.read()
 
     def get_skill_tree(self, name: str) -> list[str]:
         """Return skill tree.
@@ -208,14 +224,25 @@ class SkillManager:
         if skill is None:
             if file_path != "SKILL.md":
                 raise ValueError("A new skill must be created by writing SKILL.md first.")
-            skill_dir = (self.skill_directories["custom"] / name).resolve()
+            skill_dir = self.skill_directories["custom"] / name
         else:
             if skill.readonly:
                 raise ValueError(f"Skill '{name}' is read-only and cannot be overwritten.")
             skill_dir = skill.skill_directory
 
         target = self._resolve_path(skill_dir, file_path)
-        if target.exists() and not force:
+        workspace_relative = None
+        if self.workspace is not None:
+            try:
+                workspace_relative = target.relative_to(self.workspace.path)
+            except ValueError:
+                pass
+        if workspace_relative is not None:
+            resolved = self.workspace.resolve(str(workspace_relative))
+            target_exists = resolved is not None and resolved.exists()
+        else:
+            target_exists = target.exists()
+        if target_exists and not force:
             raise ValueError(f"Skill file '{name}/{file_path}' already exists. Use force=True to replace it.")
         if file_path == "SKILL.md":
             metadata, _ = self._parse_skill_text(content, target)
@@ -226,9 +253,28 @@ class SkillManager:
             if not description:
                 raise ValueError("SKILL.md frontmatter must contain a non-empty description.")
 
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
+        if workspace_relative is not None:
+            self.workspace.create_directory(
+                str(workspace_relative.parent),
+                parents=True,
+                exist_ok=True,
+            )
+            with self.workspace.open_for_write(
+                str(workspace_relative),
+                "w" if force else "x",
+                encoding="utf-8",
+            ) as stream:
+                stream.write(content)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
         return self.get_skill(name)
+
+    def _skill_opener(self, skill: Skill) -> Callable[..., IO]:
+        custom_directory = self.skill_directories["custom"].absolute()
+        if self.workspace is not None and skill.skill_directory.is_relative_to(custom_directory):
+            return self.workspace.safe_open
+        return open
 
     @staticmethod
     def _validate_name(name: str) -> str:
@@ -244,20 +290,9 @@ class SkillManager:
     @staticmethod
     def _resolve_path(skill_dir: Path, file_path: str) -> Path:
         relative = Path(file_path or "SKILL.md")
-        if relative.is_absolute():
-            raise ValueError("file_path must be relative to the skill directory.")
-        target = (skill_dir / relative).resolve()
-        try:
-            target.relative_to(skill_dir.resolve())
-        except ValueError as exc:
-            raise ValueError("file_path must stay inside the skill directory.") from exc
-        return target
-
-    @classmethod
-    def _load_skill_file(cls, path: Path) -> tuple[dict[str, Any], str]:
-        text = path.read_text(encoding="utf-8")
-        metadata, normalized = cls._parse_skill_text(text, path)
-        return metadata, normalized
+        if relative.is_absolute() or ".." in relative.parts:
+            raise ValueError("file_path must be relative and stay inside the skill directory.")
+        return skill_dir / relative
 
     @staticmethod
     def _parse_skill_text(text: str, path: Path) -> tuple[dict[str, Any], str]:

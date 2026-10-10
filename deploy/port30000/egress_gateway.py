@@ -92,6 +92,8 @@ async def open_upstream(value: str):
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise ValueError("upstream proxy must be an HTTP or HTTPS URL")
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    if port not in ALLOWED_TARGET_PORTS:
+        raise PermissionError("upstream proxy port is not allowed")
     reader, writer = await open_public(parsed.hostname, port, tls=parsed.scheme == "https")
     authorization = ""
     if parsed.username is not None:

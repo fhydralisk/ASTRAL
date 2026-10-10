@@ -4,11 +4,13 @@
 提供一个隔离的工作区目录，允许 Agent 通过受限的 shell 风格命令操作
 文件。
 """
+
 from __future__ import annotations
 
 import argparse
 import gzip
 import logging
+import os
 import re
 import shlex
 import shutil
@@ -26,9 +28,8 @@ _logger = logging.getLogger(f"sr_harness.{__name__}")
 
 # WorkspaceShellTool 支持的命令白名单
 ALLOWED_COMMANDS = {
-    "ls", "cat", "head", "tail", "wc",
-    "grep", "sort", "cut",
-    "cp", "mv", "rm", "mkdir",
+    "ls", "cat", "head", "tail", "wc", "grep",
+    "sort", "cut", "cp", "mv", "rm", "mkdir",
     "gunzip", "gzip", "unzip", "tar",
 }
 
@@ -70,6 +71,7 @@ class CommandArgumentParser(argparse.ArgumentParser):
 @BaseTool.register("workspace_shell")
 class WorkspaceShellTool(BaseTool):
     """Implementation of the workspace shell tool."""
+
     metadata = ToolMetadata(name="workspace_shell")
 
     DEFAULT_OUTPUT_LIMIT_BYTES = 64 * 1024
@@ -162,8 +164,7 @@ class WorkspaceShellTool(BaseTool):
                 Examples: "ls", "cat data.csv | head -5", "gunzip data.csv.gz".
             output_limit_bytes: Maximum stdout size returned by each command segment.
         """
-        workspace: Workspace = getattr(self.context.args, "workspace_manager", None)
-        if workspace is None:
+        if self.context.workspace is None:
             return self._error("Workspace not initialized.")
         output_limit_bytes = self._bounded_output_limit(output_limit_bytes)
 
@@ -175,7 +176,7 @@ class WorkspaceShellTool(BaseTool):
         stdin_text = ""
         for tokens in pipeline:
             try:
-                result = self._execute_tokens(tokens, workspace, stdin_text)
+                result = self._execute_tokens(tokens, stdin_text)
                 if not result.get("success", False):
                     return result
                 stdin_text = self._limit_output(result.get("stdout", ""), output_limit_bytes)
@@ -183,7 +184,8 @@ class WorkspaceShellTool(BaseTool):
                 rendered = shlex.join(tokens)
                 _logger.error(f"Error executing command segment '{rendered}': {log_exception(e)}")
                 return self._error(
-                    f"Error executing command segment '{rendered}', ask human for help: {e}"
+                    f"Error executing command segment '{rendered}', ask human for help: "
+                    f"{self._safe_exception_text(e)}"
                 )
         return self._ok(stdin_text)
 
@@ -206,26 +208,26 @@ class WorkspaceShellTool(BaseTool):
         if result.get("stderr"):
             parts.append(f"Command stderr:\n{result['stderr']}")
         return (
-            "\n".join(parts)
-            if parts
-            else "Command completed successfully and produced no output."
+            "\n".join(parts) if parts else "Command completed successfully and produced no output."
         )
 
-    def execute_single(self, command: str, workspace: Workspace, stdin_text: str) -> Dict[str, Any]:
+    def execute_single(self, command: str, stdin_text: str = "") -> Dict[str, Any]:
         """Execute one command segment after pipeline parsing.
 
         Args:
             command: Parsed command and arguments.
-            workspace: Active restricted workspace.
             stdin_text: Text received from the previous pipeline segment.
 
         Returns:
-            Structured command output and status."""
+            Structured command output and status.
+        """
+        if self.context.workspace is None:
+            return self._error("Workspace not initialized.")
         try:
             parts = shlex.split(command)
         except ValueError as e:
             return self._error(f"Command parse error: {e}")
-        return self._execute_tokens(parts, workspace, stdin_text)
+        return self._execute_tokens(parts, stdin_text)
 
     @staticmethod
     def _parse_pipeline(command: str) -> list[list[str]]:
@@ -259,9 +261,7 @@ class WorkspaceShellTool(BaseTool):
             raise CommandParseError(message)
         return pipeline
 
-    def _execute_tokens(
-        self, parts: list[str], workspace: Workspace, stdin_text: str
-    ) -> Dict[str, Any]:
+    def _execute_tokens(self, parts: list[str], stdin_text: str) -> Dict[str, Any]:
         if not parts:
             return self._error("Empty command.")
 
@@ -278,7 +278,7 @@ class WorkspaceShellTool(BaseTool):
         if handler is None:
             return self._error(f"Command '{cmd_name}' is not implemented.")
         try:
-            return handler(args, workspace, stdin_text)
+            return handler(args, stdin_text)
         except CommandParseError as exc:
             return self._error(str(exc))
 
@@ -317,14 +317,76 @@ class WorkspaceShellTool(BaseTool):
         except argparse.ArgumentError as exc:
             raise CommandParseError(f"{command}: {exc}") from exc
 
-    @staticmethod
-    def _read_text(path: Path) -> str:
+    def _read_text(self, path: Path) -> str:
         if not path.is_file():
             raise CommandParseError(f"Not a regular file: {path.name}")
         try:
-            return path.read_text(encoding="utf-8", errors="replace")
+            with self._workspace.safe_open(
+                path, "r", encoding="utf-8", errors="replace"
+            ) as f:
+                return f.read()
         except OSError as exc:
-            raise CommandParseError(f"Cannot read file: {exc}") from exc
+            raise CommandParseError(
+                f"Cannot read file: {self._safe_exception_text(exc)}"
+            ) from exc
+
+    @property
+    def _workspace(self) -> Workspace:
+        workspace = self.context.workspace
+        if workspace is None:
+            raise RuntimeError("Workspace not initialized.")
+        return workspace
+
+    def _safe_exception_text(self, error: BaseException) -> str:
+        """Remove host workspace and mount locations from a user-visible error."""
+        message = str(error)
+        workspace = self.context.workspace
+        if workspace is None:
+            return message
+        replacements = [
+            (workspace.path, "."),
+            *(
+                (source, os.fspath(logical.relative_to(workspace.path)))
+                for logical, source in workspace.mount_map.items()
+            ),
+        ]
+        for host_path, visible_path in sorted(
+            replacements,
+            key=lambda pair: len(os.fspath(pair[0])),
+            reverse=True,
+        ):
+            message = message.replace(os.fspath(host_path), visible_path)
+        return message
+
+    def _copy_file(self, source: str | os.PathLike, destination: str) -> str:
+        """Copy one regular file while enforcing safe source and destination access."""
+        ws = self._workspace
+        with ws.safe_open(source, "rb") as input_stream:
+            with ws.open_for_write(destination, "wb") as output_stream:
+                shutil.copyfileobj(input_stream, output_stream)
+        return os.fspath(destination)
+
+    @staticmethod
+    def _reject_tree_symlinks(directory: str, names: list[str]) -> set[str]:
+        """Reject recursive copies containing symbolic links instead of following them."""
+        symbolic_links = [name for name in names if (Path(directory) / name).is_symlink()]
+        if symbolic_links:
+            raise ValueError(
+                "recursive copies do not follow symbolic links: "
+                + ", ".join(symbolic_links)
+            )
+        return set()
+
+    @staticmethod
+    def _find_tree_symlink(root: Path) -> Path | None:
+        """Return the first symbolic link below a directory without following links."""
+        for directory, directories, filenames in os.walk(root, followlinks=False):
+            parent = Path(directory)
+            for name in (*directories, *filenames):
+                candidate = parent / name
+                if candidate.is_symlink():
+                    return candidate
+        return None
 
     @staticmethod
     def _nonnegative_int(value: str) -> int:
@@ -336,7 +398,8 @@ class WorkspaceShellTool(BaseTool):
             raise argparse.ArgumentTypeError("must be non-negative")
         return parsed
 
-    def _cmd_ls(self, args: list, ws: Workspace, stdin: str) -> Dict[str, Any]:
+    def _cmd_ls(self, args: list, stdin: str) -> Dict[str, Any]:
+        ws = self._workspace
         def configure(parser):
             parser.add_argument("-a", "--all", action="store_true")
             parser.add_argument("-l", action="store_true", dest="long")
@@ -360,13 +423,13 @@ class WorkspaceShellTool(BaseTool):
                     key=lambda entry: entry.name,
                 )
                 names = [
-                    entry.name + ("/" if entry.is_dir() else "") for entry in entries
+                    entry.name + ("@" if entry.is_symlink() else "/" if entry.is_dir() else "")
+                    for entry in entries
                 ]
                 if options.long:
                     rendered = []
-                    for name in names:
-                        entry = path / name.rstrip("/")
-                        info = entry.stat()
+                    for name, entry in zip(names, entries):
+                        info = entry.lstat()
                         modified = datetime.fromtimestamp(info.st_mtime).strftime("%Y-%m-%d %H:%M")
                         rendered.append(
                             f"{stat.filemode(info.st_mode)} {info.st_size:>10} {modified} {name}"
@@ -389,7 +452,8 @@ class WorkspaceShellTool(BaseTool):
                     sections.append(path.name)
         return self._ok("\n\n".join(sections))
 
-    def _cmd_cat(self, args: list, ws: Workspace, stdin: str) -> Dict[str, Any]:
+    def _cmd_cat(self, args: list, stdin: str) -> Dict[str, Any]:
+        ws = self._workspace
         def configure(parser):
             parser.add_argument("-n", "--number", action="store_true")
             parser.add_argument("files", nargs="*")
@@ -409,9 +473,9 @@ class WorkspaceShellTool(BaseTool):
             if not path.exists():
                 return self._error(f"No such file: {arg}")
             try:
-                parts.append(path.read_text(encoding="utf-8", errors="replace"))
+                parts.append(self._read_text(path))
             except Exception as e:
-                return self._error(f"Cannot read file: {e}")
+                return self._error(f"Cannot read file: {self._safe_exception_text(e)}")
         text = "".join(parts)
         if options.number:
             text = "\n".join(
@@ -419,7 +483,8 @@ class WorkspaceShellTool(BaseTool):
             )
         return self._ok(text)
 
-    def _cmd_head(self, args: list, ws: Workspace, stdin: str) -> Dict[str, Any]:
+    def _cmd_head(self, args: list, stdin: str) -> Dict[str, Any]:
+        ws = self._workspace
         normalized = [
             part
             for arg in args
@@ -439,13 +504,14 @@ class WorkspaceShellTool(BaseTool):
                 return self._error(f"Invalid path: {options.files[0]}")
             if not path.exists():
                 return self._error(f"No such file: {options.files[0]}")
-            text = path.read_text(encoding="utf-8", errors="replace")
+            text = self._read_text(path)
         else:
             text = stdin
         lines = text.splitlines()[:options.lines]
         return self._ok("\n".join(lines))
 
-    def _cmd_tail(self, args: list, ws: Workspace, stdin: str) -> Dict[str, Any]:
+    def _cmd_tail(self, args: list, stdin: str) -> Dict[str, Any]:
+        ws = self._workspace
         normalized = [
             part
             for arg in args
@@ -465,13 +531,14 @@ class WorkspaceShellTool(BaseTool):
                 return self._error(f"Invalid path: {options.files[0]}")
             if not path.exists():
                 return self._error(f"No such file: {options.files[0]}")
-            text = path.read_text(encoding="utf-8", errors="replace")
+            text = self._read_text(path)
         else:
             text = stdin
         lines = text.splitlines()[-options.lines:] if options.lines else []
         return self._ok("\n".join(lines))
 
-    def _cmd_wc(self, args: list, ws: Workspace, stdin: str) -> Dict[str, Any]:
+    def _cmd_wc(self, args: list, stdin: str) -> Dict[str, Any]:
+        ws = self._workspace
         def configure(parser):
             parser.add_argument("-l", "--lines", action="store_true")
             parser.add_argument("-w", "--words", action="store_true")
@@ -501,9 +568,7 @@ class WorkspaceShellTool(BaseTool):
                 len(text.encode("utf-8")),
                 len(text),
             ]
-            return [
-                value for value, enabled in zip(values, enabled_counts) if enabled
-            ]
+            return [value for value, enabled in zip(values, enabled_counts) if enabled]
 
         output = [
             " ".join(map(str, counts(text))) + (f" {name}" if name else "")
@@ -514,7 +579,8 @@ class WorkspaceShellTool(BaseTool):
             output.append(" ".join(map(str, totals)) + " total")
         return self._ok("\n".join(output))
 
-    def _cmd_grep(self, args: list, ws: Workspace, stdin: str) -> Dict[str, Any]:
+    def _cmd_grep(self, args: list, stdin: str) -> Dict[str, Any]:
+        ws = self._workspace
         def configure(parser):
             parser.add_argument("-i", "--ignore-case", action="store_true")
             parser.add_argument("-v", "--invert-match", action="store_true")
@@ -533,7 +599,7 @@ class WorkspaceShellTool(BaseTool):
                 return self._error(f"Invalid path: {options.files[0]}")
             if not path.exists():
                 return self._error(f"No such file: {options.files[0]}")
-            text = path.read_text(encoding="utf-8", errors="replace")
+            text = self._read_text(path)
         else:
             text = stdin
         pattern = options.pattern.casefold() if options.ignore_case else options.pattern
@@ -548,7 +614,8 @@ class WorkspaceShellTool(BaseTool):
             )
         return self._ok(str(len(matched)) if options.count else "\n".join(matched))
 
-    def _cmd_sort(self, args: list, ws: Workspace, stdin: str) -> Dict[str, Any]:
+    def _cmd_sort(self, args: list, stdin: str) -> Dict[str, Any]:
+        ws = self._workspace
         def configure(parser):
             parser.add_argument("-r", "--reverse", action="store_true")
             parser.add_argument("-n", "--numeric-sort", action="store_true")
@@ -564,7 +631,7 @@ class WorkspaceShellTool(BaseTool):
                 return self._error(f"Invalid path: {options.files[0]}")
             if not path.exists():
                 return self._error(f"No such file: {options.files[0]}")
-            text = path.read_text(encoding="utf-8", errors="replace")
+            text = self._read_text(path)
         else:
             text = stdin
         lines = text.splitlines()
@@ -579,7 +646,8 @@ class WorkspaceShellTool(BaseTool):
             lines.sort(reverse=options.reverse)
         return self._ok("\n".join(lines))
 
-    def _cmd_cut(self, args: list, ws: Workspace, stdin: str) -> Dict[str, Any]:
+    def _cmd_cut(self, args: list, stdin: str) -> Dict[str, Any]:
+        ws = self._workspace
         def configure(parser):
             parser.add_argument("-d", "--delimiter", default="\t")
             parser.add_argument("-f", "--fields", required=True)
@@ -596,7 +664,7 @@ class WorkspaceShellTool(BaseTool):
                 return self._error(f"Invalid path: {options.files[0]}")
             if not path.exists():
                 return self._error(f"No such file: {options.files[0]}")
-            text = path.read_text(encoding="utf-8", errors="replace")
+            text = self._read_text(path)
         else:
             text = stdin
         # 解析字段索引（1-based）
@@ -613,7 +681,8 @@ class WorkspaceShellTool(BaseTool):
             output_lines.append(options.delimiter.join(selected))
         return self._ok("\n".join(output_lines))
 
-    def _cmd_cp(self, args: list, ws: Workspace, stdin: str) -> Dict[str, Any]:
+    def _cmd_cp(self, args: list, stdin: str) -> Dict[str, Any]:
+        ws = self._workspace
         def configure(parser):
             parser.add_argument("-r", "-R", "--recursive", action="store_true")
             parser.add_argument("-f", "--force", action="store_true")
@@ -643,16 +712,46 @@ class WorkspaceShellTool(BaseTool):
         )
         if dst_path is None:
             return self._error(f"Invalid destination path: {destination}")
+        if dst_path.exists() and os.path.samefile(src_path, dst_path):
+            return self._error("cp: source and destination identify the same file")
+        if src_path.is_dir():
+            try:
+                dst_path.relative_to(src_path)
+            except ValueError:
+                pass
+            else:
+                return self._error("cp: cannot copy a directory into itself")
         try:
             if src_path.is_dir():
-                shutil.copytree(src_path, dst_path, dirs_exist_ok=options.force)
+                if dst_path.exists() and not options.force:
+                    return self._error(f"cp: destination already exists: {destination}")
+                ws.create_directory(destination_name, parents=True, exist_ok=options.force)
+                for directory, directories, filenames in os.walk(src_path, followlinks=False):
+                    parent = Path(directory)
+                    symbolic_links = [
+                        name for name in (*directories, *filenames)
+                        if (parent / name).is_symlink()
+                    ]
+                    if symbolic_links:
+                        raise ValueError(
+                            "recursive copies do not follow symbolic links: "
+                            + ", ".join(symbolic_links)
+                        )
+                    relative = parent.relative_to(src_path)
+                    for name in directories:
+                        child = Path(destination_name) / relative / name
+                        ws.create_directory(str(child), parents=True, exist_ok=options.force)
+                    for name in filenames:
+                        child = Path(destination_name) / relative / name
+                        self._copy_file(parent / name, str(child))
             else:
-                shutil.copy2(src_path, dst_path)
+                self._copy_file(src_path, destination_name)
             return self._ok("")
         except Exception as e:
-            return self._error(f"cp failed: {e}")
+            return self._error(f"cp failed: {self._safe_exception_text(e)}")
 
-    def _cmd_mv(self, args: list, ws: Workspace, stdin: str) -> Dict[str, Any]:
+    def _cmd_mv(self, args: list, stdin: str) -> Dict[str, Any]:
+        ws = self._workspace
         def configure(parser):
             parser.add_argument("-f", "--force", action="store_true")
             parser.add_argument("paths", nargs="+")
@@ -665,18 +764,14 @@ class WorkspaceShellTool(BaseTool):
         destination_probe = ws.resolve(destination)
         destination_name = str(
             Path(destination) / src_path.name
-            if src_path is not None
-            and destination_probe is not None
-            and destination_probe.is_dir()
+            if src_path is not None and destination_probe is not None and destination_probe.is_dir()
             else Path(destination)
         )
         effective_probe = ws.resolve(destination_name)
         dst_path = ws.resolve(
             destination_name,
             access=(
-                "remove"
-                if effective_probe is not None and effective_probe.exists()
-                else "create"
+                "remove" if effective_probe is not None and effective_probe.exists() else "create"
             ),
         )
         if src_path is None:
@@ -687,15 +782,23 @@ class WorkspaceShellTool(BaseTool):
             return self._error(f"No such file: {source}")
         if src_path == ws.path:
             return self._error("mv: refusing to move the workspace root")
+        if dst_path.exists() and os.path.samefile(src_path, dst_path):
+            return self._error("mv: source and destination identify the same file")
+        if src_path.is_dir():
+            try:
+                dst_path.relative_to(src_path)
+            except ValueError:
+                pass
+            else:
+                return self._error("mv: cannot move a directory into itself")
         try:
-            if options.force and dst_path.exists() and not dst_path.is_dir():
-                dst_path.unlink()
-            shutil.move(str(src_path), str(dst_path))
+            ws.move(source, destination_name, overwrite=options.force)
             return self._ok("")
         except Exception as e:
-            return self._error(f"mv failed: {e}")
+            return self._error(f"mv failed: {self._safe_exception_text(e)}")
 
-    def _cmd_rm(self, args: list, ws: Workspace, stdin: str) -> Dict[str, Any]:
+    def _cmd_rm(self, args: list, stdin: str) -> Dict[str, Any]:
+        ws = self._workspace
         def configure(parser):
             parser.add_argument("-r", "-R", "--recursive", action="store_true")
             parser.add_argument("-f", "--force", action="store_true")
@@ -708,38 +811,34 @@ class WorkspaceShellTool(BaseTool):
                 return self._error(f"Invalid path: {name}")
             if path == ws.path:
                 return self._error("rm: refusing to remove the workspace root")
-            if not path.exists():
+            if not os.path.lexists(path):
                 if options.force:
                     continue
                 return self._error(f"No such file: {name}")
             try:
-                if path.is_dir():
-                    if not options.recursive:
-                        return self._error(f"rm: cannot remove directory {name!r} without -r")
-                    shutil.rmtree(path)
-                else:
-                    path.unlink()
+                ws.remove(name, recursive=options.recursive, missing_ok=options.force)
+            except IsADirectoryError:
+                return self._error(f"rm: cannot remove directory {name!r} without -r")
             except Exception as e:
-                return self._error(f"rm failed: {e}")
+                return self._error(f"rm failed: {self._safe_exception_text(e)}")
         return self._ok("")
 
-    def _cmd_mkdir(self, args: list, ws: Workspace, stdin: str) -> Dict[str, Any]:
+    def _cmd_mkdir(self, args: list, stdin: str) -> Dict[str, Any]:
+        ws = self._workspace
         def configure(parser):
             parser.add_argument("-p", "--parents", action="store_true")
             parser.add_argument("directories", nargs="+")
 
         options = self._parse_args("mkdir", args, configure)
         for name in options.directories:
-            path = ws.resolve(name, access="create")
-            if path is None:
-                return self._error(f"Invalid path: {name}")
             try:
-                path.mkdir(parents=options.parents, exist_ok=options.parents)
+                ws.create_directory(name, parents=options.parents, exist_ok=options.parents)
             except Exception as e:
-                return self._error(f"mkdir failed: {e}")
+                return self._error(f"mkdir failed: {self._safe_exception_text(e)}")
         return self._ok("")
 
-    def _cmd_gunzip(self, args: list, ws: Workspace, stdin: str) -> Dict[str, Any]:
+    def _cmd_gunzip(self, args: list, stdin: str) -> Dict[str, Any]:
+        ws = self._workspace
         def configure(parser):
             parser.add_argument("-k", "--keep", action="store_true")
             parser.add_argument("-f", "--force", action="store_true")
@@ -761,23 +860,26 @@ class WorkspaceShellTool(BaseTool):
             output_name,
             access="remove" if output_probe is not None and output_probe.exists() else "create",
         )
-        if out_path is None or (
-            not options.keep
-            and ws.resolve(options.file, access="remove") is None
-        ):
+        remove_path = None if options.keep else ws.resolve(options.file, access="remove")
+        if out_path is None or (not options.keep and remove_path is None):
             return self._error("gunzip: read-only workspace inputs cannot be modified")
+        if out_path.exists() and os.path.samefile(path, out_path):
+            return self._error("gunzip: input and output identify the same file")
         if out_path.exists() and not options.force:
             return self._error(f"gunzip: output already exists: {out_path.name}; use -f")
         try:
-            with gzip.open(path, "rb") as f_in, open(out_path, "wb") as f_out:
-                shutil.copyfileobj(f_in, f_out)
-            if not options.keep:
-                path.unlink()
+            with ws.safe_open(path, "rb") as f:
+                with gzip.GzipFile(fileobj=f, mode="rb") as f_in:
+                    with ws.open_for_write(output_name, "wb") as f_out:
+                        shutil.copyfileobj(f_in, f_out)
+            if remove_path is not None:
+                ws.remove(options.file)
             return self._ok(f"Decompressed to {out_path.name}")
         except Exception as e:
-            return self._error(f"gunzip failed: {e}")
+            return self._error(f"gunzip failed: {self._safe_exception_text(e)}")
 
-    def _cmd_gzip(self, args: list, ws: Workspace, stdin: str) -> Dict[str, Any]:
+    def _cmd_gzip(self, args: list, stdin: str) -> Dict[str, Any]:
+        ws = self._workspace
         def configure(parser):
             parser.add_argument("-k", "--keep", action="store_true")
             parser.add_argument("-f", "--force", action="store_true")
@@ -795,23 +897,26 @@ class WorkspaceShellTool(BaseTool):
             output_name,
             access="remove" if output_probe is not None and output_probe.exists() else "create",
         )
-        if out_path is None or (
-            not options.keep
-            and ws.resolve(options.file, access="remove") is None
-        ):
+        remove_path = None if options.keep else ws.resolve(options.file, access="remove")
+        if out_path is None or (not options.keep and remove_path is None):
             return self._error("gzip: read-only workspace inputs cannot be modified")
+        if out_path.exists() and os.path.samefile(path, out_path):
+            return self._error("gzip: input and output identify the same file")
         if out_path.exists() and not options.force:
             return self._error(f"gzip: output already exists: {out_path.name}; use -f")
         try:
-            with open(path, "rb") as f_in, gzip.open(out_path, "wb") as f_out:
-                shutil.copyfileobj(f_in, f_out)
-            if not options.keep:
-                path.unlink()
+            with ws.safe_open(path, "rb") as f_in:
+                with ws.open_for_write(output_name, "wb") as output_stream:
+                    with gzip.GzipFile(fileobj=output_stream, mode="wb") as f_out:
+                        shutil.copyfileobj(f_in, f_out)
+            if remove_path is not None:
+                ws.remove(options.file)
             return self._ok(f"Compressed to {out_path.name}")
         except Exception as e:
-            return self._error(f"gzip failed: {e}")
+            return self._error(f"gzip failed: {self._safe_exception_text(e)}")
 
-    def _cmd_unzip(self, args: list, ws: Workspace, stdin: str) -> Dict[str, Any]:
+    def _cmd_unzip(self, args: list, stdin: str) -> Dict[str, Any]:
+        ws = self._workspace
         import zipfile
 
         def configure(parser):
@@ -830,31 +935,43 @@ class WorkspaceShellTool(BaseTool):
         if not path.exists():
             return self._error(f"No such file: {options.file}")
         try:
-            with zipfile.ZipFile(path, "r") as zf:
-                destination.mkdir(parents=True, exist_ok=True)
-                for member in zf.infolist():
-                    member_path = (destination / member.filename).resolve()
-                    try:
-                        member_path.relative_to(destination.resolve())
-                    except ValueError:
-                        return self._error(f"Unsafe path in archive: {member.filename}")
-                    mode = member.external_attr >> 16
-                    if stat.S_ISLNK(mode):
-                        return self._error(
-                            f"Symbolic links are not allowed in archives: {member.filename}"
-                        )
-                    logical_member = str(Path(options.directory) / member.filename)
-                    access = "remove" if member_path.exists() else "create"
-                    if ws.resolve(logical_member, access=access) is None:
-                        return self._error(
-                            f"Archive member targets a locked path: {member.filename}"
-                        )
-                zf.extractall(destination)
+            with ws.safe_open(path, "rb") as f:
+                zf = zipfile.ZipFile(f, "r")
+                with zf:
+                    ws.create_directory(options.directory, parents=True, exist_ok=True)
+                    for member in zf.infolist():
+                        member_relative = Path(member.filename)
+                        if member_relative.is_absolute() or ".." in member_relative.parts:
+                            return self._error(f"Unsafe path in archive: {member.filename}")
+                        logical_member = str(Path(options.directory) / member_relative)
+                        if Path(logical_member) == Path(options.file):
+                            return self._error(
+                                f"Archive member would overwrite its source: {member.filename}"
+                            )
+                        mode = member.external_attr >> 16
+                        if stat.S_ISLNK(mode):
+                            return self._error(
+                                f"Symbolic links are not allowed in archives: {member.filename}"
+                            )
+                        file_type = stat.S_IFMT(mode)
+                        if file_type and not (stat.S_ISREG(mode) or stat.S_ISDIR(mode)):
+                            return self._error(
+                                f"Special files are not allowed in archives: {member.filename}"
+                            )
+                        if member.is_dir():
+                            ws.create_directory(logical_member, parents=True, exist_ok=True)
+                        else:
+                            parent = str(Path(logical_member).parent)
+                            ws.create_directory(parent, parents=True, exist_ok=True)
+                            with zf.open(member, "r") as input_stream:
+                                with ws.open_for_write(logical_member, "wb") as output_stream:
+                                    shutil.copyfileobj(input_stream, output_stream)
             return self._ok(f"Extracted to {options.directory}")
         except Exception as e:
-            return self._error(f"unzip failed: {e}")
+            return self._error(f"unzip failed: {self._safe_exception_text(e)}")
 
-    def _cmd_tar(self, args: list, ws: Workspace, stdin: str) -> Dict[str, Any]:
+    def _cmd_tar(self, args: list, stdin: str) -> Dict[str, Any]:
+        ws = self._workspace
         import tarfile
 
         def configure(parser):
@@ -878,21 +995,35 @@ class WorkspaceShellTool(BaseTool):
             return self._error("Only tar extraction (-x) is supported.")
         mode = "r:gz" if options.gzip else "r:*"
         try:
-            destination.mkdir(parents=True, exist_ok=True)
-            with tarfile.open(path, mode) as tf:
-                for member in tf.getmembers():
-                    member_path = (destination / member.name).resolve()
-                    try:
-                        member_path.relative_to(destination.resolve())
-                    except ValueError:
-                        return self._error(f"Unsafe path in archive: {member.name}")
-                    logical_member = str(Path(options.directory) / member.name)
-                    access = "remove" if member_path.exists() else "create"
-                    if ws.resolve(logical_member, access=access) is None:
-                        return self._error(
-                            f"Archive member targets a locked path: {member.name}"
-                        )
-                tf.extractall(destination, filter="data")
+            ws.create_directory(options.directory, parents=True, exist_ok=True)
+            with ws.safe_open(path, "rb") as f:
+                tf = tarfile.open(fileobj=f, mode=mode)
+                with tf:
+                    for member in tf.getmembers():
+                        if not (member.isfile() or member.isdir()):
+                            return self._error(
+                                f"Links and special files are not allowed in archives: "
+                                f"{member.name}"
+                            )
+                        member_relative = Path(member.name)
+                        if member_relative.is_absolute() or ".." in member_relative.parts:
+                            return self._error(f"Unsafe path in archive: {member.name}")
+                        logical_member = str(Path(options.directory) / member_relative)
+                        if Path(logical_member) == Path(options.file):
+                            return self._error(
+                                f"Archive member would overwrite its source: {member.name}"
+                            )
+                        if member.isdir():
+                            ws.create_directory(logical_member, parents=True, exist_ok=True)
+                        else:
+                            parent = str(Path(logical_member).parent)
+                            ws.create_directory(parent, parents=True, exist_ok=True)
+                            input_stream = tf.extractfile(member)
+                            if input_stream is None:
+                                raise ValueError(f"Unable to read archive member: {member.name}")
+                            with input_stream:
+                                with ws.open_for_write(logical_member, "wb") as output_stream:
+                                    shutil.copyfileobj(input_stream, output_stream)
             return self._ok(f"Extracted to {options.directory}")
         except Exception as e:
-            return self._error(f"tar failed: {e}")
+            return self._error(f"tar failed: {self._safe_exception_text(e)}")

@@ -1,13 +1,15 @@
 from __future__ import annotations
+from sr_harness.core import AgentContext
 
 import numpy as np
 
 from sr_harness.tools.constant_fit import ConstantFitTool
+from tests.tools import tool_context
 
 
 def test_requires_a_numeric_constant():
     x = np.linspace(1, 3, 40)
-    tool = ConstantFitTool(data={"x": x, "y": 2 * x}, target="y")
+    tool = ConstantFitTool(context=AgentContext(data={"x": x, "y": 2 * x}, target="y"))
     call = tool(eq="x")
     assert call.ok is True
     assert "no numerical constants" in call.result_str
@@ -17,9 +19,11 @@ def test_recognizes_fraction_and_pi_in_distinct_positions():
     x = np.linspace(1, 4, 80)
     validation_x = np.linspace(1.1, 3.9, 20)
     tool = ConstantFitTool(
-        data={"x": x, "y": (2 / 3) * x + np.pi},
-        evaluation_data={"x": validation_x, "y": (2 / 3) * validation_x + np.pi},
-        target="y",
+        context=tool_context(
+            data={"x": x, "y": (2 / 3) * x + np.pi},
+            evaluation_data={"x": validation_x, "y": (2 / 3) * validation_x + np.pi},
+            target="y",
+        )
     )
     result = tool.execute(eq="0.6667*x + 3.1416")
     assert len(result["numbers"]) == 2
@@ -40,7 +44,9 @@ def test_recognizes_fraction_and_pi_in_distinct_positions():
 
 def test_pareto_front_retains_accuracy_complexity_tradeoff():
     x = np.linspace(1, 4, 60)
-    result = ConstantFitTool(data={"x": x, "y": 0.67 * x}, target="y").execute(eq="0.67*x")
+    result = ConstantFitTool(
+        context=AgentContext(data={"x": x, "y": 0.67 * x}, target="y")
+    ).execute(eq="0.67*x")
     front = result["pareto_front"]
     assert [item["constant_complexity"] for item in front] == [0, 1]
     assert front[0]["formula"] == "2 / 3 * x"
@@ -56,9 +62,11 @@ def test_validation_r2_is_used_for_pareto_selection_when_available():
     x = np.linspace(1, 4, 60)
     xv = np.linspace(1.1, 3.9, 20)
     tool = ConstantFitTool(
-        data={"x": x, "y": 0.67 * x},
-        evaluation_data={"x": xv, "y": (2 / 3) * xv},
-        target="y",
+        context=tool_context(
+            data={"x": x, "y": 0.67 * x},
+            evaluation_data={"x": xv, "y": (2 / 3) * xv},
+            target="y",
+        )
     )
     result = tool.execute(eq="0.67*x")
     assert [item["constant_complexity"] for item in result["pareto_front"]] == [0]
@@ -69,7 +77,7 @@ def test_validation_r2_is_used_for_pareto_selection_when_available():
 def test_y_expression_takes_precedence_over_use_eq_as_y():
     x = np.linspace(1, 4, 50)
     data = {"x": x, "y": 0.5 * x + 1}
-    tool = ConstantFitTool(data=data, target="y")
+    tool = ConstantFitTool(context=AgentContext(data=data, target="y"))
     result = tool.execute(eq="0.51*x", y="y-1", use_eq_as_y=True)
     assert result["target_expression"] == "y-1"
     assert result["primary_metric"] == "validation_r2"
@@ -78,7 +86,7 @@ def test_y_expression_takes_precedence_over_use_eq_as_y():
 
 def test_use_eq_as_y_compares_to_original_expression():
     x = np.linspace(1, 4, 50)
-    tool = ConstantFitTool(data={"x": x, "y": x}, target="y")
+    tool = ConstantFitTool(context=AgentContext(data={"x": x, "y": x}, target="y"))
     result = tool.execute(eq="0.67*x", use_eq_as_y=True)
     assert result["target_expression"] == "0.67 * x"
     assert result["pareto_front"][-1]["formula"] == "0.67 * x"
@@ -87,7 +95,7 @@ def test_use_eq_as_y_compares_to_original_expression():
 
 def test_repeated_numeric_value_is_treated_as_two_positions():
     x = np.linspace(1, 4, 50)
-    tool = ConstantFitTool(data={"x": x, "y": 0.67 * x + 0.67}, target="y")
+    tool = ConstantFitTool(context=AgentContext(data={"x": x, "y": 0.67 * x + 0.67}, target="y"))
     result = tool.execute(eq="0.67*x+0.67")
     assert [item["id"] for item in result["numbers"]] == ["Number1", "Number2"]
     assert result["total_combinations"] == 4
@@ -98,9 +106,11 @@ def test_already_simple_one_is_omitted_from_nearby_display_but_still_counted():
     x, z = rng.uniform(-1, 1, (2, 100))
     xv, zv = rng.uniform(-1.5, 1.5, (2, 30))
     tool = ConstantFitTool(
-        data={"x": x, "z": z, "y": np.pi * x + np.sqrt(2) * z + 1},
-        evaluation_data={"x": xv, "z": zv, "y": np.pi * xv + np.sqrt(2) * zv + 1},
-        target="y",
+        context=tool_context(
+            data={"x": x, "z": z, "y": np.pi * x + np.sqrt(2) * z + 1},
+            evaluation_data={"x": xv, "z": zv, "y": np.pi * xv + np.sqrt(2) * zv + 1},
+            target="y",
+        )
     )
     result = tool.execute(eq="3.1416*x+1.4142*z+1")
     text = tool.format_result_dict(result)

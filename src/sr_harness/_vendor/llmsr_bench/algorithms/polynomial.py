@@ -1,11 +1,13 @@
 """
 多项式拟合符号回归方法
 """
+
 from __future__ import annotations
 
 import argparse
 import numpy as np
 import sr_harness_engine as engine
+from sr_harness.core import AgentContext
 from sr_harness.tools import PolynomialFitTool
 from ..core import SEDTask, SRResult
 
@@ -38,7 +40,7 @@ def run(args: argparse.Namespace, task: SEDTask) -> SRResult:
     data[target] = task.train_y
 
     # 执行多项式拟合
-    tool = PolynomialFitTool(data=data, target=target)
+    tool = PolynomialFitTool(context=AgentContext(data=data, target=target))
     result = tool.execute(
         x=features,
         y=target,

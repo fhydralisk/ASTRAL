@@ -218,14 +218,25 @@ class CreateSkill(BaseTool):
             for tool_name, tool_cls in list(BaseTool.REGISTRY_DICT.items()):
                 if getattr(tool_cls, "source_path", None) == resolved:
                     del BaseTool.REGISTRY_DICT[tool_name]
-            tool_path.unlink(missing_ok=True)
+            if self.context.workspace is not None:
+                relative_tool = str(tool_path.relative_to(self.context.workspace.path))
+                self.context.workspace.remove(relative_tool, missing_ok=True)
+            else:
+                tool_path.unlink(missing_ok=True)
             return {"success": True, "name": name, "skill_type": skill_type, "readonly": readonly}
         manager.set_skill(name, tool_code + "\n", "tool.py", force=force)
         try:
-            loaded = BaseTool.load_custom_tool(tool_path)
+            loaded = BaseTool.load_custom_tool(tool_code, path=tool_path)
         except Exception:
             if not existed:
-                shutil.rmtree(skill_dir, ignore_errors=True)
+                if self.context.workspace is not None:
+                    self.context.workspace.remove(
+                        str(skill_dir.relative_to(self.context.workspace.path)),
+                        recursive=True,
+                        missing_ok=True,
+                    )
+                else:
+                    shutil.rmtree(skill_dir, ignore_errors=True)
             raise
         if readonly:
             final_content = skill_content.replace("readonly: false", "readonly: true", 1)

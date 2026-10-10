@@ -1,9 +1,10 @@
 """Persistent conversation registry for the interactive Web workbench."""
+
 from __future__ import annotations
 
 import json
 import os
-import stat
+import shutil
 import tempfile
 import threading
 import uuid
@@ -11,13 +12,16 @@ import zipfile
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import Body, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
 from .session import InteractiveSession
+
+if TYPE_CHECKING:
+    from ..runtime.workspace import Workspace
 
 
 CONVERSATION_COOKIE = "sr_harness_conversation"
@@ -250,9 +254,8 @@ class ConversationRegistry:
                 self._persistence_error = exc
 
     def _visible(self, record: dict[str, Any], client_id: str) -> bool:
-        return (
-            not record["archived"]
-            and (not self.isolate_users or record["owner_id"] == client_id)
+        return not record["archived"] and (
+            not self.isolate_users or record["owner_id"] == client_id
         )
 
     def _owned(self, record: dict[str, Any], client_id: str) -> bool:
@@ -262,12 +265,16 @@ class ConversationRegistry:
         if self._persistence_error is not None:
             raise RuntimeError("InteractiveSession persistence failed") from self._persistence_error
 
-    def resolve(self, client_id: str, selected_id: str | None) -> tuple[dict[str, Any], InteractiveSession]:
+    def resolve(
+        self, client_id: str, selected_id: str | None
+    ) -> tuple[dict[str, Any], InteractiveSession]:
         with self.lock:
             self._raise_persistence_error()
             visible = [record for record in self._records if self._visible(record, client_id)]
             if self.isolate_users and not visible:
-                unowned = next((record for record in self._records if record["owner_id"] is None), None)
+                unowned = next(
+                    (record for record in self._records if record["owner_id"] is None), None
+                )
                 if unowned is not None:
                     unowned["owner_id"] = client_id
                     unowned["updated_at"] = _now()
@@ -292,12 +299,18 @@ class ConversationRegistry:
 
     def create(self, client_id: str, name: str | None = None) -> dict[str, Any]:
         with self.lock:
-            return self._create_record(owner_id=client_id if self.isolate_users else None, name=name)
+            return self._create_record(
+                owner_id=client_id if self.isolate_users else None, name=name
+            )
 
     def select(self, client_id: str, conversation_id: str) -> dict[str, Any]:
         with self.lock:
             record = next(
-                (item for item in self._records if item["id"] == conversation_id and self._visible(item, client_id)),
+                (
+                    item
+                    for item in self._records
+                    if item["id"] == conversation_id and self._visible(item, client_id)
+                ),
                 None,
             )
             if record is None:
@@ -319,14 +332,19 @@ class ConversationRegistry:
             return record
 
     def archive(
-        self, client_id: str, conversation_id: str, selected_id: str,
+        self,
+        client_id: str,
+        conversation_id: str,
+        selected_id: str,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Archive a conversation and choose the conversation that remains selected."""
         with self.lock:
             record = next(
                 (
-                    item for item in self._records
-                    if item["id"] == conversation_id and self._owned(item, client_id)
+                    item
+                    for item in self._records
+                    if item["id"] == conversation_id
+                    and self._owned(item, client_id)
                     and not item["archived"]
                 ),
                 None,
@@ -337,38 +355,47 @@ class ConversationRegistry:
             record["updated_at"] = _now()
             visible = [item for item in self._records if self._visible(item, client_id)]
             if not visible:
-                visible = [self._create_record(
-                    owner_id=client_id if self.isolate_users else None,
-                )]
+                visible = [
+                    self._create_record(
+                        owner_id=client_id if self.isolate_users else None,
+                    )
+                ]
             selected = next((item for item in visible if item["id"] == selected_id), visible[0])
             self._write_records()
             return record, selected
 
     @staticmethod
-    def _write_tree(archive: zipfile.ZipFile, root: Path, prefix: str) -> None:
+    def _write_tree(
+        archive: zipfile.ZipFile,
+        root: Path,
+        prefix: str,
+        *,
+        workspace: Workspace | None = None,
+    ) -> None:
         if not root.exists():
             return
-        for path in sorted(root.rglob("*")):
-            if path.name == ".env":
-                continue
-            relative = Path(prefix) / path.relative_to(root)
-            if path.is_symlink():
-                info = zipfile.ZipInfo(relative.as_posix())
-                info.create_system = 3
-                info.external_attr = (stat.S_IFLNK | 0o777) << 16
-                archive.writestr(info, str(path.readlink()))
-            elif path.is_file():
-                archive.write(path, relative.as_posix())
+        opener = workspace.safe_open if workspace is not None else open
+        for current, directory_names, file_names in os.walk(root, followlinks=False):
+            current_path = Path(current)
+            directory_names[:] = sorted(
+                name for name in directory_names
+                if not (current_path / name).is_symlink()
+            )
+            for name in sorted(file_names):
+                path = current_path / name
+                if name == ".env" or path.is_symlink():
+                    continue
+                relative = Path(prefix) / path.relative_to(root)
+                with opener(path, "rb") as input_stream:
+                    with archive.open(relative.as_posix(), "w") as output_stream:
+                        shutil.copyfileobj(input_stream, output_stream)
 
     def export(self, client_id: str, conversation_id: str) -> tuple[Path, str]:
         """Create a temporary ZIP containing a conversation and its retained state."""
         with self.lock:
             record = self.select(client_id, conversation_id)
             session = self._session_for(record)
-            metadata = {
-                key: record[key]
-                for key in ("id", "name", "created_at", "updated_at")
-            }
+            metadata = {key: record[key] for key in ("id", "name", "created_at", "updated_at")}
             snapshot = session.export_persistent_state()
             workspace = self._record_path(record, "workspace")
             run_dir = self._record_path(record, "run_dir")
@@ -385,7 +412,12 @@ class ConversationRegistry:
                     "interactive-session.json",
                     json.dumps(snapshot, ensure_ascii=False, indent=2) + "\n",
                 )
-                self._write_tree(archive, workspace, "workspace")
+                self._write_tree(
+                    archive,
+                    workspace,
+                    "workspace",
+                    workspace=session.workspace_manager,
+                )
                 self._write_tree(archive, run_dir, "run")
         except Exception:
             Path(archive_name).unlink(missing_ok=True)
@@ -422,13 +454,17 @@ def mount_conversations(app, registry: ConversationRegistry) -> None:
             response = await call_next(request)
         finally:
             registry.session_proxy.reset(token)
-        response.set_cookie(CLIENT_COOKIE, client_id, httponly=True, samesite="lax", max_age=31536000)
+        response.set_cookie(
+            CLIENT_COOKIE, client_id, httponly=True, samesite="lax", max_age=31536000
+        )
         selection_was_set = any(
             header.startswith(f"{CONVERSATION_COOKIE}=")
             for header in response.headers.getlist("set-cookie")
         )
         if selected_id != record["id"] and not selection_was_set:
-            response.set_cookie(CONVERSATION_COOKIE, record["id"], httponly=True, samesite="lax", max_age=31536000)
+            response.set_cookie(
+                CONVERSATION_COOKIE, record["id"], httponly=True, samesite="lax", max_age=31536000
+            )
         return response
 
     @app.get("/api/conversations")
@@ -437,8 +473,12 @@ def mount_conversations(app, registry: ConversationRegistry) -> None:
 
     @app.post("/api/conversations")
     def create_conversation(request: Request, response: Response, payload: dict = Body(default={})):
-        record = registry.create(request.state.client_id, str(payload.get("name", "")).strip() or None)
-        response.set_cookie(CONVERSATION_COOKIE, record["id"], httponly=True, samesite="lax", max_age=31536000)
+        record = registry.create(
+            request.state.client_id, str(payload.get("name", "")).strip() or None
+        )
+        response.set_cookie(
+            CONVERSATION_COOKIE, record["id"], httponly=True, samesite="lax", max_age=31536000
+        )
         return {key: record[key] for key in ("id", "name", "created_at", "updated_at")}
 
     @app.post("/api/conversations/{conversation_id}/select")
@@ -447,13 +487,17 @@ def mount_conversations(app, registry: ConversationRegistry) -> None:
             record = registry.select(request.state.client_id, conversation_id)
         except KeyError as exc:
             raise HTTPException(404, "Conversation not found") from exc
-        response.set_cookie(CONVERSATION_COOKIE, record["id"], httponly=True, samesite="lax", max_age=31536000)
+        response.set_cookie(
+            CONVERSATION_COOKIE, record["id"], httponly=True, samesite="lax", max_age=31536000
+        )
         return {"selected": record["id"]}
 
     @app.patch("/api/conversations/{conversation_id}")
     def rename_conversation(conversation_id: str, request: Request, payload: dict = Body(...)):
         try:
-            record = registry.rename(request.state.client_id, conversation_id, str(payload.get("name", "")))
+            record = registry.rename(
+                request.state.client_id, conversation_id, str(payload.get("name", ""))
+            )
         except KeyError as exc:
             raise HTTPException(404, "Conversation not found") from exc
         except ValueError as exc:
@@ -464,13 +508,18 @@ def mount_conversations(app, registry: ConversationRegistry) -> None:
     def archive_conversation(conversation_id: str, request: Request, response: Response):
         try:
             record, selected = registry.archive(
-                request.state.client_id, conversation_id, request.state.conversation_id,
+                request.state.client_id,
+                conversation_id,
+                request.state.conversation_id,
             )
         except KeyError as exc:
             raise HTTPException(404, "Conversation not found") from exc
         response.set_cookie(
-            CONVERSATION_COOKIE, selected["id"], httponly=True,
-            samesite="lax", max_age=31536000,
+            CONVERSATION_COOKIE,
+            selected["id"],
+            httponly=True,
+            samesite="lax",
+            max_age=31536000,
         )
         return {"archived": record["id"], "selected": selected["id"]}
 
@@ -481,6 +530,8 @@ def mount_conversations(app, registry: ConversationRegistry) -> None:
         except KeyError as exc:
             raise HTTPException(404, "Conversation not found") from exc
         return FileResponse(
-            archive, filename=filename, media_type="application/zip",
+            archive,
+            filename=filename,
+            media_type="application/zip",
             background=BackgroundTask(archive.unlink, missing_ok=True),
         )

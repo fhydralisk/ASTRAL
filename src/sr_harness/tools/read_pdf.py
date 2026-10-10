@@ -1,11 +1,11 @@
 # Copyright (c) 2026-present, Yumeow. Licensed under the MIT License.
 """Bounded PDF text extraction from workspace files or public URLs."""
+
 from __future__ import annotations
 
 import ipaddress
 import socket
 from io import BytesIO
-from pathlib import Path
 from typing import Any, Dict
 from urllib.parse import urlparse
 
@@ -32,6 +32,7 @@ def _validate_public_url(url: str) -> None:
 @BaseTool.register("read_pdf")
 class PDFReadTool(BaseTool):
     """Implementation of the p d f read tool."""
+
     metadata = ToolMetadata(name="read_pdf")
 
     def execute(self, source: str, start_page: int = 1, max_pages: int = 10) -> Dict[str, Any]:
@@ -55,8 +56,7 @@ class PDFReadTool(BaseTool):
         if begin >= len(reader.pages):
             raise ValueError(f"start_page exceeds PDF page count ({len(reader.pages)}).")
         pages = [
-            {"page": i + 1, "text": reader.pages[i].extract_text() or ""}
-            for i in range(begin, end)
+            {"page": i + 1, "text": reader.pages[i].extract_text() or ""} for i in range(begin, end)
         ]
         return {"source": source, "page_count": len(reader.pages), "pages": pages}
 
@@ -76,15 +76,11 @@ class PDFReadTool(BaseTool):
                 if len(data) > MAX_DOWNLOAD_BYTES:
                     raise ValueError("PDF exceeds the 25 MiB download limit.")
             return bytes(data)
-        path = Path(source).expanduser().resolve()
-        allowed_root = self.context.workspace
-        try:
-            path.relative_to(allowed_root)
-        except ValueError as exc:
-            raise ValueError(f"Local PDFs must be inside {allowed_root}.") from exc
-        if path.stat().st_size > MAX_DOWNLOAD_BYTES:
+        with self.context.workspace.safe_open(source, "rb") as stream:
+            raw = stream.read(MAX_DOWNLOAD_BYTES + 1)
+        if len(raw) > MAX_DOWNLOAD_BYTES:
             raise ValueError("PDF exceeds the 25 MiB read limit.")
-        return path.read_bytes()
+        return raw
 
     @classmethod
     def format_result_dict(cls, result: Dict[str, Any]) -> str:
@@ -96,9 +92,7 @@ class PDFReadTool(BaseTool):
         Returns:
             str: The operation result.
         """
-        return "\n\n".join(
-            f"## Page {page['page']}\n{page['text']}" for page in result["pages"]
-        )
+        return "\n\n".join(f"## Page {page['page']}\n{page['text']}" for page in result["pages"])
 
 
 """

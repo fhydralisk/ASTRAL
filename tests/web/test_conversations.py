@@ -64,6 +64,10 @@ def test_conversation_can_be_exported_and_archived_without_deleting_state(tmp_pa
         assert client.put("/api/session/provider-credential", json={
             "provider": "openrouter", "api_key": "must-not-be-exported",
         }).status_code == 200
+        record = next(item for item in registry._records if item["id"] == conversation_id)
+        outside = tmp_path / "outside-export-sentinel.txt"
+        outside.write_text("outside-export-sentinel")
+        (tmp_path / record["workspace"] / "outside-link").symlink_to(outside)
 
         exported = client.get(f"/api/conversations/{conversation_id}/export")
         assert exported.status_code == 200
@@ -71,8 +75,10 @@ def test_conversation_can_be_exported_and_archived_without_deleting_state(tmp_pa
             assert json.loads(archive.read("conversation.json"))["name"] == "Export me"
             assert archive.read("workspace/notes.txt") == b"retained"
             assert "interactive-session.json" in archive.namelist()
+            assert "workspace/outside-link" not in archive.namelist()
             assert not any(name.endswith("/.env") for name in archive.namelist())
             assert b"must-not-be-exported" not in exported.content
+            assert b"outside-export-sentinel" not in exported.content
 
         archived = client.delete(f"/api/conversations/{conversation_id}").json()
         assert archived["archived"] == conversation_id

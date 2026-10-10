@@ -1,4 +1,6 @@
 from __future__ import annotations
+import argparse
+from sr_harness.core import AgentContext
 
 import json
 import numpy as np
@@ -47,7 +49,7 @@ def make_agent(tmp_path):
         tools=["unit_parallel_tool"],
         save_path=str(tmp_path),
     )
-    agent.tools = [UnitParallelTool(offset=10)]
+    agent.tools = [UnitParallelTool(context=AgentContext(args=argparse.Namespace(offset=10)))]
     return agent
 
 
@@ -76,14 +78,19 @@ def test_interactive_initial_buffer_uses_narrow_customization_hooks(tmp_path):
     agent.variable_descriptions = {"x": "input", "y": "output"}
 
     messages = agent.create_initial_buffer(
-        "Find y from x.", {"x": np.arange(3)}, {"y": np.arange(3)}, [],
+        "Find y from x.",
+        {"x": np.arange(3)},
+        {"y": np.arange(3)},
+        [],
     )
 
     assert "working with a human researcher" in messages[0]["content"]
     assert "- x: input" in messages[1]["content"]
     events = manager.get_recent_events()["events"]
     assert [event["payload"]["message"]["role"] for event in events] == [
-        "system", "user", "user",
+        "system",
+        "user",
+        "user",
     ]
 
 
@@ -100,7 +107,10 @@ def test_initial_prompts_can_be_created_without_progress_or_buffer_events(tmp_pa
     agent.variable_descriptions = {"x": "input", "y": "output"}
 
     messages = agent.create_initial_prompt_messages(
-        "Find y from x.", {"x": np.arange(3)}, {"y": np.arange(3)}, [],
+        "Find y from x.",
+        {"x": np.arange(3)},
+        {"y": np.arange(3)},
+        [],
     )
 
     assert [message["role"] for message in messages] == ["system", "user"]
@@ -122,10 +132,7 @@ def test_interactive_guidance_is_added_before_prompt_construction():
 
     assert buffer[-1] == {
         "role": "user",
-        "content": (
-            "[Human guidance injected during the run]\n"
-            "compare against a power law"
-        ),
+        "content": ("[Human guidance injected during the run]\ncompare against a power law"),
     }
 
 
@@ -262,7 +269,8 @@ def test_interactive_agent_honors_pending_control_before_automatic_guidance():
 
 @pytest.mark.parametrize("pause_on_truncation", [True, False])
 def test_interactive_truncated_response_completes_iteration_before_optional_pause(
-    tmp_path, pause_on_truncation,
+    tmp_path,
+    pause_on_truncation,
 ):
     manager = SRInteractionManager()
     manager.start_agent_execution()
@@ -296,7 +304,10 @@ def test_interactive_truncated_response_completes_iteration_before_optional_paus
 
     agent.api = TruncatedAPI()
     responses, usage = agent.request_llm(
-        [{"role": "user", "content": "Find a formula."}], R=1, L=1, C=1,
+        [{"role": "user", "content": "Find a formula."}],
+        R=1,
+        L=1,
+        C=1,
     )
     results = agent.execute_tool_calls(responses, R=1, L=1, C=1)
     buffer = []
@@ -333,14 +344,20 @@ def test_agent_exposes_only_skills_from_enabled_tools(tmp_path):
         save_path=str(tmp_path / "disabled"),
     )
 
-    enabled_reader = ReadSkill(skill_manager=enabled.skill_manager)
-    disabled_reader = ReadSkill(skill_manager=disabled.skill_manager)
+    enabled_reader = ReadSkill(
+        context=AgentContext(args=argparse.Namespace(skill_manager=enabled.skill_manager))
+    )
+    disabled_reader = ReadSkill(
+        context=AgentContext(args=argparse.Namespace(skill_manager=disabled.skill_manager))
+    )
 
     runtime_skill = enabled_reader.skill_manager.load_skills()["workspace-shell"]
     skill_path = runtime_skill.skill_directory / "SKILL.md"
     assert skill_path.name == "SKILL.md"
     assert skill_path.parent.name == "workspace-shell"
-    assert skill_path.read_text(encoding="utf-8") == enabled_reader.skill_manager.read_skill("workspace-shell")
+    assert skill_path.read_text(encoding="utf-8") == enabled_reader.skill_manager.read_skill(
+        "workspace-shell"
+    )
     assert "workspace-shell" not in disabled_reader.skill_manager.load_skills()
 
     assert "<name>workspace-shell</name>" in enabled_reader.metadata.description
@@ -453,15 +470,15 @@ def test_force_initial_diagnostics_runs_and_injects_results(tmp_path):
         "x": np.arange(1.0, 11.0),
         "y": 2 * np.arange(1.0, 11.0),
     }
-    context = {
-        "data": data,
-        "target": "y",
-        "skill_manager": agent.skill_manager,
-    }
+    context = AgentContext(
+        args=argparse.Namespace(skill_manager=agent.skill_manager),
+        data=data,
+        target="y",
+    )
     agent.tools = [
-        StatisticsTool(**context),
-        RelationshipAnalysisTool(**context),
-        ReadSkill(**context),
+        StatisticsTool(context=context),
+        RelationshipAnalysisTool(context=context),
+        ReadSkill(context=context),
     ]
 
     buffer = [{"role": "user", "content": "Find y=f(x)."}]
@@ -473,16 +490,20 @@ def test_force_initial_diagnostics_runs_and_injects_results(tmp_path):
     assert "## statistics_analysis" in diagnostic_message
     assert "## relationship_analysis" in diagnostic_message
     assert "## read_skill" in diagnostic_message
-    assert "<skill_content name=\"discover-symbolic-laws\">" in diagnostic_message
+    assert '<skill_content name="discover-symbolic-laws">' in diagnostic_message
     assert buffer[-1] == prompt[-1]
     assert agent.tools_counter.named_count == {
         "statistics_analysis": 1,
         "relationship_analysis": 1,
         "read_skill": 1,
     }
-    records = [json.loads(line) for line in (tmp_path / "tool_calls.jsonl").read_text().splitlines()]
+    records = [
+        json.loads(line) for line in (tmp_path / "tool_calls.jsonl").read_text().splitlines()
+    ]
     assert [record["name"] for record in records] == [
-        "statistics_analysis", "relationship_analysis", "read_skill",
+        "statistics_analysis",
+        "relationship_analysis",
+        "read_skill",
     ]
     assert all(record["forced"] is True for record in records)
 
@@ -504,12 +525,16 @@ def test_force_initial_diagnostics_requires_all_tools(tmp_path):
 
 def test_split_data_keeps_validation_and_test_out_of_training_context(tmp_path):
     agent = SRAgent(
-        llm_provider="unused", llm_model="unused", tools=["unit_parallel_tool"],
-        save_path=str(tmp_path), validation_fraction=0.2,
+        llm_provider="unused",
+        llm_model="unused",
+        tools=["unit_parallel_tool"],
+        save_path=str(tmp_path),
+        validation_fraction=0.2,
         split_random_state=7,
     )
     train, validation = agent._split_data(
-        {"x": np.arange(10.0)}, {"y": np.arange(10.0) * 2},
+        {"x": np.arange(10.0)},
+        {"y": np.arange(10.0) * 2},
     )
     assert len(train["x"]) == 8
     assert len(validation["x"]) == 2
@@ -518,8 +543,12 @@ def test_split_data_keeps_validation_and_test_out_of_training_context(tmp_path):
 
 def test_split_data_ood_uses_high_t_values_for_validation(tmp_path):
     agent = SRAgent(
-        llm_provider="unused", llm_model="unused", tools=["unit_parallel_tool"],
-        save_path=str(tmp_path), validation_fraction=0.2, split_by="ood",
+        llm_provider="unused",
+        llm_model="unused",
+        tools=["unit_parallel_tool"],
+        save_path=str(tmp_path),
+        validation_fraction=0.2,
+        split_by="ood",
         split_ood_variable="t",
     )
     train, validation = agent._split_data(
@@ -532,8 +561,12 @@ def test_split_data_ood_uses_high_t_values_for_validation(tmp_path):
 
 def test_split_data_ood_uses_the_explicitly_selected_variable(tmp_path):
     agent = SRAgent(
-        llm_provider="unused", llm_model="unused", tools=["unit_parallel_tool"],
-        save_path=str(tmp_path), validation_fraction=0.25, split_by="ood",
+        llm_provider="unused",
+        llm_model="unused",
+        tools=["unit_parallel_tool"],
+        save_path=str(tmp_path),
+        validation_fraction=0.25,
+        split_by="ood",
         split_ood_variable="T",
     )
     _, validation_T = agent._split_data(
@@ -555,9 +588,14 @@ def test_split_data_uses_manifest_structure_metadata_in_network_mode(tmp_path):
     links = np.array([[0, 1], [1, 2], [2, 0]], dtype=int)
     target = theta * 2
     data = {
-        "theta": theta, "omega": omega, "links": links, "dtheta": target,
-        "time": np.arange(10.0), "node": np.arange(3),
-        "edge": np.arange(3), "endpoint": np.arange(2),
+        "theta": theta,
+        "omega": omega,
+        "links": links,
+        "dtheta": target,
+        "time": np.arange(10.0),
+        "node": np.arange(3),
+        "edge": np.arange(3),
+        "endpoint": np.arange(2),
     }
     context = AgentContext(
         data=data,
@@ -572,8 +610,12 @@ def test_split_data_uses_manifest_structure_metadata_in_network_mode(tmp_path):
         num_nodes=3,
     )
     agent = SRAgent(
-        llm_provider="unused", llm_model="unused", tools=["unit_parallel_tool"],
-        save_path=str(tmp_path), validation_fraction=0.2, split_by="ood",
+        llm_provider="unused",
+        llm_model="unused",
+        tools=["unit_parallel_tool"],
+        save_path=str(tmp_path),
+        validation_fraction=0.2,
+        split_by="ood",
         split_ood_variable="time",
         context=context,
     )
@@ -592,8 +634,12 @@ def test_split_data_uses_manifest_structure_metadata_in_network_mode(tmp_path):
 
 def test_split_data_ood_requires_an_explicit_variable(tmp_path):
     agent = SRAgent(
-        llm_provider="unused", llm_model="unused", tools=["unit_parallel_tool"],
-        save_path=str(tmp_path), validation_fraction=0.2, split_by="ood",
+        llm_provider="unused",
+        llm_model="unused",
+        tools=["unit_parallel_tool"],
+        save_path=str(tmp_path),
+        validation_fraction=0.2,
+        split_by="ood",
     )
     with pytest.raises(ValueError, match="split_ood_variable is required"):
         agent._split_data(
@@ -604,11 +650,16 @@ def test_split_data_ood_requires_an_explicit_variable(tmp_path):
 
 def test_split_data_random_uses_requested_train_and_validation_sizes(tmp_path):
     agent = SRAgent(
-        llm_provider="unused", llm_model="unused", tools=["unit_parallel_tool"],
-        save_path=str(tmp_path), validation_fraction=0.2, split_by="random",
+        llm_provider="unused",
+        llm_model="unused",
+        tools=["unit_parallel_tool"],
+        save_path=str(tmp_path),
+        validation_fraction=0.2,
+        split_by="random",
     )
     train, validation = agent._split_data(
-        {"x": np.arange(10.0)}, {"y": np.arange(10.0)},
+        {"x": np.arange(10.0)},
+        {"y": np.arange(10.0)},
     )
     assert len(train["x"]) == 8
     assert len(validation["x"]) == 2
@@ -616,11 +667,16 @@ def test_split_data_random_uses_requested_train_and_validation_sizes(tmp_path):
 
 def test_split_data_zero_validation_fraction_reuses_training_data(tmp_path):
     agent = SRAgent(
-        llm_provider="unused", llm_model="unused", tools=["unit_parallel_tool"],
-        save_path=str(tmp_path), validation_fraction=0, split_by="ood",
+        llm_provider="unused",
+        llm_model="unused",
+        tools=["unit_parallel_tool"],
+        save_path=str(tmp_path),
+        validation_fraction=0,
+        split_by="ood",
     )
     train, validation = agent._split_data(
-        {"t": np.arange(10.0)}, {"y": np.arange(10.0)},
+        {"t": np.arange(10.0)},
+        {"y": np.arange(10.0)},
     )
     assert len(train["t"]) == 10
     assert len(validation["t"]) == 10
@@ -640,9 +696,7 @@ def test_update_conversation_injects_iteration_status(tmp_path):
     response_list = [("", [], {"role": "assistant", "content": ""})]
     results_list = [[]]
 
-    updated, _ = agent.update_conversation(
-        buffer, response_list, results_list, {}, R=1, L=2, C=1
-    )
+    updated, _ = agent.update_conversation(buffer, response_list, results_list, {}, R=1, L=2, C=1)
 
     assert updated is buffer
     assert len(buffer) == len(original_buffer) + 1
@@ -656,12 +710,16 @@ def test_update_conversation_injects_iteration_status(tmp_path):
 def test_update_conversation_injects_current_pareto_front(tmp_path):
     agent = make_agent(tmp_path)
     agent.max_refinement_depth = 5
-    candidate = CandidateRecord(formula="x + y", node_id="candidate-node", details={
-        "data_split_results": {
-            "train": {"metrics": {"mse": 0.1, "r2": 0.98, "complexity": 3}},
-            "validation": {"metrics": {"mse": 0.2, "r2": 0.97, "complexity": 3}},
+    candidate = CandidateRecord(
+        formula="x + y",
+        node_id="candidate-node",
+        details={
+            "data_split_results": {
+                "train": {"metrics": {"mse": 0.1, "r2": 0.98, "complexity": 3}},
+                "validation": {"metrics": {"mse": 0.2, "r2": 0.97, "complexity": 3}},
+            },
         },
-    })
+    )
     agent.push_candidate(candidate)
     buffer = [{"role": "user", "content": "Find a formula."}]
 
@@ -722,9 +780,16 @@ def test_update_conversation_sorts_unwrapped_tool_results(tmp_path):
     ]
     results_list = [
         [ToolCallResult(True, {"content": "diagnostic"}, "diagnostic", {})],
-        [ToolCallResult(True, {
-            "data_split_results": {"train": {"metrics": {"mse": 0.1, "complexity": 2}}},
-        }, "candidate", {})],
+        [
+            ToolCallResult(
+                True,
+                {
+                    "data_split_results": {"train": {"metrics": {"mse": 0.1, "complexity": 2}}},
+                },
+                "candidate",
+                {},
+            )
+        ],
     ]
 
     agent.update_conversation(buffer, response_list, results_list, {}, R=1, L=1, C=1)
@@ -735,42 +800,66 @@ def test_update_conversation_sorts_unwrapped_tool_results(tmp_path):
 def test_collect_candidates_records_pareto_front(tmp_path):
     agent = make_agent(tmp_path)
     response_list = [
-        ("", [
-            ToolCall(name="evaluate_formula", params={"eq": "x"}),
-            ToolCall(name="evaluate_formula", params={"eq": "x + y"}),
-            ToolCall(name="evaluate_formula", params={"eq": "x + y + z"}),
-        ], {}),
+        (
+            "",
+            [
+                ToolCall(name="evaluate_formula", params={"eq": "x"}),
+                ToolCall(name="evaluate_formula", params={"eq": "x + y"}),
+                ToolCall(name="evaluate_formula", params={"eq": "x + y + z"}),
+            ],
+            {},
+        ),
     ]
-    results_list = [[
-        ToolCallResult(True, {
-            "formula": "x",
-            "data_split_results": {
-                "train": {"metrics": {"mse": 0.2, "complexity": 2}},
-            },
-            "is_candidate": True,
-        }, "", {}),
-        ToolCallResult(True, {
-            "formula": "x + y",
-            "data_split_results": {
-                "train": {"metrics": {"mse": 0.1, "complexity": 3}},
-            },
-            "is_candidate": True,
-        }, "", {}),
-        ToolCallResult(True, {
-            "formula": "x + y + z",
-            "data_split_results": {
-                "train": {"metrics": {"mse": 0.3, "complexity": 5}},
-            },
-            "is_candidate": True,
-        }, "", {}),
-    ]]
+    results_list = [
+        [
+            ToolCallResult(
+                True,
+                {
+                    "formula": "x",
+                    "data_split_results": {
+                        "train": {"metrics": {"mse": 0.2, "complexity": 2}},
+                    },
+                    "is_candidate": True,
+                },
+                "",
+                {},
+            ),
+            ToolCallResult(
+                True,
+                {
+                    "formula": "x + y",
+                    "data_split_results": {
+                        "train": {"metrics": {"mse": 0.1, "complexity": 3}},
+                    },
+                    "is_candidate": True,
+                },
+                "",
+                {},
+            ),
+            ToolCallResult(
+                True,
+                {
+                    "formula": "x + y + z",
+                    "data_split_results": {
+                        "train": {"metrics": {"mse": 0.3, "complexity": 5}},
+                    },
+                    "is_candidate": True,
+                },
+                "",
+                {},
+            ),
+        ]
+    ]
 
     candidates = agent.collect_candidates(response_list, results_list, R=1, L=1, C=1)
     result = agent.build_search_result("completed", R=1, L=1, C=1)
 
     assert [item.formula for item in candidates] == ["x + y", "x", "x + y + z"]
     assert result["pareto_front"] == [0, 1]
-    assert [result["candidates"][index]["formula"] for index in result["pareto_front"]] == ["x + y", "x"]
+    assert [result["candidates"][index]["formula"] for index in result["pareto_front"]] == [
+        "x + y",
+        "x",
+    ]
     saved = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))
     assert saved["pareto_front"] == [0, 1]
 
@@ -791,29 +880,45 @@ def test_no_file_mode_keeps_search_identity_in_memory():
 def test_collect_candidates_rejects_non_finite_candidate_metrics(tmp_path):
     agent = make_agent(tmp_path)
     response_list = [
-        ("", [
-            ToolCall(name="evaluate_formula", params={"f": "1.966*P*log(0.0423/P)"}),
-            ToolCall(name="evaluate_formula", params={"f": "P"}),
-        ], {}),
+        (
+            "",
+            [
+                ToolCall(name="evaluate_formula", params={"f": "1.966*P*log(0.0423/P)"}),
+                ToolCall(name="evaluate_formula", params={"f": "P"}),
+            ],
+            {},
+        ),
     ]
-    results_list = [[
-        ToolCallResult(True, {
-            "formula": "7.2768821 * P * log(-111.24893 / P)",
-            "data_split_results": {
-                "train": {"metrics": {"mse": float("nan"), "complexity": 8}},
-                "validation": {"metrics": {"mse": float("nan"), "complexity": 8}},
-            },
-            "is_candidate": True,
-        }, "", {}),
-        ToolCallResult(True, {
-            "formula": "P",
-            "data_split_results": {
-                "train": {"metrics": {"mse": 0.2, "complexity": 1}},
-                "validation": {"metrics": {"mse": 0.3, "complexity": 1}},
-            },
-            "is_candidate": True,
-        }, "", {}),
-    ]]
+    results_list = [
+        [
+            ToolCallResult(
+                True,
+                {
+                    "formula": "7.2768821 * P * log(-111.24893 / P)",
+                    "data_split_results": {
+                        "train": {"metrics": {"mse": float("nan"), "complexity": 8}},
+                        "validation": {"metrics": {"mse": float("nan"), "complexity": 8}},
+                    },
+                    "is_candidate": True,
+                },
+                "",
+                {},
+            ),
+            ToolCallResult(
+                True,
+                {
+                    "formula": "P",
+                    "data_split_results": {
+                        "train": {"metrics": {"mse": 0.2, "complexity": 1}},
+                        "validation": {"metrics": {"mse": 0.3, "complexity": 1}},
+                    },
+                    "is_candidate": True,
+                },
+                "",
+                {},
+            ),
+        ]
+    ]
 
     topk_records = agent.collect_candidates(response_list, results_list, R=1, L=1, C=1)
 

@@ -52,7 +52,7 @@ class DataPreparationAgent(Agent):
             if not isinstance(skill_manager, SkillManager):
                 raise TypeError("context.args.skill_manager must be a SkillManager")
         else:
-            skill_manager = SkillManager()
+            skill_manager = SkillManager(workspace=context.workspace)
             context.args.skill_manager = skill_manager
         self.skills = (
             list(skills)

@@ -52,7 +52,7 @@ class EditTool(BaseTool):
             return {"success": False, "skill": name, "warnings": warnings, "tool_name": None}
 
         manager.set_skill(name, new_tool, "tool.py", force=True)
-        loaded = BaseTool.load_custom_tool(tool_path)
+        loaded = BaseTool.load_custom_tool(new_tool, path=tool_path)
         if new_skill != old_skill:
             manager.set_skill(name, new_skill, force=True)
         return {"success": True, "skill": name, "warnings": [], **loaded}

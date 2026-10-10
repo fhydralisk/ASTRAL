@@ -1,4 +1,5 @@
 """Validate a workspace evaluator against the current dataset."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -16,7 +17,14 @@ class ValidateEvaluatorTool(BaseTool):
 
     metadata = ToolMetadata(name="validate_evaluator")
 
-    def execute(self, f: str, evaluator_file: str | None = None, y: str | None = None, fit: bool = False, show_diagnostics: bool = False) -> dict[str, Any]:
+    def execute(
+        self,
+        f: str,
+        evaluator_file: str | None = None,
+        y: str | None = None,
+        fit: bool = False,
+        show_diagnostics: bool = False,
+    ) -> dict[str, Any]:
         """Validate a custom evaluator without changing the live context.
 
         Args:
@@ -29,20 +37,26 @@ class ValidateEvaluatorTool(BaseTool):
         relative = None
         evaluator = self.context.evaluator
         if evaluator_file is not None:
+            if self.context.workspace is None:
+                raise RuntimeError("Workspace not initialized.")
             relative = Path(evaluator_file)
-            if relative.is_absolute() or not relative.parts or relative.parts[0] != "context.evaluator":
-                raise ValueError("evaluator_file must be under context.evaluator/")
-            path = (self.context.workspace / relative).resolve()
-            evaluator_root = (self.context.workspace / "context.evaluator").resolve()
-            if evaluator_root not in path.parents or path.suffix != ".py" or not path.is_file():
-                raise ValueError("evaluator_file must identify an existing Python file under context.evaluator/")
-            evaluator = load_custom_evaluator(file=path)
+            if relative.suffix != ".py":
+                raise ValueError("evaluator_file must identify a Python file")
+            path = self.context.workspace.path / relative
+            evaluator = load_custom_evaluator(
+                file=path,
+                workspace=self.context.workspace,
+            )
         test_context = AgentContext(
-            args=self.context.args, data=self.context.data, target=self.context.target,
+            args=self.context.args,
+            data=self.context.data,
+            target=self.context.target,
             variable_descriptions=self.context.variable_descriptions,
             variable_axes=self.context.variable_axes,
             variable_structures=self.context.variable_structures,
-            num_nodes=self.context.num_nodes, evaluator=evaluator, workspace=self.context.workspace,
+            num_nodes=self.context.num_nodes,
+            evaluator=evaluator,
+            workspace=self.context.workspace,
         )
         result = EvaluateTool(context=test_context).execute(
             f=f, y=y, fit=fit, show_diagnostics=show_diagnostics,

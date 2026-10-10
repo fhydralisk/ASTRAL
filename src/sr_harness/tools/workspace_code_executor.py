@@ -49,11 +49,13 @@ class WorkspaceCodeExecutorTool(CodeExecutorTool):
             output_limit_bytes, self.DEFAULT_OUTPUT_LIMIT_BYTES, 1024, self.MAX_OUTPUT_LIMIT_BYTES
         )
         stdin_text = json.dumps(self.serialization(self.context.data), ensure_ascii=False)
-        workspace_manager = getattr(self.context.args, "workspace_manager", None)
+        workspace = self.context.workspace
+        if workspace is None:
+            raise RuntimeError("Workspace not initialized.")
         result = get_sandbox_runner().run(
             self.extract_code(program),
             stdin=stdin_text,
-            workspace=workspace_manager or self.context.workspace,
+            workspace=workspace,
             timeout_seconds=timeout_seconds,
             memory_limit_mb=memory_limit_mb,
             output_limit_bytes=output_limit_bytes,

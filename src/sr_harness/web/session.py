@@ -1,10 +1,12 @@
 """Single interactive run and observable hooks, without changing the search loop."""
+
 from __future__ import annotations
 
 import json
 import ast
 import os
 import shutil
+import stat
 import tempfile
 import threading
 import uuid
@@ -44,8 +46,7 @@ RUNTIME_SETTING_NAMES = (
     "local_sample_size", "max_refinement_depth", "global_width",
     "max_restart_loop", "restart_top_k", "max_workers", "validation_fraction",
     "split_by", "split_ood_variable", "split_random_state", "ranking_metric", "larger_is_better",
-    "force_initial_diagnostics",
-    "pause_on_truncated_response",
+    "force_initial_diagnostics", "pause_on_truncated_response",
 )
 
 DATA_AGENT_SETTING_NAMES = (
@@ -79,6 +80,7 @@ PROVIDER_API_KEY_VARIABLES = {
 
 class InteractiveSession:
     """Own one run for the lifetime of the server; no account/session registry."""
+
     def __init__(
         self,
         log_dir,
@@ -117,13 +119,13 @@ class InteractiveSession:
         self.context.args.save_path = str(self.run_dir)
         self._capability_skill_manager = SkillManager(
             custom_directory=self.workspace / "skills",
+            workspace=self.workspace_manager,
         )
         self.context.args.skill_manager = self._capability_skill_manager
         self.env_path = Path(env_path or self.run_dir / ".env").resolve()
         env_values = dotenv_values(self.env_path) if self.env_path.exists() else {}
         stored_environment = {
-            str(name): str(value) for name, value in env_values.items()
-            if value is not None
+            str(name): str(value) for name, value in env_values.items() if value is not None
         }
         if no_proxy := os.environ.get("NO_PROXY") or os.environ.get("no_proxy"):
             stored_environment.setdefault("NO_PROXY", no_proxy)
@@ -232,28 +234,31 @@ class InteractiveSession:
             topk = (
                 []
                 if self.run_state is None
-                else json_value([
-                    record.display_dict()
-                    for record in self.run_state.ranked_candidates()
-                ])
+                else json_value([record.display_dict() for record in self.run_state.ranked_candidates()])
             )
-            return {"state": self.state, "settings": self.settings.copy(),
-                    "pending_settings": self.pending_settings, "topk_records": topk,
-                    "result": self.result, "run_id": self.run_id,
-                    "initial_prompt": self.initial_prompt,
-                    "supplied_data": self.data is not None,
-                    "context_ready": bool(self.context.data),
-                    "workspace": str(self.workspace), "data_state": self.data_state,
-                    "data_interaction_state": self.data_interaction_manager.state,
-                    "data_agent_settings": self.data_agent_settings.copy(),
-                    "evaluator_agent_settings": self.evaluator_agent_settings.copy(),
-                    "evaluator_agent_state": self.evaluator_agent_state,
-                    "evaluator_interaction_state": self.evaluator_interaction_manager.state,
-                    "evaluator_agent_result": json_value(self.evaluator_agent_result),
-                    "evaluator_id": self._evaluator_metadata()["selected"],
-                    "data_result": json_value(self.data_result),
-                    "data_context": json_value(self.context.schema()),
-                    **self.sr_interaction_manager.status()}
+            return {
+                "state": self.state,
+                "settings": self.settings.copy(),
+                "pending_settings": self.pending_settings,
+                "topk_records": topk,
+                "result": self.result,
+                "run_id": self.run_id,
+                "initial_prompt": self.initial_prompt,
+                "supplied_data": self.data is not None,
+                "context_ready": bool(self.context.data),
+                "workspace": str(self.workspace),
+                "data_state": self.data_state,
+                "data_interaction_state": self.data_interaction_manager.state,
+                "data_agent_settings": self.data_agent_settings.copy(),
+                "evaluator_agent_settings": self.evaluator_agent_settings.copy(),
+                "evaluator_agent_state": self.evaluator_agent_state,
+                "evaluator_interaction_state": self.evaluator_interaction_manager.state,
+                "evaluator_agent_result": json_value(self.evaluator_agent_result),
+                "evaluator_id": self._evaluator_metadata()["selected"],
+                "data_result": json_value(self.data_result),
+                "data_context": json_value(self.context.schema()),
+                **self.sr_interaction_manager.status(),
+            }
 
     def export_persistent_state(self) -> dict[str, Any]:
         """Return a JSON-safe snapshot that can be restored in a new process."""
@@ -340,7 +345,9 @@ class InteractiveSession:
 
             data_directory = self.workspace / "context.data"
             if (data_directory / "manifest.json").is_file():
-                self.context.commit_context_data(load_context_data(data_directory))
+                self.context.commit_context_data(
+                    load_context_data(data_directory, workspace=self.workspace_manager)
+                )
                 target = snapshot["context_target"]
                 if target is not None and target not in self.context.data:
                     raise ValueError("Persisted context target is missing from context.data")
@@ -362,6 +369,7 @@ class InteractiveSession:
                 self.context.evaluator = load_custom_evaluator(
                     file=Path(custom_file) if custom_file is not None else None,
                     source=custom_source,
+                    workspace=self.workspace_manager,
                 )
             elif selected in {"default", "graph"}:
                 self.context.evaluator = create_builtin_evaluator(selected)
@@ -372,38 +380,53 @@ class InteractiveSession:
             run_state = snapshot["run_state"]
             if run_state is not None and not isinstance(run_state, dict):
                 raise TypeError("run_state must be a dictionary or None")
-            self.run_state = SearchRunState.from_state(run_state, save_path=self.run_dir) if run_state is not None else None
+            self.run_state = (
+                SearchRunState.from_state(run_state, save_path=self.run_dir)
+                if run_state is not None
+                else None
+            )
             interactions = snapshot["interactions"]
-            search_interrupted = self.sr_interaction_manager.restore_state(
-                interactions["search"]
-            )
-            data_interrupted = self.data_interaction_manager.restore_state(
-                interactions["data"]
-            )
+            search_interrupted = self.sr_interaction_manager.restore_state(interactions["search"])
+            data_interrupted = self.data_interaction_manager.restore_state(interactions["data"])
             evaluator_interrupted = self.evaluator_interaction_manager.restore_state(
                 interactions["evaluator"]
             )
             saved_state = str(snapshot["state"])
-            if saved_state not in {"idle", "starting", "running", "completed", "early_stopped", "interrupted", "failed"}:
+            if saved_state not in {
+                "idle", "starting", "running", "completed", "early_stopped", "interrupted", "failed",
+            }:
                 raise ValueError(f"Unknown persisted session state: {saved_state!r}")
             if search_interrupted or saved_state in {"starting", "running"}:
                 self.state = "idle"
                 previous_result = self.result if isinstance(self.result, dict) else {}
-                self.result = {**previous_result, "status": "interrupted", "restored_after_restart": True}
+                self.result = {
+                    **previous_result,
+                    "status": "interrupted",
+                    "restored_after_restart": True,
+                }
             else:
                 self.state = saved_state
             saved_data_state = str(snapshot["data_state"])
-            if saved_data_state not in {"idle", "running", "stopping", "stopped", "completed", "failed"}:
+            if saved_data_state not in {
+                "idle", "running", "stopping", "stopped", "completed", "failed",
+            }:
                 raise ValueError(f"Unknown persisted data-agent state: {saved_data_state!r}")
-            self.data_state = "stopped" if data_interrupted or saved_data_state in {"running", "stopping"} else saved_data_state
+            self.data_state = (
+                "stopped"
+                if data_interrupted or saved_data_state in {"running", "stopping"}
+                else saved_data_state
+            )
             saved_evaluator_state = str(snapshot["evaluator_agent_state"])
-            if saved_evaluator_state not in {"idle", "running", "stopping", "stopped", "completed", "failed"}:
+            if saved_evaluator_state not in {
+                "idle", "running", "stopping", "stopped", "completed", "failed",
+            }:
                 raise ValueError(f"Unknown persisted evaluator-agent state: {saved_evaluator_state!r}")
             self.evaluator_agent_state = (
                 "stopped"
                 if evaluator_interrupted or saved_evaluator_state in {"running", "stopping"}
                 else saved_evaluator_state
             )
+
     def _sync_manifest_descriptions(self) -> None:
         """Reflect externally edited manifest descriptions in the live context."""
         manifest_path = self.workspace / "context.data" / "manifest.json"
@@ -414,7 +437,10 @@ class InteractiveSession:
         if revision == self._manifest_description_revision:
             return
         try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            with self.workspace_manager.safe_open(
+                manifest_path, "r", encoding="utf-8"
+            ) as stream:
+                manifest = json.load(stream)
             descriptions = {}
             for section in ("variables", "axes"):
                 for name, spec in manifest[section].items():
@@ -426,7 +452,10 @@ class InteractiveSession:
             return
         changed = False
         for name in self.context.data:
-            if name in descriptions and self.context.variable_descriptions[name] != descriptions[name]:
+            if (
+                name in descriptions
+                and self.context.variable_descriptions[name] != descriptions[name]
+            ):
                 self.context.variable_descriptions[name] = descriptions[name]
                 changed = True
         self._manifest_description_revision = revision
@@ -448,16 +477,26 @@ class InteractiveSession:
 
     def _custom_evaluator_catalog(self) -> list[dict[str, Any]]:
         """Return valid evaluator implementations saved in this workspace."""
-        if not self.evaluator_workspace.is_dir():
-            return []
+        files = self._custom_evaluator_files()
         catalog = []
-        for file in sorted(self.evaluator_workspace.glob("*.py"), key=lambda path: path.name):
+        for file in files:
             try:
-                source = file.read_text(encoding="utf-8")
-                evaluator = load_custom_evaluator(file=file)
+                with self.workspace_manager.safe_open(file, "r", encoding="utf-8") as stream:
+                    source = stream.read()
+                evaluator = load_custom_evaluator(
+                    source=source,
+                    file=file,
+                    workspace=self.workspace_manager,
+                )
             except (OSError, UnicodeError, ValueError) as exc:
                 try:
-                    source = file.read_text(encoding="utf-8", errors="replace")
+                    with self.workspace_manager.safe_open(
+                        file,
+                        "r",
+                        encoding="utf-8",
+                        errors="replace",
+                    ) as stream:
+                        source = stream.read()
                 except OSError:
                     source = ""
                 catalog.append({
@@ -473,18 +512,41 @@ class InteractiveSession:
                 })
                 continue
             class_name = type(evaluator).__name__
-            catalog.append({
-                "id": f"custom:{file.name}",
-                "label": class_name,
-                "label_en": class_name,
-                "source": file.read_text(encoding="utf-8"),
-                "abstract": False,
-                "custom": True,
-                "file": str(file),
-                "invalid": False,
-                "error": None,
-            })
+            catalog.append(
+                {
+                    "id": f"custom:{file.name}",
+                    "label": class_name,
+                    "label_en": class_name,
+                    "source": source,
+                    "abstract": False,
+                    "custom": True,
+                    "file": str(file),
+                    "invalid": False,
+                    "error": None,
+                }
+            )
         return catalog
+
+    def _custom_evaluator_files(self) -> list[Path]:
+        """Return ordinary evaluator files without following workspace links."""
+        directory = self.workspace_manager.resolve("context.evaluator")
+        if directory is None or not directory.is_dir():
+            return []
+        with os.scandir(directory) as entries:
+            candidates = [
+                Path(entry.path)
+                for entry in entries
+                if entry.name.endswith(".py") and entry.is_file(follow_symlinks=False)
+            ]
+        files = []
+        for path in candidates:
+            try:
+                with self.workspace_manager.safe_open(path, "rb") as stream:
+                    if stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                        files.append(path)
+            except OSError:
+                continue
+        return sorted(files, key=lambda path: path.name)
 
     def _evaluator_metadata(self) -> dict[str, Any]:
         evaluator = self.context.evaluator
@@ -499,8 +561,10 @@ class InteractiveSession:
             }
         selected = "graph" if type(evaluator) is GraphEvaluator else "default"
         return {
-            "selected": selected, "source": evaluator_source(selected),
-            "custom_name": None, "custom_file": None,
+            "selected": selected,
+            "source": evaluator_source(selected),
+            "custom_name": None,
+            "custom_file": None,
         }
 
     def evaluator_editable(self) -> bool:
@@ -508,20 +572,18 @@ class InteractiveSession:
         if self.state == "idle":
             return True
         control = self.sr_interaction_manager.status()
-        return (
-            self.state in {"starting", "running"}
-            and control["interaction_state"] == "paused"
-        )
+        return self.state in {"starting", "running"} and control["interaction_state"] == "paused"
 
     def configure_evaluator(self, payload):
         """Validate and select an evaluator before symbolic regression starts."""
         if not self.evaluator_editable():
-            raise ValueError("Pause the search and wait for a safe boundary before changing the evaluator")
+            raise ValueError(
+                "Pause the search and wait for a safe boundary before changing the evaluator"
+            )
         evaluator_id = str(payload.get("selected", "")).strip()
         source = str(payload.get("source", ""))
         available = {
-            item["id"]: item
-            for item in [*evaluator_catalog(), *self._custom_evaluator_catalog()]
+            item["id"]: item for item in [*evaluator_catalog(), *self._custom_evaluator_catalog()]
         }
         selected_item = available.get(evaluator_id)
         builtin_source = (
@@ -533,8 +595,15 @@ class InteractiveSession:
             evaluator = create_builtin_evaluator(evaluator_id)
             source = builtin_source
             custom_name = custom_file = None
-        elif selected_item is not None and selected_item.get("custom") and source == selected_item["source"]:
-            evaluator = load_custom_evaluator(file=Path(selected_item["file"]))
+        elif (
+            selected_item is not None
+            and selected_item.get("custom")
+            and source == selected_item["source"]
+        ):
+            evaluator = load_custom_evaluator(
+                file=Path(selected_item["file"]),
+                workspace=self.workspace_manager,
+            )
             custom_name = type(evaluator).__name__
             custom_file = selected_item["file"]
         else:
@@ -551,7 +620,10 @@ class InteractiveSession:
                     f"Evaluator class name {custom_name!r} conflicts with a built-in evaluator. "
                     "Rename the class before saving."
                 )
-            evaluator = load_custom_evaluator(source=source)
+            evaluator = load_custom_evaluator(
+                source=source,
+                workspace=self.workspace_manager,
+            )
             custom_name = type(evaluator).__name__
             if custom_name in BUILTIN_EVALUATOR_CLASS_NAMES:
                 raise ValueError(
@@ -560,17 +632,28 @@ class InteractiveSession:
                 )
             filename = evaluator_filename(custom_name)
             save_dir = self.evaluator_workspace
-            save_dir.mkdir(parents=True, exist_ok=True)
+            save_dir_relative = str(save_dir.relative_to(self.workspace))
+            self.workspace_manager.create_directory(
+                save_dir_relative, parents=True, exist_ok=True,
+            )
             destination = save_dir / filename
-            descriptor, temporary_name = tempfile.mkstemp(prefix=f".{destination.stem}-", suffix=".py", dir=save_dir)
+            descriptor, temporary_name = tempfile.mkstemp(
+                prefix=f".{destination.stem}-", suffix=".py", dir=self.run_dir
+            )
             os.close(descriptor)
             temporary = Path(temporary_name)
             try:
                 temporary.write_text(source, encoding="utf-8")
-                os.replace(temporary, destination)
+                self.workspace_manager.replace_file(
+                    temporary,
+                    str(destination.relative_to(self.workspace)),
+                )
             finally:
                 temporary.unlink(missing_ok=True)
-            evaluator = load_custom_evaluator(file=destination)
+            evaluator = load_custom_evaluator(
+                file=destination,
+                workspace=self.workspace_manager,
+            )
             evaluator_id = f"custom:{destination.name}"
             custom_file = str(destination)
         with self.lock:
@@ -583,16 +666,27 @@ class InteractiveSession:
         evaluator_id = str(payload.get("selected", self._evaluator_metadata()["selected"])).strip()
         source = str(payload.get("source", ""))
         available = {
-            item["id"]: item
-            for item in [*evaluator_catalog(), *self._custom_evaluator_catalog()]
+            item["id"]: item for item in [*evaluator_catalog(), *self._custom_evaluator_catalog()]
         }
         selected_item = available.get(evaluator_id)
-        if selected_item is not None and selected_item.get("custom") and source == selected_item["source"]:
-            evaluator = load_custom_evaluator(file=Path(selected_item["file"]))
-        elif evaluator_id in {item["id"] for item in evaluator_catalog()} and source == evaluator_source(evaluator_id):
+        if (
+            selected_item is not None
+            and selected_item.get("custom")
+            and source == selected_item["source"]
+        ):
+            evaluator = load_custom_evaluator(
+                file=Path(selected_item["file"]),
+                workspace=self.workspace_manager,
+            )
+        elif evaluator_id in {
+            item["id"] for item in evaluator_catalog()
+        } and source == evaluator_source(evaluator_id):
             evaluator = create_builtin_evaluator(evaluator_id)
         else:
-            evaluator = load_custom_evaluator(source=source)
+            evaluator = load_custom_evaluator(
+                source=source,
+                workspace=self.workspace_manager,
+            )
         if not self.context.data or not self.context.target or not self.context.feature_names():
             raise ValueError("Prepare data and select a target plus at least one feature first")
         test_context = AgentContext(
@@ -627,7 +721,9 @@ class InteractiveSession:
     def assist_evaluator(self, payload):
         """Let a restricted agent construct, exercise, and repair an evaluator."""
         if not self.evaluator_editable():
-            raise ValueError("Pause the search and wait for a safe boundary before using EvaluatorConstructionAgent")
+            raise ValueError(
+                "Pause the search and wait for a safe boundary before using EvaluatorConstructionAgent"
+            )
         instruction = str(payload.get("message", "")).strip()
         if not instruction:
             raise ValueError("Evaluator construction instruction must not be empty")
@@ -668,15 +764,17 @@ class InteractiveSession:
                 delattr(self.context.args, "enabled_skills")
             else:
                 self.context.args.enabled_skills = previous_skills
-        files = sorted(self.evaluator_workspace.glob("*.py"), key=lambda path: path.stat().st_mtime_ns)
+        files = sorted(self._custom_evaluator_files(), key=lambda path: path.lstat().st_mtime_ns)
         if not files:
             raise ValueError(
                 "EvaluatorConstructionAgent did not create a Python file under context.evaluator/"
             )
         result_file = files[-1]
+        with self.workspace_manager.safe_open(result_file, "r", encoding="utf-8") as stream:
+            result_source = stream.read()
         return {
             **result,
-            "source": result_file.read_text(encoding="utf-8"),
+            "source": result_source,
             "selected": f"custom:{result_file.name}",
             "custom_file": str(result_file),
             "provider": settings["llm_provider"],
@@ -784,19 +882,18 @@ class InteractiveSession:
         if agent == "data":
             default_tools = list(DataPreparationAgent.DEFAULT_TOOLS)
             default_skills = [
-                skill["name"] for skill in skills
+                skill["name"]
+                for skill in skills
                 if skill["name"] not in DataPreparationAgent.DEFAULT_EXCLUDED_SKILLS
             ]
         elif agent == "evaluator":
             default_tools = list(EVALUATOR_DEFAULT_TOOLS)
             default_skills = [
-                skill["name"] for skill in skills
-                if skill["name"] != "discover-symbolic-laws"
+                skill["name"] for skill in skills if skill["name"] != "discover-symbolic-laws"
             ]
         else:
             default_tools = [
-                name for name in SRAgentInteractive.DEFAULT_TOOLS
-                if name in tool_names
+                name for name in SRAgentInteractive.DEFAULT_TOOLS if name in tool_names
             ]
             default_skills = [skill["name"] for skill in skills]
         return {
@@ -820,7 +917,11 @@ class InteractiveSession:
             available = {item["name"] for item in catalog[catalog_key]}
             if unknown := set(settings[key]) - available:
                 raise ValueError(f"Unknown {key}: {', '.join(sorted(unknown))}")
-        if agent == "data" and "tools" in settings and "validate_context_data" not in settings["tools"]:
+        if (
+            agent == "data"
+            and "tools" in settings
+            and "validate_context_data" not in settings["tools"]
+        ):
             raise ValueError("The data-preparation agent requires the validate_context_data tool")
         if (
             agent == "evaluator"
@@ -934,14 +1035,11 @@ class InteractiveSession:
         required = {"statistics_analysis", "relationship_analysis", "read_skill"}
         if tools is not None and (missing := required - set(tools)):
             raise ValueError(
-                "force_initial_diagnostics requires enabled tools: "
-                + ", ".join(sorted(missing))
+                "force_initial_diagnostics requires enabled tools: " + ", ".join(sorted(missing))
             )
         skills = settings.get("skills")
         if skills is not None and "discover-symbolic-laws" not in skills:
-            raise ValueError(
-                "force_initial_diagnostics requires the discover-symbolic-laws skill"
-            )
+            raise ValueError("force_initial_diagnostics requires the discover-symbolic-laws skill")
 
     def start(self, payload):
         """Run the ``start`` operation.
@@ -959,10 +1057,12 @@ class InteractiveSession:
             updated_settings = {**self.settings, **options}
             self.validate_setting_dependencies(updated_settings)
             self.settings = updated_settings
-            description = str(payload.get(
-                "problem_description",
-                payload.get("prompt", "Find an interpretable formula explaining the data."),
-            ))
+            description = str(
+                payload.get(
+                    "problem_description",
+                    payload.get("prompt", "Find an interpretable formula explaining the data."),
+                )
+            )
             self.prompt_overrides = {
                 role: (
                     SRAgentInteractive.normalize_system_prompt(str(payload[key]))
@@ -979,8 +1079,14 @@ class InteractiveSession:
                     y = {"target": y}
             elif payload.get("dataset"):
                 import pandas as pd
+
                 path = self.resolve(str(payload["dataset"]))
-                frame = pd.read_excel(path) if path.suffix.lower() == ".xlsx" else pd.read_csv(path)
+                with self.workspace_manager.safe_open(path, "rb") as stream:
+                    frame = (
+                        pd.read_excel(stream)
+                        if path.suffix.lower() == ".xlsx"
+                        else pd.read_csv(stream)
+                    )
                 target = str(payload.get("target", "y"))
                 if target not in frame or len(frame.columns) < 2 or len(frame) < 5:
                     raise ValueError("CSV needs a target column, at least one feature, and 5 rows.")
@@ -997,13 +1103,17 @@ class InteractiveSession:
                     features = list(dict.fromkeys(requested_features))
                 missing = [column for column in features if column not in frame]
                 if missing or target in features:
-                    raise ValueError("Features must exist in the CSV and must not include the target")
+                    raise ValueError(
+                        "Features must exist in the CSV and must not include the target"
+                    )
                 try:
                     values = frame[[*features, target]].to_numpy(dtype=float)
                 except (TypeError, ValueError) as exc:
                     raise ValueError("Selected target and feature columns must be numeric") from exc
                 if not np.isfinite(values).all():
-                    raise ValueError("Selected columns must contain finite values without missing data")
+                    raise ValueError(
+                        "Selected columns must contain finite values without missing data"
+                    )
                 X = {column: frame[column].to_numpy(dtype=float) for column in features}
                 y = {target: frame[target].to_numpy(dtype=float)}
             elif self.context.data:
@@ -1014,7 +1124,7 @@ class InteractiveSession:
             else:
                 rng = np.random.default_rng(42)
                 x = rng.uniform(-2, 2, 100)
-                X, y = {"x": x}, {"y": x*x + 2*x + 1}
+                X, y = {"x": x}, {"y": x * x + 2 * x + 1}
                 self.create_demo()
             self.state = "starting"
             self.thread = threading.Thread(target=self._run, args=(X, y, description), daemon=True)
@@ -1038,9 +1148,7 @@ class InteractiveSession:
             if self.state == "starting":
                 raise ValueError("Wait for symbolic regression to reach a controllable boundary")
             control_status = self.sr_interaction_manager.status()
-            if self.state == "running" and not (
-                control_status["interaction_state"] == "paused"
-            ):
+            if self.state == "running" and not (control_status["interaction_state"] == "paused"):
                 raise ValueError(
                     "Pause symbolic regression and wait for the safe-boundary acknowledgement "
                     "before changing its data"
@@ -1098,19 +1206,43 @@ class InteractiveSession:
         data_directory = self.workspace / "context.data"
 
         def directory_revision():
-            if not data_directory.is_dir():
+            resolved_directory = self.workspace_manager.resolve("context.data")
+            if resolved_directory is None or not resolved_directory.is_dir():
                 return None
-            return tuple(
-                (str(path.relative_to(data_directory)), path.stat().st_size, path.stat().st_mtime_ns)
-                for path in sorted(data_directory.rglob("*")) if path.is_file()
-            )
+            revision = []
+            for current, directory_names, file_names in os.walk(
+                resolved_directory, followlinks=False
+            ):
+                current_path = Path(current)
+                directory_names[:] = [
+                    name for name in directory_names
+                    if not (current_path / name).is_symlink()
+                ]
+                for name in file_names:
+                    path = current_path / name
+                    metadata = path.lstat()
+                    if stat.S_ISREG(metadata.st_mode):
+                        revision.append((
+                            str(path.relative_to(resolved_directory)),
+                            metadata.st_size,
+                            metadata.st_mtime_ns,
+                        ))
+            return tuple(sorted(revision))
 
         previous_revision = directory_revision()
         try:
             queued = self.data_interaction_manager.start_agent_execution()
             result = self.data_agent.run(queued[-1].content if queued else instruction)
-            if directory_revision() != previous_revision and (data_directory / "manifest.json").is_file():
-                self.context.commit_context_data(load_context_data(data_directory))
+            if (
+                directory_revision() != previous_revision
+                and (data_directory / "manifest.json").is_file()
+            ):
+                self.context.commit_context_data(
+                    load_context_data(
+                        data_directory,
+                        workspace=self.workspace_manager,
+                    )
+                )
                 result = {**result, "context": self.context.schema()}
             state = "completed"
         except InterruptedError as exc:
@@ -1137,22 +1269,27 @@ class InteractiveSession:
         Args:
             payload: Serializable event payload.
         """
-        description = str(payload.get(
-            "problem_description",
-            self.initial_prompt or "Find an interpretable formula explaining the selected target from the selected features.",
-        ))
+        description = str(
+            payload.get(
+                "problem_description",
+                self.initial_prompt
+                or "Find an interpretable formula explaining the selected target from the selected features.",
+            )
+        )
         if self.data is not None:
             X, y = self.data
             if not isinstance(y, dict):
                 y = {"target": y}
         elif payload.get("dataset"):
             import pandas as pd
+
             source = self.resolve(str(payload["dataset"]))
-            frame = (
-                pd.read_excel(source, nrows=1)
-                if source.suffix.lower() == ".xlsx"
-                else pd.read_csv(source, nrows=1)
-            )
+            with self.workspace_manager.safe_open(source, "rb") as stream:
+                frame = (
+                    pd.read_excel(stream, nrows=1)
+                    if source.suffix.lower() == ".xlsx"
+                    else pd.read_csv(stream, nrows=1)
+                )
             target = str(payload.get("target", ""))
             requested_features = payload.get("features")
             if requested_features is None:
@@ -1195,12 +1332,18 @@ class InteractiveSession:
         preview_agent.prompt_overrides = {}
         preview_agent.ranking_metric = settings.get("ranking_metric", "mse")
         preview_agent.larger_is_better = bool(settings.get("larger_is_better", False))
-        preview_agent.run_state = SimpleNamespace(ranked_candidates=lambda: [], pareto_indices=lambda records: [])
+        preview_agent.run_state = SimpleNamespace(
+            ranked_candidates=lambda: [], pareto_indices=lambda records: []
+        )
         messages = preview_agent.create_initial_prompt_messages(description, X, y, [])
         return {
             "problem_description": description,
-            "system_prompt": next(message["content"] for message in messages if message["role"] == "system"),
-            "user_prompt": next(message["content"] for message in messages if message["role"] == "user"),
+            "system_prompt": next(
+                message["content"] for message in messages if message["role"] == "system"
+            ),
+            "user_prompt": next(
+                message["content"] for message in messages if message["role"] == "user"
+            ),
         }
 
     def _select_context_columns(
@@ -1208,12 +1351,7 @@ class InteractiveSession:
         target: str,
         features: Any,
     ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
-        if (
-            not target
-            or not isinstance(features, list)
-            or not features
-            or target in features
-        ):
+        if not target or not isinstance(features, list) or not features or target in features:
             raise ValueError("Select a target and at least one distinct feature")
 
         def array(name: str) -> np.ndarray | None:
@@ -1242,11 +1380,7 @@ class InteractiveSession:
             for name, value in descriptions.items()
         ):
             raise ValueError("variable_descriptions must map column names to text")
-        return {
-            name: value.strip()
-            for name, value in descriptions.items()
-            if value.strip()
-        }
+        return {name: value.strip() for name, value in descriptions.items() if value.strip()}
 
     def create_demo(self, kind: str = "polynomial"):
         """Create and load a manifest-backed sample dataset.
@@ -1262,36 +1396,40 @@ class InteractiveSession:
             if path.exists() or path.is_symlink():
                 if path.is_symlink() or not path.is_dir() or any(path.iterdir()):
                     raise FileExistsError("context.data already exists and is not empty")
-                path.rmdir()
-            staging = Path(tempfile.mkdtemp(prefix=".context-data-", dir=self.workspace))
+                self.workspace_manager.remove("context.data")
+            arrays, manifest, target = build_demo(kind)
+            self.workspace_manager.create_directory("context.data")
             try:
-                arrays, manifest, target = build_demo(kind)
                 for name, value in arrays.items():
-                    np.save(staging / f"{name}.npy", value)
+                    with self.workspace_manager.open_for_write(
+                        f"context.data/{name}.npy", "xb"
+                    ) as stream:
+                        np.save(stream, value)
                 for name, spec in manifest["variables"].items():
                     spec["file"] = f"{name}.npy"
-                (staging / "manifest.json").write_text(
-                    json.dumps(manifest, indent=2), encoding="utf-8",
-                )
-                load_context_data(staging)
-                staging.replace(path)
-                self.context.commit_context_data(load_context_data(path))
+                with self.workspace_manager.open_for_write(
+                    "context.data/manifest.json", "x", encoding="utf-8"
+                ) as stream:
+                    json.dump(manifest, stream, indent=2)
+                loaded = load_context_data(path, workspace=self.workspace_manager)
+                self.context.commit_context_data(loaded)
                 self.context.target = target
-            finally:
-                shutil.rmtree(staging, ignore_errors=True)
+            except Exception:
+                self.workspace_manager.remove("context.data", recursive=True, missing_ok=True)
+                raise
             return path
 
     def reload_context_data(self):
         """Reload ``context.data`` from the workspace into the shared context."""
         with self.lock:
             if self.data_state in {"running", "stopping"}:
-                raise ValueError("Wait for the data-preparation agent to finish before reloading context.data")
+                raise ValueError(
+                    "Wait for the data-preparation agent to finish before reloading context.data"
+                )
             if self.state == "starting":
                 raise ValueError("Wait for symbolic regression to reach a controllable boundary")
             control = self.sr_interaction_manager.status()
-            if self.state == "running" and not (
-                control["interaction_state"] == "paused"
-            ):
+            if self.state == "running" and not (control["interaction_state"] == "paused"):
                 raise ValueError(
                     "Pause symbolic regression and wait for the safe-boundary acknowledgement "
                     "before reloading context.data"
@@ -1299,7 +1437,12 @@ class InteractiveSession:
             directory = self.workspace / "context.data"
             if not (directory / "manifest.json").is_file():
                 raise ValueError("context.data/manifest.json does not exist")
-            change = self.context.commit_context_data(load_context_data(directory))
+            change = self.context.commit_context_data(
+                load_context_data(
+                    directory,
+                    workspace=self.workspace_manager,
+                )
+            )
             self.variable_descriptions = dict(self.context.variable_descriptions)
             return {**change, "context": self.context.schema()}
 
@@ -1338,10 +1481,13 @@ class InteractiveSession:
             self.result = json_value(result)
             self.state = result.get("status", "completed")
             self.context.args.sr_active = False
-        manager.publish_event("execution_completed" if self.state != "failed" else "execution_failed", {
-            "status": self.state,
-            "result": self.result,
-        })
+        manager.publish_event(
+            "execution_completed" if self.state != "failed" else "execution_failed",
+            {
+                "status": self.state,
+                "result": self.result,
+            },
+        )
         if manager.state != "paused":
             manager.finish_agent_execution()
 
@@ -1365,8 +1511,11 @@ class InteractiveSession:
         """
         allowed = set(RUNTIME_SETTING_NAMES)
         bounded_integers = {
-            "max_refinement_depth", "local_sample_size", "global_width",
-            "max_restart_loop", "restart_top_k",
+            "max_refinement_depth",
+            "local_sample_size",
+            "global_width",
+            "max_restart_loop",
+            "restart_top_k",
         }
         nonnegative_integers = {"max_workers"}
         result = {k: v for k, v in payload.items() if k in allowed}
@@ -1387,7 +1536,9 @@ class InteractiveSession:
                 if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 <= v < 1:
                     raise ValueError("validation_fraction must be in [0, 1)")
             elif k in {
-                "auto_routing", "larger_is_better", "force_initial_diagnostics",
+                "auto_routing",
+                "larger_is_better",
+                "force_initial_diagnostics",
                 "pause_on_truncated_response",
             }:
                 if not isinstance(v, bool):
@@ -1408,11 +1559,19 @@ class InteractiveSession:
             elif not isinstance(v, str) or not v.strip():
                 raise ValueError(f"{k} must be non-empty")
         if "llm_provider" in result and result["llm_provider"] not in {
-            "openrouter", "openai", "deepseek", "siliconflow", "gemini", "lmstudio"
+            "openrouter",
+            "openai",
+            "deepseek",
+            "siliconflow",
+            "gemini",
+            "lmstudio",
         }:
             raise ValueError("Unsupported web model provider")
         if "tool_parser" in result and result["tool_parser"] not in {
-            "openai", "text", "json", "xml"
+            "openai",
+            "text",
+            "json",
+            "xml",
         }:
             raise ValueError("Unsupported tool parser")
         if "split_by" in result and result["split_by"] not in {"random", "ood"}:
@@ -1446,7 +1605,10 @@ class InteractiveSession:
         if "llm_provider" in result and result["llm_provider"] not in PROVIDER_API_KEY_VARIABLES:
             raise ValueError("Unsupported web model provider")
         if "tool_parser" in result and result["tool_parser"] not in {
-            "openai", "text", "json", "xml"
+            "openai",
+            "text",
+            "json",
+            "xml",
         }:
             raise ValueError("Unsupported tool parser")
         return result
@@ -1455,8 +1617,13 @@ class InteractiveSession:
     def validate_evaluator_agent_settings(payload):
         """Validate the restricted evaluator-agent model settings."""
         allowed = {
-            "llm_provider", "llm_model", "tool_parser", "llm_max_tokens",
-            "proxy", "tools", "skills",
+            "llm_provider",
+            "llm_model",
+            "tool_parser",
+            "llm_max_tokens",
+            "proxy",
+            "tools",
+            "skills",
         }
         unknown = set(payload) - allowed
         if unknown:
@@ -1528,22 +1695,27 @@ class InteractiveSession:
                 tool_parser_name=settings["tool_parser"],
                 environment=environment,
             )
-            plain_rows = list(api(
-                "Reply with exactly SRHARNESS_OK.",
-                n=1,
-                max_tokens=min(settings["llm_max_tokens"], 64),
-            ))
-            tool_rows = list(api(
-                "Call report_model_test with answer set to SRHARNESS_TOOL_OK. "
-                "Use the tool instead of answering in plain text.",
-                n=1,
-                max_tokens=min(settings["llm_max_tokens"], 128),
-            ))
+            plain_rows = list(
+                api(
+                    "Reply with exactly SRHARNESS_OK.",
+                    n=1,
+                    max_tokens=min(settings["llm_max_tokens"], 64),
+                )
+            )
+            tool_rows = list(
+                api(
+                    "Call report_model_test with answer set to SRHARNESS_TOOL_OK. "
+                    "Use the tool instead of answering in plain text.",
+                    n=1,
+                    max_tokens=min(settings["llm_max_tokens"], 128),
+                )
+            )
         plain_response = plain_rows[0][0] if plain_rows else ""
         calls = [call for _, row_calls, _ in tool_rows for call in (row_calls or [])]
         expected_call = next(
             (
-                call for call in calls
+                call
+                for call in calls
                 if call.name == "report_model_test"
                 and call.params.get("answer") == "SRHARNESS_TOOL_OK"
             ),
@@ -1577,7 +1749,9 @@ class InteractiveSession:
                     if name in settings:
                         setattr(self.context.args, name, settings[name])
                 if set(settings) & {
-                    "validation_fraction", "split_random_state", "split_by",
+                    "validation_fraction",
+                    "split_random_state",
+                    "split_by",
                     "split_ood_variable",
                 }:
                     self.context.invalidate_splits()

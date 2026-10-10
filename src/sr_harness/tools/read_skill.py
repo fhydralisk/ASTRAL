@@ -3,6 +3,7 @@ from typing import Any, Dict
 from dataclasses import replace
 from xml.sax.saxutils import escape
 from ..skills import Skill, SkillManager
+from ..core import AgentContext
 from .base_tool import BaseTool, ToolMetadata
 
 
@@ -29,14 +30,15 @@ def _format_description(skills: Dict[str, Skill]) -> str:
 @BaseTool.register("read_skill")
 class ReadSkill(BaseTool):
     """Implementation of the read skill."""
+
     default_skill_manager = SkillManager()
     metadata = ToolMetadata(
         name="read_skill",
         description=_format_description(default_skill_manager.load_skills()),
     )
 
-    def __init__(self, **context: Any) -> None:
-        super().__init__(**context)
+    def __init__(self, context: AgentContext | None = None) -> None:
+        super().__init__(context=context)
         if hasattr(self.context.args, "skill_manager"):
             self.skill_manager = self.context.args.skill_manager
             if not isinstance(self.skill_manager, SkillManager):
@@ -71,9 +73,7 @@ class ReadSkill(BaseTool):
             if not query.strip():
                 raise ValueError("Provide either an exact skill name or a search query.")
             matches = [
-                skill for skill in self.skill_manager.search_skills(
-                    query, limit=max(5, len(self.skill_manager.load_skills()))
-                )
+                skill for skill in self.skill_manager.search_skills(query)
                 if skill.name in self.enabled_skills
             ][:5]
             return {

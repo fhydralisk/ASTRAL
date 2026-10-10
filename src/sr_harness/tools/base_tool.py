@@ -5,7 +5,6 @@
 """
 from __future__ import annotations
 import re
-import argparse
 import time
 import warnings
 from numbers import Real
@@ -18,7 +17,7 @@ from docstring_parser import DocstringStyle, parse
 from abc import ABC, abstractmethod
 from types import NoneType, UnionType
 from inspect import Parameter, signature
-from typing import TYPE_CHECKING, Any, Dict, List, Literal, Union, get_args, get_origin, get_type_hints
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Literal, Union, get_args, get_origin, get_type_hints
 from ..utils import FactoryMixin, log_exception
 from ..core import AgentContext
 from ..core.tool import ToolCallResult, ToolMetadata
@@ -58,33 +57,19 @@ class BaseTool(ABC, FactoryMixin):
         if cls.metadata.parameters is None:
             cls.metadata.parameters = cls.infer_tool_parameters()
 
-    def __init__(self, context: AgentContext | None = None, **values: Any) -> None:
-        """ context 中传入一些工具执行时需要的上下文信息，如数据、模型等，这些信息不适合放在 execute 的参数列表中让 LLM 生成 """
-        if isinstance(context, AgentContext):
-            self.context = context
-            for name, value in values.items():
-                setattr(self.context.args, name, value)
-            return
-        if context is not None:
+    def __init__(self, context: AgentContext | None = None) -> None:
+        """Initialize a tool with its authoritative runtime context.
+
+        Args:
+            context: Context used by the tool. An empty context is created when
+                omitted for tools that do not require runtime data.
+
+        Raises:
+            TypeError: If ``context`` is not an :class:`AgentContext`.
+        """
+        if context is not None and not isinstance(context, AgentContext):
             raise TypeError("context must be an AgentContext or None")
-        supplied = dict(values)
-        data = supplied.pop("data", {})
-        target = supplied.pop("target", None)
-        evaluation_data = supplied.pop("evaluation_data", None)
-        evaluator_provided = "evaluator" in supplied
-        evaluator = supplied.pop("evaluator", None)
-        workspace = supplied.pop("workspace", supplied.pop("workspace_dir", None))
-        supplied.setdefault("validation_fraction", 0)
-        args = argparse.Namespace(**supplied)
-        context_kwargs = {"args": args, "data": data, "target": target, "workspace": workspace}
-        if evaluator_provided:
-            context_kwargs["evaluator"] = evaluator
-        self.context = AgentContext(**context_kwargs)
-        if evaluation_data is not None:
-            self.context._split_cache = {
-                "train": self.context.with_data(self.context.data),
-                "validation": self.context.with_data({name: np.asarray(value) for name, value in evaluation_data.items()}),
-            }
+        self.context = context if context is not None else AgentContext()
 
     @classmethod
     def get_doc(cls) -> dict[str, str] | None:
@@ -265,17 +250,18 @@ class BaseTool(ABC, FactoryMixin):
         return tool_list
 
     @classmethod
-    def load_custom_tool(cls, path: str) -> dict:
+    def load_custom_tool(cls, source: str, *, path: str | Path) -> dict:
         """Inspect one sandboxed ``BaseTool`` stored in a skill's ``tool.py``.
 
         Args:
-            path: Path to the custom Python tool module.
+            source: Python source defining the custom tool.
+            path: Origin path used for diagnostics and source identity.
 
         Returns:
             Metadata and a sandbox-backed proxy class for the tool."""
         path = Path(path).resolve()
-        if path.suffix != ".py" or not path.is_file():
-            raise ValueError(f"Custom tool file does not exist or is not a Python file: {path}")
+        if path.suffix != ".py":
+            raise ValueError(f"Custom tool source must be a Python file: {path}")
         from .sandboxed_custom_tool import create_sandboxed_custom_tool
 
         for registered_name, registered_cls in list(cls.REGISTRY_DICT.items()):
@@ -283,7 +269,6 @@ class BaseTool(ABC, FactoryMixin):
                 del cls.REGISTRY_DICT[registered_name]
         registry_before = dict(cls.REGISTRY_DICT)
         try:
-            source = path.read_text(encoding="utf-8")
             if len(source) > 50_000:
                 raise ValueError("Custom tool source exceeds 50000 characters")
             # Parsing is side-effect free and preserves a useful SyntaxError for authors;
@@ -317,10 +302,10 @@ class BaseTool(ABC, FactoryMixin):
             list[type['BaseTool']]: The operation result.
         """
         custom_tool_cls_list = []
-        for skill in skill_manager.discover_tool_skills():
+        for skill, source in skill_manager.load_tool_skills():
             tool_path = skill.skill_directory / "tool.py"
             try:
-                loaded = cls.load_custom_tool(tool_path)
+                loaded = cls.load_custom_tool(source, path=tool_path)
                 custom_tool_cls_list.append(cls.REGISTRY_DICT[loaded["tool_name"]])
             except Exception as e:
                 _logger.warning(f"Skipping custom tool {tool_path}: {log_exception(e)}")

@@ -1,6 +1,8 @@
 # Copyright (c) 2026-present, Yumeow. Licensed under the MIT License.
 """代码模型评估工具的单元测试。"""
 
+from sr_harness.core import AgentContext
+
 import numpy as np
 import pytest
 
@@ -11,7 +13,7 @@ from sr_harness.tools.evaluate_code import EvaluateCodeTool
 class TestEvaluateCodeTool:
     @staticmethod
     def make_tool(X, y):
-        return EvaluateCodeTool(data=X | {"y": y}, target="y")
+        return EvaluateCodeTool(context=AgentContext(data=X | {"y": y}, target="y"))
 
     def test_doc_recommends_engine_skills_before_code(self):
         description = EvaluateCodeTool.metadata.description
@@ -102,7 +104,7 @@ class TestEvaluateCodeTool:
             "z": np.array([3.0, 5.0]),
             "y": np.array([2.0, 4.0]),
         }
-        tool = EvaluateCodeTool(data=data, target="y")
+        tool = EvaluateCodeTool(context=AgentContext(data=data, target="y"))
 
         result = tool.execute(
             model_code="def build_model(data):\n    return {'a': 2.0, 'b': 1.0}",

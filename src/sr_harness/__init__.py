@@ -4,7 +4,7 @@ from .agents.evaluator_construction_agent import EvaluatorConstructionAgent
 from .agents.sr_agent import SRAgent
 from .agents.sr_agent_interactive import SRAgentInteractive
 from .core import AgentContext, ToolCall
-from .evaluator import DefaultEvaluator, GraphEvaluator, load_custom_evaluator
+from .evaluator import DefaultEvaluator, GraphEvaluator
 from .runtime import InteractionManager, SRInteractionManager
 from . import api
 from . import tools
@@ -24,7 +24,6 @@ __all__ = [
     "SRInteractionManager",
     "ToolCall",
     "api",
-    "load_custom_evaluator",
     "parser",
     "tools",
     "utils",

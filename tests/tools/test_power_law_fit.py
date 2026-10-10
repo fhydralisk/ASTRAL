@@ -1,8 +1,10 @@
 from __future__ import annotations
+from sr_harness.core import AgentContext
 
 import numpy as np
 
 from sr_harness.tools.power_law_fit import PowerLawFitTool
+from tests.tools import tool_context
 
 
 def test_recovers_multivariate_power_law():
@@ -10,7 +12,9 @@ def test_recovers_multivariate_power_law():
     x1 = rng.uniform(0.5, 3, 300)
     x2 = rng.uniform(0.5, 3, 300)
     y = 2.5 * x1**2 * x2**-0.5
-    result = PowerLawFitTool(data={"x1": x1, "x2": x2, "y": y}, target="y").execute()
+    result = PowerLawFitTool(
+        context=AgentContext(data={"x1": x1, "x2": x2, "y": y}, target="y")
+    ).execute()
     assert abs(result["exponents"]["x1"] - 2) < 1e-10
     assert abs(result["exponents"]["x2"] + 0.5) < 1e-10
     assert result["data_split_results"]["train"]["metrics"]["rmse"] < 1e-9
@@ -22,7 +26,10 @@ def test_recovers_multivariate_power_law():
     text = PowerLawFitTool.format_result_dict(result)
     assert "Training-set log-space RMSE" not in text
     assert "Samples satisfying the nonzero-target" not in text
-    assert "Exponent stability (Divide the 300 training samples into 5 folds, use 4 of the folds to fit the exponents, and repeat the process 5 times):" in text
+    assert (
+        "Exponent stability (Divide the 300 training samples into 5 folds, use 4 of the folds to fit the exponents, and repeat the process 5 times):"
+        in text
+    )
     assert "x1: 95% CI=[" in text
 
 
@@ -36,7 +43,7 @@ def test_ci_endpoints_add_digits_only_when_needed():
 def test_rejects_sign_changing_target():
     x = np.linspace(1, 2, 20)
     y = np.linspace(-1, 1, 20)
-    result = PowerLawFitTool(data={"x": x, "y": y}, target="y")()
+    result = PowerLawFitTool(context=AgentContext(data={"x": x, "y": y}, target="y"))()
     assert result.ok is True
     assert result.result == {
         "exceptions": ["y has 10/20 (50.0%) non-positive finite values"],
@@ -53,7 +60,7 @@ def test_reports_nonpositive_fraction_for_every_affected_variable():
     x1 = np.array([-2.0, 0.0, 1.0, 2.0, 3.0])
     x2 = np.array([1.0, 2.0, 0.0, 2.0, 3.0])
     y = np.array([1.0, -1.0, 2.0, 2.0, 3.0])
-    result = PowerLawFitTool(data={"x1": x1, "x2": x2, "y": y}, target="y")()
+    result = PowerLawFitTool(context=AgentContext(data={"x1": x1, "x2": x2, "y": y}, target="y"))()
     assert result.ok is True
     assert len(result.result["exceptions"]) == 3
     assert "x1 has 2/5 (40.0%)" in result.result["exceptions"][0]
@@ -65,7 +72,7 @@ def test_reports_nonpositive_fraction_for_every_affected_variable():
 def test_reports_nonfinite_values_and_invalid_y_type():
     x = np.array([1.0, np.nan, 2.0])
     y = np.array([1.0, 2.0, 3.0])
-    tool = PowerLawFitTool(data={"x": x, "y": y}, target="y")
+    tool = PowerLawFitTool(context=AgentContext(data={"x": x, "y": y}, target="y"))
     result = tool.execute()
     assert "1/3 (33.3%) non-finite values" in result["exceptions"][0]
     assert "y must be a string" in tool.execute(y=["y"])["exceptions"][0]
@@ -78,7 +85,9 @@ def test_domain_error_lists_only_present_issues_and_nonzero_small_percentages():
     a[:12] = np.nan
     y = np.ones(4000)
     y[:123] = -1
-    call = PowerLawFitTool(data={"t": t, "A": a, "dA_dt": y}, target="dA_dt")()
+    call = PowerLawFitTool(
+        context=AgentContext(data={"t": t, "A": a, "dA_dt": y}, target="dA_dt")
+    )()
     assert call.result_str == (
         "Power-law fitting not applicable:\n"
         "    t has 1/4000 (0.025%) non-positive finite values\n"
@@ -90,7 +99,9 @@ def test_domain_error_lists_only_present_issues_and_nonzero_small_percentages():
 
 def test_negative_infinity_is_counted_only_as_nonfinite():
     call = PowerLawFitTool(
-        data={"x": np.array([-np.inf, -1.0, 1.0]), "y": np.ones(3)}, target="y"
+        context=AgentContext(
+            data={"x": np.array([-np.inf, -1.0, 1.0]), "y": np.ones(3)}, target="y"
+        )
     )()
     assert call.result["exceptions"] == [
         "x has 1/3 (33.3%) non-positive finite values",
@@ -101,7 +112,7 @@ def test_negative_infinity_is_counted_only_as_nonfinite():
 def test_rejects_distant_exponent_snap():
     x = np.linspace(0.5, 4, 300)
     y = 3 * x**1.137
-    result = PowerLawFitTool(data={"x": x, "y": y}, target="y").execute(
+    result = PowerLawFitTool(context=AgentContext(data={"x": x, "y": y}, target="y")).execute(
         snap_exponents=True, max_denominator=2, snap_tolerance=0.03
     )
     assert result["simple_exponent_check"]["rounding_applied"] is False
@@ -112,13 +123,13 @@ def test_simplified_exponent_check_reports_validation_r2_without_using_it_for_se
     x = np.exp(np.linspace(-1, 1, 300))
     validation_x = np.exp(np.linspace(-0.9, 0.9, 100))
     tool = PowerLawFitTool(
-        data={"x": x, "y": 3 * x**1.137},
-        evaluation_data={"x": validation_x, "y": 3 * validation_x},
-        target="y",
+        context=tool_context(
+            data={"x": x, "y": 3 * x**1.137},
+            evaluation_data={"x": validation_x, "y": 3 * validation_x},
+            target="y",
+        )
     )
-    result = tool.execute(
-        snap_exponents=True, max_denominator=1, snap_tolerance=0.03
-    )
+    result = tool.execute(snap_exponents=True, max_denominator=1, snap_tolerance=0.03)
     check = result["simple_exponent_check"]
     assert check["rounding_applied"] is False
     assert check["snapped_validation_r2"] > check["raw_validation_r2"]
@@ -131,21 +142,28 @@ def test_simplified_exponent_check_reports_validation_r2_without_using_it_for_se
 def test_accepts_exact_simple_fraction_snap():
     x = np.linspace(0.5, 4, 300)
     y = 3 * x**1.5
-    result = PowerLawFitTool(data={"x": x, "y": y}, target="y").execute(
-        snap_exponents=True, max_denominator=4, snap_tolerance=0.03,
+    result = PowerLawFitTool(context=AgentContext(data={"x": x, "y": y}, target="y")).execute(
+        snap_exponents=True,
+        max_denominator=4,
+        snap_tolerance=0.03,
     )
     assert result["simple_exponent_check"]["rounding_applied"] is True
     assert result["exponents"]["x"] == 1.5
-    assert "the simplified exponents were thus used as the best fitted power-law formula." in PowerLawFitTool.format_result_dict(result)
+    assert (
+        "the simplified exponents were thus used as the best fitted power-law formula."
+        in PowerLawFitTool.format_result_dict(result)
+    )
 
 
 def test_fractional_exponent_is_visible_in_formula_and_check():
     x = np.linspace(0.5, 3, 300)
     validation_x = np.linspace(0.6, 3.2, 60)
     tool = PowerLawFitTool(
-        data={"x": x, "y": x ** (4 / 3)},
-        evaluation_data={"x": validation_x, "y": validation_x ** (4 / 3)},
-        target="y",
+        context=tool_context(
+            data={"x": x, "y": x ** (4 / 3)},
+            evaluation_data={"x": validation_x, "y": validation_x ** (4 / 3)},
+            target="y",
+        )
     )
     result = tool.execute(snap_exponents=True)
     assert result["simple_exponent_check"]["rounding_applied"] is True

@@ -3,13 +3,15 @@
 
 from __future__ import annotations
 
+from sr_harness.core import AgentContext
+
 import numpy as np
 
 from sr_harness.tools.call_pysr import PySRTool
 
 
 def make_tool(x: dict[str, np.ndarray], y: np.ndarray) -> PySRTool:
-    return PySRTool(data=x | {"y": y}, target="y")
+    return PySRTool(context=AgentContext(data=x | {"y": y}, target="y"))
 
 
 def train_metrics(result: dict) -> dict:
@@ -24,9 +26,7 @@ class TestPySRTool:
         restored = tool._restore_feature_names(cleaned, ["x1"], ["x"])
         parsed = tool.parse_formula(restored)
         x = np.linspace(1.0, 2.0, 10)
-        np.testing.assert_allclose(
-            parsed.eval({"x": x}).flatten(), (x + (x**2)**3)**2
-        )
+        np.testing.assert_allclose(parsed.eval({"x": x}).flatten(), (x + (x**2) ** 3) ** 2)
 
     def test_execute_accepts_pysr_square_and_cube_candidates(self, monkeypatch):
         x = np.linspace(0.5, 2.0, 20)
@@ -45,25 +45,42 @@ class TestPySRTool:
         assert result["exceptions"] == []
 
     def test_format_result_reads_unified_pareto_metrics(self):
-        rendered = PySRTool.format_result_dict({
-            "formula": "x",
-            "target_expression": "y",
-            "data_split_results": {"train": {"metrics": {
-                "mse": 0.0, "rmse": 0.0, "r2": 1.0, "complexity": 1,
-            }}},
-            "is_candidate": True,
-            "method": "PySR",
-            "backend_complexity": 1,
-            "all_formulas": [{
+        rendered = PySRTool.format_result_dict(
+            {
                 "formula": "x",
-                "data_split_results": {"train": {"metrics": {
-                    "mse": 0.0, "rmse": 0.0, "complexity": 1,
-                }}},
+                "target_expression": "y",
+                "data_split_results": {
+                    "train": {
+                        "metrics": {
+                            "mse": 0.0,
+                            "rmse": 0.0,
+                            "r2": 1.0,
+                            "complexity": 1,
+                        }
+                    }
+                },
                 "is_candidate": True,
-            }],
-            "exceptions": [],
-            "retry_hint": None,
-        })
+                "method": "PySR",
+                "backend_complexity": 1,
+                "all_formulas": [
+                    {
+                        "formula": "x",
+                        "data_split_results": {
+                            "train": {
+                                "metrics": {
+                                    "mse": 0.0,
+                                    "rmse": 0.0,
+                                    "complexity": 1,
+                                }
+                            }
+                        },
+                        "is_candidate": True,
+                    }
+                ],
+                "exceptions": [],
+                "retry_hint": None,
+            }
+        )
 
         assert "RMSE=0" in rendered
         assert "Best formula found:\n    y = x" in rendered
@@ -180,7 +197,7 @@ class TestPySRTool:
         """LLM sometimes passes y with extra quotes like '"omega"'."""
         x = np.linspace(-2.0, 2.0, 20)
         omega = 2 * x + 1
-        tool = PySRTool(data={"x": x, "omega": omega}, target="omega")
+        tool = PySRTool(context=AgentContext(data={"x": x, "omega": omega}, target="omega"))
 
         def fake_run_pysr(self, X, y_fit, x_names, binary_ops, unary_ops, timeout, maxsize):
             return "2*x1 + 1", [{"formula": "2*x1 + 1", "loss": 0.0, "complexity": 3}], 3
@@ -200,9 +217,7 @@ class TestPySRTool:
             return "x1", [], 1
 
         monkeypatch.setattr(PySRTool, "_run_pysr", fake_run_pysr)
-        result = tool.execute(
-            binary_operators=["+"], unary_operators=[], x=["x"], y="log(y)"
-        )
+        result = tool.execute(binary_operators=["+"], unary_operators=[], x=["x"], y="log(y)")
 
         assert train_metrics(result)["mse"] < 1e-12
         assert train_metrics(result)["complexity"] == 1
