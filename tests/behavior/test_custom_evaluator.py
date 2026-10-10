@@ -81,6 +81,60 @@ class EnvironmentEvaluator(DefaultEvaluator):
     assert result["data_split_results"]["train"]["metrics"]["secret_visible"] == 0
 
 
+def test_custom_evaluator_receives_only_whitelisted_context_arguments():
+    evaluator = load_custom_evaluator(
+        source="""from .default_evaluator import DefaultEvaluator
+
+class ContextArgumentsEvaluator(DefaultEvaluator):
+    @classmethod
+    def evaluate_candidate(cls, f, context):
+        names = set(vars(context.args))
+        context.data["x"][0] = 999.0
+        context.args.validation_fraction = 0.75
+        context.variable_descriptions["x"] = "changed in sandbox"
+        context.target = "x"
+        return {
+            "mse": 0.0,
+            "credentials_visible": int(bool(names & {
+                "api_environment", "openrouter_api_key", "proxy", "private_secret"
+            })),
+            "split_settings_visible": int({
+                "validation_fraction", "split_by", "split_random_state",
+                "split_ood_variable"
+            } <= names),
+        }
+"""
+    )
+    args = argparse.Namespace(
+        validation_fraction=0,
+        split_by="random",
+        split_random_state=42,
+        split_ood_variable=None,
+        ranking_metric="mse",
+        larger_is_better=False,
+        api_environment={"OPENROUTER_API_KEY": "not-for-custom-code"},
+        openrouter_api_key="not-for-custom-code",
+        proxy="http://private-proxy",
+        private_secret="not-for-custom-code",
+    )
+    context = AgentContext(
+        args=args,
+        data={"x": np.arange(3.0), "y": np.arange(3.0)},
+        target="y",
+        evaluator=evaluator,
+    )
+
+    result = EvaluateTool(context=context).execute(f="x", show_diagnostics=False)
+    metrics = result["data_split_results"]["train"]["metrics"]
+
+    assert metrics["credentials_visible"] == 0
+    assert metrics["split_settings_visible"] == 1
+    assert context.data["x"][0] == 0.0
+    assert context.args.validation_fraction == 0
+    assert context.variable_descriptions["x"] == ""
+    assert context.target == "y"
+
+
 def test_agent_context_keeps_runtime_arguments_separate_from_data():
     args = argparse.Namespace(validation_fraction=0)
     context = AgentContext(args=args, data={"x": np.arange(3.0)}, target="x")

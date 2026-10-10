@@ -266,54 +266,40 @@ class BaseTool(ABC, FactoryMixin):
 
     @classmethod
     def load_custom_tool(cls, path: str) -> dict:
-        """Load or update one ``BaseTool`` stored in a skill's ``tool.py``.
-
-        Reloading the same path replaces its previous registration. A load failure leaves that path unavailable, and a name owned by another path is rejected.
+        """Inspect one sandboxed ``BaseTool`` stored in a skill's ``tool.py``.
 
         Args:
             path: Path to the custom Python tool module.
 
         Returns:
-            Registration details for the loaded tool."""
+            Metadata and a sandbox-backed proxy class for the tool."""
         path = Path(path).resolve()
         if path.suffix != ".py" or not path.is_file():
             raise ValueError(f"Custom tool file does not exist or is not a Python file: {path}")
+        from .sandboxed_custom_tool import create_sandboxed_custom_tool
 
         for registered_name, registered_cls in list(cls.REGISTRY_DICT.items()):
             if getattr(registered_cls, "source_path", None) == path:
                 del cls.REGISTRY_DICT[registered_name]
         registry_before = dict(cls.REGISTRY_DICT)
-        namespace = {
-            "__name__": f"sr_agent_custom_tool_{abs(hash(str(path)))}",
-            "__file__": str(path),
-        }
         try:
-            exec(compile(path.read_bytes(), str(path), "exec"), namespace)
-            candidates = []
-            for c in namespace.values():
-                if isinstance(c, type) and issubclass(c, cls) and c is not cls:
-                    candidates.append(c)
-            if len(candidates) != 1:
-                raise ValueError(f"Custom tool must define exactly one BaseTool subclass, found {len(candidates)}.")
-            tool_cls = candidates[0]
-
-            if any(registered is tool_cls for registered in cls.REGISTRY_DICT.values()):
-                raise ValueError(
-                    "Custom tools must not use @BaseTool.register(...); "
-                    "set metadata.name and let the loader register the tool."
-                )
-
-            tool_name = getattr(tool_cls.metadata, "name", None)
-            if not isinstance(tool_name, str) or not tool_name.strip():
-                raise ValueError("Custom tool metadata.name must be a non-empty string.")
-            tool_name = tool_name.strip()
-
+            source = path.read_text(encoding="utf-8")
+            if len(source) > 50_000:
+                raise ValueError("Custom tool source exceeds 50000 characters")
+            # Parsing is side-effect free and preserves a useful SyntaxError for authors;
+            # importing and inspecting the module still happens only in the sandbox.
+            compile(source, str(path), "exec", dont_inherit=True)
+            tool_cls = create_sandboxed_custom_tool(source, path)
+            tool_name = tool_cls.metadata.name.strip()
             if tool_name in registry_before:
                 raise ValueError(f"Tool name '{tool_name}' is already registered.")
-            tool_cls.source_path = path
-
             cls.register(tool_name)(tool_cls)
-            return {"tool_name": tool_name, "path": str(path), "class_name": tool_cls.__name__}
+            return {
+                "tool_name": tool_name,
+                "path": str(path),
+                "class_name": tool_cls.__name__,
+                "tool_class": tool_cls,
+            }
         except Exception:
             cls.REGISTRY_DICT.clear()
             cls.REGISTRY_DICT.update(registry_before)

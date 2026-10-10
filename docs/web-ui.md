@@ -83,7 +83,7 @@ Agent 写入后应调用 `validate_context_data`。只有有效数据才由 `Int
 
 `workspace_code_executor` 不再依赖 AST 白名单判断 Python 源码是否安全。每次调用都会启动一个短生命周期的操作系统沙箱，使用 Landlock 限制文件访问，并用 seccomp 禁止网络、创建子进程和主机管理相关系统调用。沙箱只继承经过清理的环境变量，并限制运行时间、地址空间、文件大小、打开文件数和输出大小；如果内核无法提供所需隔离，工具会拒绝执行。
 
-`code_executor` 和 `evaluate_code` 只接收当前数据，并仅拥有临时写入空间；`workspace_code_executor` 额外获得当前对话工作区的读写权限和显式挂载输入的只读权限。Python 运行时与已安装科学计算库以只读方式可见，以便正常导入 NumPy、SciPy、pandas 等依赖。自定义 Evaluator 使用同一套 data-only 沙箱执行。
+`code_executor`、`evaluate_code`、自定义 Tool 和自定义 Evaluator 只接收当前数据，并仅拥有临时写入空间，不能访问对话工作区；只有 `workspace_code_executor` 额外获得当前对话工作区的受控读写权限和显式挂载输入的只读权限。Python 运行时与已安装科学计算库以只读方式可见，以便正常导入 NumPy、SciPy、pandas 等依赖。传入自定义 Tool 和 Evaluator 的数据与元数据均为序列化副本，沙箱内对 `AgentContext` 的原地修改不会反向改变服务进程中的对象；大型数组按数据版本生成一次只读快照，并由后续 worker 以 copy-on-write 方式复用，不会在每次调用时完整复制。`context.args` 采用白名单，只包含数据切分和评估所需的参数，API Key、代理配置、模型设置和会话内部对象不会进入自定义代码。
 
 SRHarness 提供两种只读机制：
 

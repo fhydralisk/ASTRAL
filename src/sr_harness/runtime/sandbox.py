@@ -10,7 +10,9 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+import weakref
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
@@ -105,6 +107,20 @@ class _ProtocolResult:
     peak_memory_bytes: int
 
 
+@dataclass
+class _ArraySnapshot:
+    """Reusable read-only-on-disk arrays for one AgentContext data revision."""
+
+    temporary_directory: tempfile.TemporaryDirectory[str]
+    root: Path
+    revision: int
+    signature: tuple[tuple[str, int, tuple[int, ...], str], ...]
+
+
+_ARRAY_SNAPSHOT_LOCK = threading.RLock()
+_ARRAY_SNAPSHOTS: weakref.WeakKeyDictionary[Any, _ArraySnapshot] = weakref.WeakKeyDictionary()
+
+
 def _write_array_groups(root: Path, groups: dict[str, dict[str, Any]]) -> None:
     """Serialize named array groups without pickle support."""
     manifest: dict[str, dict[str, str]] = {}
@@ -122,6 +138,36 @@ def _write_array_groups(root: Path, groups: dict[str, dict[str, Any]]) -> None:
             manifest[group_name][str(name)] = filename
             index += 1
     (root / "arrays.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+
+def _context_array_snapshot(context: Any) -> _ArraySnapshot:
+    """Return a reusable immutable-on-disk snapshot of ``context.data``."""
+    revision = int(getattr(context.args, "data_revision", 0))
+    signature = tuple(
+        sorted(
+            (
+                str(name),
+                id(value),
+                tuple(np.asarray(value).shape),
+                np.asarray(value).dtype.str,
+            )
+            for name, value in context.data.items()
+        )
+    )
+    with _ARRAY_SNAPSHOT_LOCK:
+        current = _ARRAY_SNAPSHOTS.get(context)
+        if (
+            current is not None
+            and current.revision == revision
+            and current.signature == signature
+        ):
+            return current
+        temporary = tempfile.TemporaryDirectory(prefix="srh-sandbox-arrays-")
+        root = Path(temporary.name)
+        _write_array_groups(root, {"context": context.data})
+        snapshot = _ArraySnapshot(temporary, root, revision, signature)
+        _ARRAY_SNAPSHOTS[context] = snapshot
+        return snapshot
 
 
 def _read_array_groups(root: Path) -> dict[str, dict[str, np.ndarray]]:
@@ -212,6 +258,7 @@ class _SandboxProcessRunner:
         self,
         *,
         input_directory: Path,
+        array_directory: Path,
         output_directory: Path,
         temporary_directory: Path,
         workspace: Path | None,
@@ -223,7 +270,7 @@ class _SandboxProcessRunner:
         """Build a worker command whose first action installs the sandbox policy."""
         runtime = Path(sys.prefix).resolve()
         source = self._runtime_source_root().resolve()
-        readable = [input_directory, runtime, source]
+        readable = [input_directory, array_directory, runtime, source]
         executable = [runtime]
         for system_path in (Path("/usr"), Path("/bin"), Path("/lib"), Path("/lib64")):
             if system_path.exists():
@@ -257,6 +304,7 @@ class _SandboxProcessRunner:
         environment.update(
             {
                 "SRH_SANDBOX_INPUT": str(input_directory),
+                "SRH_SANDBOX_ARRAYS": str(array_directory),
                 "SRH_SANDBOX_OUTPUT": str(output_directory),
                 "SRH_SANDBOX_READABLE": json.dumps([str(path) for path in readable]),
                 "SRH_SANDBOX_WRITABLE": json.dumps([str(path) for path in writable]),
@@ -330,6 +378,7 @@ class _SandboxProcessRunner:
         operation: str,
         request: dict[str, Any],
         arrays: dict[str, dict[str, Any]] | None = None,
+        array_snapshot: _ArraySnapshot | None = None,
         workspace: Workspace | str | Path | None = None,
         timeout_seconds: int = 30,
         memory_limit_mb: int = 1024,
@@ -341,7 +390,8 @@ class _SandboxProcessRunner:
         Args:
             operation: Worker operation identifier.
             request: JSON-compatible operation parameters.
-            arrays: Named input array groups.
+            arrays: Named input array groups serialized for this invocation.
+            array_snapshot: Reusable array snapshot. Mutually exclusive with arrays.
             workspace: Managed workspace or plain workspace path. Passing a managed
                 workspace also applies its mounted-input and lock policies.
             timeout_seconds: Wall-clock timeout.
@@ -372,7 +422,13 @@ class _SandboxProcessRunner:
             (input_directory / "request.json").write_text(
                 json.dumps(complete_request, ensure_ascii=False), encoding="utf-8"
             )
-            _write_array_groups(input_directory, arrays or {})
+            if arrays is not None and array_snapshot is not None:
+                raise ValueError("arrays and array_snapshot are mutually exclusive")
+            if array_snapshot is None:
+                _write_array_groups(input_directory, arrays or {})
+                array_directory = input_directory
+            else:
+                array_directory = array_snapshot.root
             workspace_manager = workspace if isinstance(workspace, Workspace) else None
             resolved_workspace = (
                 workspace_manager.path
@@ -400,6 +456,7 @@ class _SandboxProcessRunner:
             }
             command, environment, working_directory = self._worker_command(
                 input_directory=input_directory,
+                array_directory=array_directory,
                 output_directory=output_directory,
                 temporary_directory=temporary_directory,
                 workspace=resolved_workspace,
@@ -531,6 +588,7 @@ def _run_sandbox_protocol(
     request: dict[str, Any],
     *,
     arrays: dict[str, dict[str, Any]] | None = None,
+    array_snapshot: _ArraySnapshot | None = None,
     workspace: Workspace | str | Path | None = None,
     timeout_seconds: int = 30,
     memory_limit_mb: int = 1024,
@@ -542,6 +600,7 @@ def _run_sandbox_protocol(
         operation=operation,
         request=request,
         arrays=arrays,
+        array_snapshot=array_snapshot,
         workspace=workspace,
         timeout_seconds=timeout_seconds,
         memory_limit_mb=memory_limit_mb,

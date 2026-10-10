@@ -56,7 +56,9 @@ def load_array_groups(root: Path) -> dict[str, dict[str, np.ndarray]]:
     manifest = json.loads((root / "arrays.json").read_text(encoding="utf-8"))
     return {
         group_name: {
-            name: np.load(root / "arrays" / filename, allow_pickle=False)
+            name: np.load(
+                root / "arrays" / filename, mmap_mode="c", allow_pickle=False
+            )
             for name, filename in values.items()
         }
         for group_name, values in manifest.items()
@@ -252,6 +254,119 @@ def _load_evaluator(source: str, filename: str):
     return classes[0]()
 
 
+def _load_custom_tool(source: str, filename: str):
+    """Load exactly one user-authored BaseTool subclass inside the sandbox."""
+    from sr_harness.tools.base_tool import BaseTool
+
+    module_name = f"sr_harness.custom_tools.{Path(filename).stem}"
+    namespace: dict[str, Any] = {
+        "__name__": module_name,
+        "__package__": "sr_harness.custom_tools",
+        "__file__": f"/workspace/skills/{Path(filename).name}",
+    }
+    registry_before = dict(BaseTool.REGISTRY_DICT)
+    try:
+        exec(compile(source, namespace["__file__"], "exec", dont_inherit=True), namespace)
+        classes = [
+            value
+            for value in namespace.values()
+            if isinstance(value, type)
+            and value is not BaseTool
+            and issubclass(value, BaseTool)
+            and value.__module__ == module_name
+        ]
+        if len(classes) != 1:
+            raise ValueError(
+                f"Custom tool must define exactly one BaseTool subclass, found {len(classes)}."
+            )
+        tool_class = classes[0]
+        if any(registered is tool_class for registered in BaseTool.REGISTRY_DICT.values()):
+            raise ValueError(
+                "Custom tools must not use @BaseTool.register(...); set metadata.name "
+                "and let the loader register the sandbox proxy."
+            )
+        metadata = tool_class.metadata
+        if not isinstance(metadata.name, str) or not metadata.name.strip():
+            raise ValueError("Custom tool metadata.name must be a non-empty string.")
+        if not isinstance(metadata.description, str):
+            raise ValueError("Custom tool metadata.description must be a string.")
+        if not isinstance(metadata.parameters, dict):
+            raise ValueError("Custom tool metadata.parameters must be a dictionary.")
+        return tool_class
+    finally:
+        BaseTool.REGISTRY_DICT.clear()
+        BaseTool.REGISTRY_DICT.update(registry_before)
+
+
+def _tool_evaluator(metadata: dict[str, Any]):
+    """Reconstruct the evaluator available to a sandboxed custom tool."""
+    from sr_harness.evaluator.default_evaluator import DefaultEvaluator
+    from sr_harness.evaluator.graph_evaluator import GraphEvaluator
+
+    kind = metadata.get("kind", "default")
+    if kind == "default":
+        return DefaultEvaluator()
+    if kind == "graph":
+        return GraphEvaluator()
+    if kind == "custom":
+        return _load_evaluator(str(metadata["source"]), str(metadata["filename"]))
+    raise ValueError(f"Unknown sandbox evaluator kind: {kind!r}")
+
+
+def _build_tool_context(request: dict[str, Any], data: dict[str, np.ndarray], evaluator):
+    """Reconstruct the explicitly shared portion of AgentContext."""
+    from sr_harness.core import AgentContext
+
+    metadata = request["context"]
+    args = argparse.Namespace(**metadata.get("args", {}))
+    return AgentContext(
+        args=args,
+        data=data,
+        target=metadata.get("target"),
+        variable_descriptions=metadata.get("variable_descriptions"),
+        variable_axes={
+            name: tuple(axes) for name, axes in metadata.get("variable_axes", {}).items()
+        },
+        variable_structures=metadata.get("variable_structures"),
+        relation_names=set(metadata.get("relation_names", [])),
+        num_nodes=metadata.get("num_nodes"),
+        evaluator=evaluator,
+        workspace=Path.cwd(),
+    )
+
+
+def execute_custom_tool(
+    request: dict[str, Any], arrays: dict[str, dict[str, np.ndarray]]
+) -> dict[str, Any]:
+    """Inspect or execute one custom tool entirely inside the sandbox."""
+    from sr_harness.core import json_value
+
+    tool_class = _load_custom_tool(str(request["source"]), str(request["filename"]))
+    action = str(request["action"])
+    if action == "inspect":
+        return {
+            "class_name": tool_class.__name__,
+            "tool_name": tool_class.metadata.name.strip(),
+            "description": tool_class.metadata.description,
+            "parameters": tool_class.metadata.parameters,
+        }
+    if action != "execute":
+        raise ValueError(f"Unknown custom-tool action: {action}")
+    evaluator = _tool_evaluator(dict(request["context"].get("evaluator", {})))
+    context = _build_tool_context(request, arrays["context"], evaluator)
+    tool = tool_class(context=context)
+    params = request.get("params", {})
+    if not isinstance(params, dict):
+        raise TypeError("Custom tool parameters must be a dictionary")
+    result = tool.execute(**params)
+    if not isinstance(result, dict):
+        raise TypeError("Custom tool execute() must return a dictionary")
+    return {
+        "result": json_value(result),
+        "result_str": str(tool.format_result_dict(result)),
+    }
+
+
 def _build_evaluator_context(request: dict[str, Any], data: dict[str, np.ndarray], evaluator):
     """Reconstruct the minimal AgentContext visible to a custom evaluator."""
     from sr_harness.core import AgentContext
@@ -363,9 +478,10 @@ def execute_evaluator(
     raise ValueError(f"Unknown evaluator action: {action}")
 
 
-def _configure_sandbox() -> tuple[Path, Path]:
+def _configure_sandbox() -> tuple[Path, Path, Path]:
     """Consume launcher metadata and confine this worker before user imports."""
     input_root = Path(os.environ.pop("SRH_SANDBOX_INPUT"))
+    array_root = Path(os.environ.pop("SRH_SANDBOX_ARRAYS"))
     output_root = Path(os.environ.pop("SRH_SANDBOX_OUTPUT"))
     readable = json.loads(os.environ.pop("SRH_SANDBOX_READABLE"))
     writable = json.loads(os.environ.pop("SRH_SANDBOX_WRITABLE"))
@@ -384,26 +500,27 @@ def _configure_sandbox() -> tuple[Path, Path]:
     )
     restrict_system_calls()
     os.chdir(working_directory)
-    return input_root, output_root
+    return input_root, output_root, array_root
 
 
-def _sandbox_paths() -> tuple[Path, Path]:
+def _sandbox_paths() -> tuple[Path, Path, Path]:
     """Return protocol paths before the syscall filter is installed."""
     return (
         Path(os.environ["SRH_SANDBOX_INPUT"]),
         Path(os.environ["SRH_SANDBOX_OUTPUT"]),
+        Path(os.environ["SRH_SANDBOX_ARRAYS"]),
     )
 
 
 def main() -> None:
     """Dispatch one trusted request and persist a JSON result."""
-    input_root, output_root = _sandbox_paths()
+    input_root, output_root, _ = _sandbox_paths()
     result_file = output_root / "result.json"
     try:
         request = json.loads((input_root / "request.json").read_text(encoding="utf-8"))
         apply_resource_limits(request)
-        _configure_sandbox()
-        arrays = load_array_groups(input_root)
+        _, _, array_root = _configure_sandbox()
+        arrays = load_array_groups(array_root)
         operation = request["operation"]
         if operation in {"code", "workspace-code"}:
             result = execute_program(request)
@@ -411,6 +528,8 @@ def main() -> None:
             result = evaluate_code(request, arrays, output_root)
         elif operation == "evaluator":
             result = execute_evaluator(request, arrays, output_root)
+        elif operation == "custom-tool":
+            result = execute_custom_tool(request, arrays)
         else:
             raise ValueError(f"Unknown sandbox operation: {operation}")
         usage = resource.getrusage(resource.RUSAGE_SELF)

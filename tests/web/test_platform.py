@@ -20,6 +20,7 @@ from sr_harness.agents.evaluator_construction_agent import EvaluatorConstruction
 from sr_harness.agents.sr_agent_interactive import SRAgentInteractive
 from sr_harness.core import APICallResult, SearchRunState, ToolCall, load_context_data
 from sr_harness.api import BaseAPI
+from sr_harness.tools import BaseTool
 from sr_harness.web.app import create_app
 from sr_harness.web.session import InteractiveSession
 
@@ -1097,6 +1098,39 @@ def test_runtime_capabilities_can_be_configured(platform):
     assert client.post('/api/session/settings', json={
         'tools': ['not-a-tool'],
     }).status_code == 400
+
+
+def test_sandboxed_custom_tool_is_visible_and_optional_in_all_agent_settings(platform):
+    client, session = platform
+    skill_directory = session.workspace / 'skills' / 'visible-tool'
+    skill_directory.mkdir(parents=True)
+    tool_path = skill_directory / 'tool.py'
+    tool_path.write_text(
+        'from sr_harness.tools import BaseTool, ToolMetadata\n'
+        'class VisibleTool(BaseTool):\n'
+        '    metadata = ToolMetadata(name="visible_tool", description="Visible custom tool.")\n'
+        '    def execute(self):\n'
+        '        return {"visible": True}\n',
+        encoding='utf-8',
+    )
+    BaseTool.load_custom_tool(str(tool_path))
+    try:
+        for agent in ('search', 'data', 'evaluator'):
+            payload = client.get(
+                '/api/session/capabilities', params={'agent': agent},
+            ).json()
+            assert 'visible_tool' in {tool['name'] for tool in payload['tools']}
+            assert 'visible_tool' not in payload['default_tools']
+
+        current = session.snapshot()['settings']
+        selected_tools = [
+            name for name in current['tools'] if name != 'visible_tool'
+        ]
+        response = client.post('/api/session/settings', json={'tools': selected_tools})
+        assert response.status_code == 200
+        assert 'visible_tool' not in response.json()['settings']['tools']
+    finally:
+        BaseTool.REGISTRY_DICT.pop('visible_tool', None)
 
 
 def test_search_agent_uses_restricted_default_tools(tmp_path):

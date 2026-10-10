@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import argparse
 from pathlib import Path
 
 import numpy as np
@@ -14,6 +15,7 @@ from sr_harness.tools.edit_tool import EditTool
 from sr_harness.tools.read_skill import ReadSkill
 from sr_harness.tools.base_tool import BaseTool
 from sr_harness.tools.workspace_shell import WorkspaceShellTool
+from sr_harness import AgentContext
 
 
 def _test_manager(custom_directory: Path) -> SkillManager:
@@ -428,6 +430,94 @@ class DoubleValue(BaseTool):
         )
         ready = BaseTool.create("double_value", skills_dir=tmp_path / "skills")
         assert ready.execute(value=21)["value"] == 42
+
+    def test_custom_tool_runs_in_sandbox_with_sanitized_context(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("SRH_TOOL_PARENT_SECRET", "not-for-custom-code")
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / "workspace-visible.txt").write_text("workspace", encoding="utf-8")
+        outside = tmp_path / "outside-secret.txt"
+        outside.write_text("host-secret", encoding="utf-8")
+        tool_path = workspace / "probe.py"
+        tool_path.write_text(
+            '''import os
+from pathlib import Path
+from sr_harness.tools import BaseTool, ToolMetadata
+
+try:
+    TOP_LEVEL_OUTSIDE_READ = Path("../outside-secret.txt").read_text() == "host-secret"
+except Exception:
+    TOP_LEVEL_OUTSIDE_READ = False
+
+class SandboxProbe(BaseTool):
+    metadata = ToolMetadata(name="sandbox_probe", description="Probe sandbox isolation.")
+    def execute(self):
+        try:
+            workspace_read = Path("workspace-visible.txt").read_text() == "workspace"
+        except Exception:
+            workspace_read = False
+        try:
+            outside_read = Path("../outside-secret.txt").read_text() == "host-secret"
+        except Exception:
+            outside_read = False
+        names = set(vars(self.context.args))
+        self.context.data["x"][0] = 999.0
+        self.context.args.validation_fraction = 0.75
+        self.context.variable_descriptions["x"] = "changed in sandbox"
+        self.context.target = "x"
+        Path("inside.txt").write_text("allowed", encoding="utf-8")
+        return {
+            "top_level_outside_read": TOP_LEVEL_OUTSIDE_READ,
+            "outside_read": outside_read,
+            "workspace_read": workspace_read,
+            "parent_environment_visible": os.environ.get("SRH_TOOL_PARENT_SECRET") is not None,
+            "credentials_visible": bool(names & {
+                "api_environment", "openrouter_api_key", "proxy", "private_secret"
+            }),
+            "split_settings_visible": {
+                "validation_fraction", "split_by", "split_random_state",
+                "split_ood_variable"
+            } <= names,
+        }
+''',
+            encoding="utf-8",
+        )
+        result = BaseTool.load_custom_tool(str(tool_path))
+        args = argparse.Namespace(
+            validation_fraction=0,
+            split_by="random",
+            split_random_state=42,
+            split_ood_variable=None,
+            ranking_metric="mse",
+            larger_is_better=False,
+            api_environment={"OPENROUTER_API_KEY": "not-for-custom-code"},
+            openrouter_api_key="not-for-custom-code",
+            proxy="http://private-proxy",
+            private_secret="not-for-custom-code",
+        )
+        context = AgentContext(
+            args=args,
+            data={"x": np.arange(3.0), "y": np.arange(3.0)},
+            target="y",
+            workspace=workspace,
+        )
+
+        call = result["tool_class"](context=context)()
+
+        assert call.ok
+        assert call.result == {
+            "top_level_outside_read": False,
+            "outside_read": False,
+            "workspace_read": False,
+            "parent_environment_visible": False,
+            "credentials_visible": False,
+            "split_settings_visible": True,
+        }
+        assert not (workspace / "inside.txt").exists()
+        assert context.data["x"][0] == 0.0
+        assert context.args.validation_fraction == 0
+        assert context.variable_descriptions["x"] == ""
+        assert context.target == "y"
 
     def test_execute_rejects_duplicate_tool_name(self, tmp_path):
         from sr_harness.tools import BaseTool

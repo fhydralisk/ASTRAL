@@ -9,38 +9,14 @@ from typing import Any
 import sr_harness_engine as engine
 
 from ..core import AgentContext
-from ..runtime.sandbox import _run_sandbox_protocol
+from ..runtime.sandbox import _context_array_snapshot, _run_sandbox_protocol
+from ..runtime.sandbox_context import sandbox_arguments
 from .default_evaluator import DefaultEvaluator, MetricDict
 
 
-def _json_value(value: Any) -> Any:
-    """Return a JSON-safe value or omit unsupported runtime objects."""
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-    if isinstance(value, (list, tuple)):
-        converted = [_json_value(item) for item in value]
-        return converted if all(item is not _UNSUPPORTED for item in converted) else _UNSUPPORTED
-    if isinstance(value, dict):
-        converted = {str(key): _json_value(item) for key, item in value.items()}
-        return (
-            converted
-            if all(item is not _UNSUPPORTED for item in converted.values())
-            else _UNSUPPORTED
-        )
-    return _UNSUPPORTED
-
-
-_UNSUPPORTED = object()
-
-
 def _context_payload(context: AgentContext) -> dict[str, Any]:
-    args = {
-        name: converted
-        for name, value in vars(context.args).items()
-        if (converted := _json_value(value)) is not _UNSUPPORTED
-    }
     return {
-        "args": args,
+        "args": sandbox_arguments(context.args),
         "target": context.target,
         "variable_descriptions": context.variable_descriptions,
         "variable_axes": {name: list(axes) for name, axes in context.variable_axes.items()},
@@ -72,10 +48,10 @@ class SandboxedCustomEvaluator(DefaultEvaluator):
             "source": cls.SANDBOX_SOURCE,
             "filename": cls.SANDBOX_FILENAME,
         }
-        arrays = None
+        array_snapshot = None
         if context is not None:
             request["context"] = _context_payload(context)
-            arrays = {"context": context.data}
+            array_snapshot = _context_array_snapshot(context)
         if f is not None:
             request["f"] = f.to_str(number_format=".17g")
         if y is not None:
@@ -84,7 +60,7 @@ class SandboxedCustomEvaluator(DefaultEvaluator):
         return _run_sandbox_protocol(
             operation="evaluator",
             request=request,
-            arrays=arrays,
+            array_snapshot=array_snapshot,
             timeout_seconds=120,
             memory_limit_mb=4096,
             output_limit_bytes=64 * 1024,
