@@ -1,10 +1,6 @@
-FROM debian:bookworm-slim
+FROM python:3.12-slim
 
-RUN apt-get update \
-    && apt-get install --yes --no-install-recommends ca-certificates squid \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY squid.conf /etc/squid/squid.conf
+COPY --chmod=0555 egress_gateway.py /usr/local/bin/egress_gateway.py
 
 USER proxy
-ENTRYPOINT ["squid", "-N", "-f", "/etc/squid/squid.conf"]
+ENTRYPOINT ["python", "/usr/local/bin/egress_gateway.py"]

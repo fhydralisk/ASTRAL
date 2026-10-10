@@ -27,7 +27,11 @@ class DeepSeekAPI(BaseAPI):
         ## Ensure this is a generator
         yield from []
         api_key = self.getenv("DEEPSEEK_API_KEY")
-        client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+        client = OpenAI(
+            api_key=api_key,
+            base_url="https://api.deepseek.com",
+            http_client=self.openai_http_client(),
+        )
         payload = {
             "model": self.model,
             "messages": messages,

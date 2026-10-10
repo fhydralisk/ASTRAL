@@ -1243,9 +1243,9 @@
     svg.addEventListener("wheel", onWheel, { passive: false });
 
     const viewerParams = new URLSearchParams(location.search);
-    function reportTree(message) {
+    function reportTree(message, key = null, values = {}) {
       statusEl.textContent = message;
-      if (viewerParams.has("embed")) parent.postMessage({type: "sr-tree-status", message}, location.origin);
+      if (viewerParams.has("embed")) parent.postMessage({type: "sr-tree-status", message, key, values}, location.origin);
     }
     let followLatest = true;
     function frameTree(mode) {
@@ -1403,9 +1403,9 @@
       state.runId = viewerParams.get("run");
       try {
         await loadRecords();
-        reportTree(state.records.size ? `${state.records.size} 个节点 · 已同步` : "等待第一轮完成后生成搜索节点");
+        reportTree(state.records.size ? `${state.records.size} 个节点 · 已同步` : "等待第一轮完成后生成搜索节点", state.records.size ? "treeSynced" : "treeAwaitingFirstNode", state.records.size ? {count: state.records.size} : {});
       } catch (error) {
-        reportTree(error.status === 404 ? "等待第一轮完成后生成搜索节点" : `搜索树同步失败：${error.message} · 自动重试`);
+        reportTree(error.status === 404 ? "等待第一轮完成后生成搜索节点" : `搜索树同步失败：${error.message} · 自动重试`, error.status === 404 ? "treeAwaitingFirstNode" : "treeSyncFailed", error.status === 404 ? {} : {message: error.message});
       } finally { setTimeout(pollRequestedRun, 3000); }
     }
 
@@ -2952,7 +2952,7 @@
     setRunTab(state.runTab);
     applyPanelLayout();
     if (viewerParams.has("run")) {
-      reportTree("正在加载本次搜索树…");
+      reportTree("正在加载本次搜索树…", "treeLoading");
       pollRequestedRun();
     } else {
       loadRuns().catch(error => reportTree(error.message));

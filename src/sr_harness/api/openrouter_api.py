@@ -51,7 +51,11 @@ class OpenRouterAPI(BaseAPI):
         load_dotenv()
         api_key = self.require_env("OPENROUTER_API_KEY")
         endpoint = self.getenv("OPENROUTER_ENDPOINT", "https://openrouter.ai/api/v1")
-        client = OpenAI(base_url=endpoint, api_key=api_key)
+        client = OpenAI(
+            base_url=endpoint,
+            api_key=api_key,
+            http_client=self.openai_http_client(endpoint),
+        )
         payload = {
             "model": self.model,
             "messages": messages,

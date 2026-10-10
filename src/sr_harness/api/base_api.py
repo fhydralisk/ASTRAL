@@ -7,6 +7,8 @@ import logging
 from abc import ABC, abstractmethod
 from functools import cached_property
 import os
+import httpx
+from urllib.parse import urlsplit
 from typing import Any, Callable, Dict, Generator, List, Literal, Mapping
 
 from ..core import APICallResult, ToolCall
@@ -77,6 +79,35 @@ class BaseAPI(ABC, FactoryMixin):
         if value is None:
             raise KeyError(name)
         return value
+
+    def proxy_url(self, url: str | None = None) -> str | None:
+        """Return this API instance's session proxy unless ``url`` bypasses it."""
+        proxy = (
+            self.environment.get("HTTPS_PROXY")
+            or self.environment.get("https_proxy")
+            or self.environment.get("HTTP_PROXY")
+            or self.environment.get("http_proxy")
+        )
+        if proxy and url:
+            host = (urlsplit(url).hostname or "").lower()
+            exclusions = (self.environment.get("NO_PROXY") or self.environment.get("no_proxy") or "").split(",")
+            if any(host == item.strip().lower().lstrip(".") or host.endswith("." + item.strip().lower().lstrip(".")) for item in exclusions if item.strip()):
+                return None
+        return proxy
+
+    def http_client(self, url: str | None = None) -> httpx.Client:
+        """Create an HTTPX client using only this API instance's proxy."""
+        return httpx.Client(proxy=self.proxy_url(url), trust_env=False)
+
+    def openai_http_client(self, url: str | None = None):
+        """Create the OpenAI SDK's matching HTTPX2 client."""
+        from openai import DefaultHttpxClient
+        return DefaultHttpxClient(proxy=self.proxy_url(url), trust_env=False)
+
+    def requests_proxies(self) -> dict[str, str] | None:
+        """Return Requests-compatible session proxy settings."""
+        proxy = self.proxy_url()
+        return {"http": proxy, "https": proxy} if proxy else None
 
     def __call__(
         self,

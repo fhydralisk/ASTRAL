@@ -87,7 +87,10 @@ class SiliconFlowAPI(BaseAPI):
             **payload
         }
         try:
-            res = requests.request("POST", url, json=payload, headers=headers)
+            res = requests.request(
+                "POST", url, json=payload, headers=headers,
+                proxies=self.requests_proxies(),
+            )
         except Exception as e:
             _logger.error(f"Error requesting {self.model}: {log_exception(e)}")
             return []
@@ -156,7 +159,10 @@ class SiliconFlowAPI(BaseAPI):
         details = []
         for _ in range(n):
             try:
-                res = requests.request("POST", url, json=payload, headers=headers)
+                res = requests.request(
+                    "POST", url, json=payload, headers=headers,
+                    proxies=self.requests_proxies(),
+                )
             except Exception as e:
                 _logger.error(f"Error requesting {type(self).__name__}({model}): {log_exception(e)}")
                 continue

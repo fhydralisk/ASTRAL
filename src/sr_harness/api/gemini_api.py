@@ -44,7 +44,10 @@ class GeminiAPI(BaseAPI):
         )
         if self.model in ["gemini-2.0-flash", "gemini-2.0-flash-lite"]:
             config.thinking_config = None
-        client = genai.Client(api_key=api_key)
+        client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(httpx_client=self.http_client()),
+        )
         response = client.models.generate_content(
             model=self.model,
             contents=messages,

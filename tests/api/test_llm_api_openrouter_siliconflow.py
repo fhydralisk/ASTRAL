@@ -441,7 +441,7 @@ def test_siliconflow_qwen_text_parser_injects_tool_prompt_and_parses_action(monk
     monkeypatch.setenv("SILICONFLOW_API_KEY", "test-key")
     payloads = []
 
-    def fake_request(method, url, json, headers):
+    def fake_request(method, url, json, headers, **kwargs):
         payloads.append(json)
         return _FakeSiliconFlowResponse(
             _siliconflow_response({"content": "Action: demo_tool(x=3)"})
@@ -464,7 +464,7 @@ def test_siliconflow_qwen_native_tools_are_sent_and_tool_calls_are_extracted(mon
     monkeypatch.setenv("SILICONFLOW_API_KEY", "test-key")
     payloads = []
 
-    def fake_request(method, url, json, headers):
+    def fake_request(method, url, json, headers, **kwargs):
         payloads.append(json)
         return _FakeSiliconFlowResponse(
             _siliconflow_response({

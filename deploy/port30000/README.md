@@ -12,8 +12,12 @@ docker compose -f deploy/port30000/compose.yaml logs -f --tail=100
 The SRHarness container can write only to `logs/port30000` and its temporary filesystem. It does
 not mount the repository, the Docker socket, or other host paths. Its root filesystem is read-only,
 all Linux capabilities are dropped, privilege escalation is disabled, and its Docker network has
-no direct Internet route. Public HTTP and HTTPS access goes through a separate Squid proxy that
-rejects loopback, private, link-local, reserved, and cloud-metadata destinations.
+no direct Internet route. Public HTTP and HTTPS access goes through a separate egress gateway that
+rejects loopback, private, link-local, reserved, and cloud-metadata destinations. The gateway also
+limits global and per-destination concurrency, connection rate, and per-connection bandwidth.
+The deployment gateway is not shown as the editable WebUI proxy. A proxy explicitly configured in
+a conversation is treated as an upstream HTTP(S) proxy and is itself reached through the gateway;
+without one, the gateway connects to the public destination directly.
 
 Port 30000 is published by a separate, read-only Nginx ingress container. The SRHarness container
 is attached only to the internal network; the ingress container forwards browser traffic to it.
@@ -36,7 +40,7 @@ This prevents scripts in the SRHarness container from reading or exfiltrating th
 it cannot prevent them from abusing the gateway to incur model charges. Use a dedicated, low-limit,
 revocable API key for a public deployment and monitor its spend limit.
 
-Internet-enabled tools can send workspace or conversation data to arbitrary public services, can
-download untrusted code, and can abuse the server's public IP. The proxy limits access to ports 80
-and 443 and blocks private networks, but it does not provide domain allow-listing or content
-inspection. Do not put sensitive data in this public demo.
+Internet-enabled tools can send workspace or conversation data to arbitrary public services and
+download untrusted code. The gateway limits access to ports 80 and 443, blocks private networks,
+and places conservative resource ceilings on outbound traffic, but it does not provide domain
+allow-listing or content inspection. Do not put sensitive data in this public demo.

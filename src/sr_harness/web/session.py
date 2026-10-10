@@ -8,7 +8,6 @@ import shutil
 import tempfile
 import threading
 import uuid
-from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -32,6 +31,7 @@ from ..evaluator.load_custom_evaluator import (
     evaluator_source,
 )
 from ..runtime import InteractionManager, ModelRouter, SRInteractionManager
+from ..runtime.network import proxy_environment
 from ..skills import SkillManager
 from ..tools import BaseTool, ModelTestTool, ValidateEvaluatorTool
 from ..runtime.workspace import Workspace
@@ -121,24 +121,20 @@ class InteractiveSession:
         self.context.args.skill_manager = self._capability_skill_manager
         self.env_path = Path(env_path or self.run_dir / ".env").resolve()
         env_values = dotenv_values(self.env_path) if self.env_path.exists() else {}
-        self.context.args.api_environment = {
+        stored_environment = {
             str(name): str(value) for name, value in env_values.items()
             if value is not None
         }
+        if no_proxy := os.environ.get("NO_PROXY") or os.environ.get("no_proxy"):
+            stored_environment.setdefault("NO_PROXY", no_proxy)
         file_http_proxy = env_values.get("HTTP_PROXY") or env_values.get("http_proxy")
         file_https_proxy = env_values.get("HTTPS_PROXY") or env_values.get("https_proxy")
-        if file_http_proxy:
-            os.environ.setdefault("HTTP_PROXY", file_http_proxy)
-        if file_https_proxy:
-            os.environ.setdefault("HTTPS_PROXY", file_https_proxy)
-        configured_proxy = (
-            file_https_proxy
-            or file_http_proxy
-            or os.environ.get("HTTPS_PROXY")
-            or os.environ.get("https_proxy")
-            or os.environ.get("HTTP_PROXY")
-            or os.environ.get("http_proxy")
-            or ""
+        configured_proxy = file_https_proxy or file_http_proxy or ""
+        self.egress_proxy = os.environ.get("SRH_EGRESS_PROXY", "").strip()
+        self.context.args.api_environment = proxy_environment(
+            stored_environment,
+            user_proxy=configured_proxy,
+            egress_proxy=self.egress_proxy,
         )
         self.settings = {
             "llm_provider": "openrouter",
@@ -649,7 +645,7 @@ class InteractiveSession:
         previous_skills = getattr(self.context.args, "enabled_skills", None)
         self.context.args.enabled_skills = settings.get("skills") or []
         try:
-            with self.evaluator_agent_lock, self.temporary_proxy(settings.get("proxy", "")):
+            with self.evaluator_agent_lock:
                 agent = EvaluatorConstructionAgent(
                     llm_provider=settings["llm_provider"],
                     llm_model=settings["llm_model"],
@@ -886,25 +882,22 @@ class InteractiveSession:
             proxy: Proxy URL, or an empty string to clear the configured proxy.
         """
         proxy = self.validate_proxy(proxy)
-        previous = str(self.data_agent_settings.get("proxy", ""))
         self.env_path.parent.mkdir(parents=True, exist_ok=True)
         if not self.env_path.exists():
             self.env_path.touch(mode=0o600)
         if proxy:
             set_key(self.env_path, "HTTP_PROXY", proxy, quote_mode="always")
             set_key(self.env_path, "HTTPS_PROXY", proxy, quote_mode="always")
-            self.context.args.api_environment["HTTP_PROXY"] = proxy
-            self.context.args.api_environment["HTTPS_PROXY"] = proxy
-            for name in ("http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY"):
-                os.environ[name] = proxy
         else:
             unset_key(self.env_path, "HTTP_PROXY")
             unset_key(self.env_path, "HTTPS_PROXY")
-            self.context.args.api_environment.pop("HTTP_PROXY", None)
-            self.context.args.api_environment.pop("HTTPS_PROXY", None)
-            for name in ("http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY"):
-                if previous and os.environ.get(name) == previous:
-                    os.environ.pop(name, None)
+        updated_environment = proxy_environment(
+            self.context.args.api_environment,
+            user_proxy=proxy,
+            egress_proxy=self.egress_proxy,
+        )
+        self.context.args.api_environment.clear()
+        self.context.args.api_environment.update(updated_environment)
 
     @staticmethod
     def validate_proxy(proxy: str) -> str:
@@ -927,35 +920,6 @@ class InteractiveSession:
         if parsed.scheme not in {"http", "https", "socks5", "socks5h"} or not parsed.netloc:
             raise ValueError("proxy must be an HTTP, HTTPS, SOCKS5, or SOCKS5H URL")
         return proxy
-
-    @contextmanager
-    def temporary_proxy(self, proxy: str):
-        """Temporarily expose a proxy to provider clients during a model test.
-
-        Args:
-            proxy: Validated proxy URL, or an empty string to disable proxying.
-
-        Yields:
-            Control while the temporary environment is active.
-        """
-        names = ("http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY")
-        previous = {name: os.environ.get(name) for name in names}
-        try:
-            if proxy:
-                for name in names:
-                    os.environ[name] = proxy
-            else:
-                configured = str(self.data_agent_settings.get("proxy", ""))
-                for name in names:
-                    if configured and os.environ.get(name) == configured:
-                        os.environ.pop(name, None)
-            yield
-        finally:
-            for name, value in previous.items():
-                if value is None:
-                    os.environ.pop(name, None)
-                else:
-                    os.environ[name] = value
 
     @staticmethod
     def validate_setting_dependencies(settings):
@@ -1550,14 +1514,19 @@ class InteractiveSession:
     def _test_model(self, settings, *, proxy=None):
         """Run the shared plain-response and tool-call model probes."""
         probe_tool = ModelTestTool(context=self.context)
-        proxy_context = self.temporary_proxy(proxy) if proxy is not None else nullcontext()
-        with self.model_test_lock, proxy_context:
+        user_proxy = str(self.data_agent_settings.get("proxy", "")) if proxy is None else proxy
+        environment = proxy_environment(
+            self.context.args.api_environment,
+            user_proxy=user_proxy,
+            egress_proxy=self.egress_proxy,
+        )
+        with self.model_test_lock:
             api = BaseAPI.create(
                 settings["llm_provider"],
                 model=settings["llm_model"],
                 tool_list=[probe_tool],
                 tool_parser_name=settings["tool_parser"],
-                environment=self.context.args.api_environment,
+                environment=environment,
             )
             plain_rows = list(api(
                 "Reply with exactly SRHARNESS_OK.",

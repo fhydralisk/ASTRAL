@@ -24,6 +24,7 @@ services:
       OPENROUTER_ENDPOINT: http://openrouter-gateway:8080/api/v1
       HTTP_PROXY: http://egress-proxy:3128
       HTTPS_PROXY: http://egress-proxy:3128
+      SRH_EGRESS_PROXY: http://egress-proxy:3128
       NO_PROXY: 127.0.0.1,localhost,openrouter-gateway
     volumes:
       - type: bind
@@ -154,11 +155,15 @@ services:
     networks:
       - sandbox
       - egress
+    environment:
+      MAX_CONNECTIONS: "32"
+      MAX_DESTINATION_CONNECTIONS: "6"
+      REQUESTS_PER_SECOND: "8"
+      BURST_REQUESTS: "16"
+      BYTES_PER_SECOND: "524288"
     read_only: true
     tmpfs:
       - /tmp:rw,nosuid,nodev,noexec,size=32m,mode=1777
-      - /var/log/squid:rw,nosuid,nodev,noexec,size=16m
-      - /var/spool/squid:rw,nosuid,nodev,noexec,size=16m
     cap_drop:
       - ALL
     security_opt:
@@ -169,8 +174,10 @@ services:
     restart: unless-stopped
     healthcheck:
       test:
-        - CMD-SHELL
-        - "test -s /tmp/squid.pid && kill -0 $$(cat /tmp/squid.pid)"
+        - CMD
+        - python
+        - -c
+        - "import socket; connection = socket.create_connection(('127.0.0.1', 3128), timeout=5); connection.close()"
       interval: 15s
       timeout: 5s
       retries: 5

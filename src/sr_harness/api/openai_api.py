@@ -105,6 +105,7 @@ class OpenAIAPI(BaseAPI):
             api_version=self.require_env("OPENAI_API_VERSION"),
             azure_endpoint=self.require_env("OPENAI_ENDPOINT"),
             api_key=self.require_env("OPENAI_API_KEY"),
+            http_client=self.openai_http_client(self.require_env("OPENAI_ENDPOINT")),
         )
         payload = {
             "input": deepcopy(messages), # 因为后面可能要 pop, 所以 deepcopy 一下
@@ -234,6 +235,7 @@ class OpenAIAPI(BaseAPI):
             api_version=self.require_env("OPENAI_API_VERSION"),
             azure_endpoint=self.require_env("OPENAI_OLDTIME_ENDPOINT"),
             api_key=self.require_env("OPENAI_API_KEY"),
+            http_client=self.openai_http_client(self.require_env("OPENAI_OLDTIME_ENDPOINT")),
         )
         payload = {
             "messages": messages,

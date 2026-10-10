@@ -14,6 +14,15 @@ import requests
 from .base_tool import BaseTool, ToolMetadata
 
 
+def _session_proxies(tool: BaseTool) -> dict[str, str] | None:
+    environment = getattr(tool.context.args, "api_environment", {})
+    proxy = (
+        environment.get("HTTPS_PROXY") or environment.get("https_proxy")
+        or environment.get("HTTP_PROXY") or environment.get("http_proxy")
+    )
+    return {"http": proxy, "https": proxy} if proxy else None
+
+
 class _DuckDuckGoParser(HTMLParser):
     def __init__(self):
         super().__init__()
@@ -67,6 +76,7 @@ class WebSearchTool(BaseTool):
             data={"q": query},
             timeout=15,
             headers={"User-Agent": "SRAgent/1.0 (research assistant)"},
+            proxies=_session_proxies(self),
         )
         response.raise_for_status()
         parser = _DuckDuckGoParser()
@@ -134,7 +144,7 @@ class WebFetchTool(BaseTool):
         public_addresses = {
             address for address in addresses if ipaddress.ip_address(address).is_global
         }
-        proxies = requests.utils.get_environ_proxies(url)
+        proxies = _session_proxies(self)
         if not public_addresses or (public_addresses != addresses and not proxies):
             raise ValueError("url must resolve only to public network addresses")
         limit = max(1000, min(int(max_characters), 50000))
@@ -144,6 +154,7 @@ class WebFetchTool(BaseTool):
             headers={"User-Agent": "SRHarness/1.0"},
             allow_redirects=False,
             stream=True,
+            proxies=proxies,
         )
         if response.is_redirect:
             raise ValueError("redirects are not followed; fetch the public destination URL directly")
