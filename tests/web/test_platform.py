@@ -4,6 +4,7 @@ import os
 import threading
 import time
 import zipfile
+from importlib.metadata import version as package_version
 from pathlib import Path
 
 import numpy as np
@@ -45,6 +46,10 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert not (session.workspace / "skills").exists()
     page = client.get('/')
     assert page.status_code == 200
+    assert client.get('/api/version').json() == {'version': package_version('sr-harness')}
+    assert '<div class="brand"><div class="logo">SR<span>Harness</span></div><span id="app-version" class="app-version"></span></div>' in page.text
+    assert ".app-version{color:var(--muted);font:600 9px/1" in page.text
+    assert "$('app-version').textContent='v'+result.version" in page.text
     assert 'class="badge"' not in page.text
     assert 'id="search-record-link"' not in page.text
     assert 'id="prepare-tab"' in page.text

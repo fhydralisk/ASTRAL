@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+from importlib.metadata import version as package_version
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +35,8 @@ def create_app(
     Returns:
         FastAPI: The operation result.
     """
-    app = FastAPI(title="SRHarness Search Viewer")
+    version = package_version("sr-harness")
+    app = FastAPI(title="SRHarness Search Viewer", version=version)
     app.state.log_dir = Path(log_dir).resolve()
     app.state.session = session
     app.state.conversation_registry = conversation_registry
@@ -51,6 +53,10 @@ def create_app(
     @app.get("/viewer")
     def viewer():
         return FileResponse(STATIC_DIR / "index.html")
+
+    @app.get("/api/version")
+    def application_version():
+        return {"version": version}
 
     if session is not None:
         from .platform import mount_platform
