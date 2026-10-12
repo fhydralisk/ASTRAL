@@ -34,6 +34,7 @@ statistics_analysis(variables=["y*x2", "log(y)"])
 ```
 
 Use a log only on a valid domain. If values cross zero, consider `sign(z)*log1p(abs(z))`, separate sign and magnitude, or an evidence-backed shift.
+In SRHarness formulas, `log` (and its alias `ln`) is the natural logarithm. Use `log10`/`lg` or `log2` when base 10 or base 2 is intended.
 
 If `statistics_analysis` is unavailable and `code_executor` is available, run a bounded audit such as:
 

@@ -44,6 +44,23 @@ class TestPySRTool:
         assert train_metrics(result["all_formulas"][0])["mse"] < 1e-12
         assert result["exceptions"] == []
 
+    def test_execute_normalizes_function_names_for_pysr(self, monkeypatch):
+        x = np.linspace(1.0, 2.0, 20)
+        tool = make_tool({"x": x}, np.log(x))
+
+        def fake_run_pysr(self, X, y_fit, x_names, binary_ops, unary_ops, timeout, maxsize):
+            assert unary_ops == ["log", "log10", "asin", "acos", "atan", "log2"]
+            return "log(x1)", [], 2
+
+        monkeypatch.setattr(PySRTool, "_run_pysr", fake_run_pysr)
+        result = tool.execute(
+            binary_operators=["+"],
+            unary_operators=["ln", "lg", "arcsin", "arccos", "arctan", "log2"],
+        )
+
+        assert result["formula"] == "log(x)"
+        assert train_metrics(result)["mse"] < 1e-12
+
     def test_format_result_reads_unified_pareto_metrics(self):
         rendered = PySRTool.format_result_dict(
             {

@@ -62,8 +62,10 @@ x1 ** 2 + exp(-x2)
 当前支持以下逐元素函数：
 
 ```text
-abs  sin  cos  tan  tanh  exp  log  log10  sqrt  sigmoid
+abs  sin  cos  tan  tanh  exp  log  log10  log2  sqrt  sigmoid
 ```
+
+其中 `log`（别名 `ln`）为自然对数，`log10`（别名 `lg`）为十进制对数，`log2` 为二进制对数。反三角函数支持 `arcsin`/`asin`、`arccos`/`acos` 和 `arctan`/`atan`，并在解析时规范化为 `arc*` 名称。
 
 字面数字是固定常数，不参与参数优化。
 

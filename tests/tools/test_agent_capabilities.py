@@ -244,9 +244,10 @@ def test_sr4mdl_constructs_search_data_like_pysr(tmp_path, monkeypatch):
             data={"a": values, "b": values**2, "y": values + values**2},
             target="y",
         )
-    ).execute(["+", "*"], [], x=["a", "b"], y="y", n_iter=7)
+    ).execute(["+", "*"], ["ln"], x=["a", "b"], y="y", n_iter=7)
 
     assert set(captured["X"]) == {"x1", "x2"}
+    assert captured["unary_operators"] == ["log"]
     assert captured["n_iter"] == 7
     assert result["formula"] == "a + b"
     assert result["method"] == "SR4MDL-MCTS"

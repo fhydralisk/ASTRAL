@@ -99,7 +99,15 @@ def render(
         if latex and expression.name == "abs":
             return f"\\left|{arguments}\\right|"
         if latex:
-            return f"{expression.name}\\left({arguments}\\right)"
+            function_name = {
+                "arccos": r"\arccos",
+                "arcsin": r"\arcsin",
+                "arctan": r"\arctan",
+                "log": r"\ln",
+                "log10": r"\log_{10}",
+                "log2": r"\log_{2}",
+            }.get(expression.name, rf"\operatorname{{{expression.name}}}")
+            return f"{function_name}\\left({arguments}\\right)"
         return f"{expression.name}({arguments})"
     if isinstance(expression, Reduction):
         indices = ", ".join(str(index) for index in expression.indices)

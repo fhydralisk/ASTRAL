@@ -63,9 +63,15 @@ cosh = _unary("cosh")
 arcsin = _unary("arcsin")
 arccos = _unary("arccos")
 arctan = _unary("arctan")
+asin = arcsin
+acos = arccos
+atan = arctan
 exp = _unary("exp")
 log = _unary("log")
 log10 = _unary("log10")
+log2 = _unary("log2")
+ln = log
+lg = log10
 sqrt = _unary("sqrt")
 abs = _unary("abs")
 sigmoid = _unary("sigmoid")
@@ -95,9 +101,12 @@ __all__ = [
     "GroupedParameter",
     "Index", "Indexed", "Number", "Parameter", "Reduction", "RelationField",
     "RelationLift", "Symbol",
-    "Variable", "abs", "aggr", "arccos", "arcsin", "arctan", "cos", "cosh",
-    "bind_parameters", "cot", "count_parameters", "csc", "delay", "desugar", "evaluate", "exp", "fit",
-    "fold_constants", "function", "gather", "grouped_param", "inv", "log", "log10",
+    "Variable", "abs", "acos", "aggr", "arccos", "arcsin", "arctan", "asin", "atan",
+    "cos", "cosh",
+    "bind_parameters", "cot", "count_parameters", "csc", "delay", "desugar",
+    "evaluate", "exp", "fit",
+    "fold_constants", "function", "gather", "grouped_param", "inv", "lg", "ln", "log",
+    "log10", "log2",
     "param", "parameter_values", "parse", "reduction", "render", "sec", "sech",
     "sigmoid", "sign", "sin",
     "sinh", "sour", "sqrt", "tan", "tanh", "targ", "unbound_parameters",

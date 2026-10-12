@@ -8,7 +8,6 @@ import re
 import os
 import logging
 import numpy as np
-import sr_harness_engine as engine
 from pathlib import Path
 from typing import Dict, Any, List
 from .base_tool import BaseTool, ToolMetadata, is_numeric_array
@@ -23,6 +22,16 @@ MAX_TIMEOUT = 120
 class PySRTool(BaseTool):
     """Implementation of the py s r tool."""
     metadata = ToolMetadata(name="call_pysr")
+    UNARY_ALIASES = {
+        "acos": "acos",
+        "arccos": "acos",
+        "arcsin": "asin",
+        "arctan": "atan",
+        "asin": "asin",
+        "atan": "atan",
+        "lg": "log10",
+        "ln": "log",
+    }
 
     def execute(
         self,
@@ -111,6 +120,7 @@ class PySRTool(BaseTool):
             X_fit = X_matrix
             y_fit = y_vec
 
+        unary_operators = [self.UNARY_ALIASES.get(name, name) for name in unary_operators]
         formula_str, pareto_front, _ = self._run_pysr(
             X_fit, y_fit, features['internal_names'], binary_operators, unary_operators,
             timeout, maxsize

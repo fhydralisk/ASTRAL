@@ -48,9 +48,11 @@ x ** 2
 ```text
 sin cos tan sinh cosh tanh
 arcsin arccos arctan
-exp log log10 sqrt abs
+exp log log10 log2 sqrt abs
 sigmoid sign sec sech csc cot inv
 ```
+
+`log(x)` 与别名 `ln(x)` 表示自然对数；`log10(x)` 与别名 `lg(x)` 表示十进制对数；`log2(x)` 表示二进制对数。反三角函数同时接受 `arcsin`/`asin`、`arccos`/`acos` 和 `arctan`/`atan`。解析后均使用前者作为规范名称，因此别名不会形成重复候选。
 
 示例：
 

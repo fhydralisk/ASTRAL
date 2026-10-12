@@ -58,6 +58,48 @@ def test_common_nonlinear_functions_are_elementwise():
     assert np.allclose(model.evaluate(data), [5.0, 8.0])
 
 
+def test_logarithm_and_inverse_trigonometric_aliases_are_canonical():
+    values = {"x": np.array([np.e, 100.0, 8.0]), "u": np.array([0.0, 0.5, 1.0])}
+
+    assert str(engine.parse("ln(x)")) == "log(x)"
+    assert str(engine.parse("lg(x)")) == "log10(x)"
+    assert str(engine.parse("asin(u) + acos(u) + atan(u)")) == (
+        "arcsin(u) + arccos(u) + arctan(u)"
+    )
+    assert np.allclose(engine.parse("log(x)").evaluate(values)[0], 1.0)
+    assert np.allclose(engine.parse("log10(x)").evaluate(values)[1], 2.0)
+    assert np.allclose(engine.parse("log2(x)").evaluate(values)[2], 3.0)
+    assert engine.parse("ln(x)") == engine.parse("log(x)")
+    assert engine.parse("lg(x)") == engine.parse("log10(x)")
+    assert engine.ln(engine.Symbol("x")) == engine.log(engine.Symbol("x"))
+    assert engine.asin(engine.Symbol("u")) == engine.arcsin(engine.Symbol("u"))
+
+
+def test_logarithm_aliases_work_with_indexed_evaluation():
+    values = {"x": np.array([1.0, np.e, np.e**2])}
+
+    assert np.allclose(engine.parse("ln(x[i])").evaluate(values, num_nodes=3), [0, 1, 2])
+    assert np.allclose(
+        engine.parse("log2(x[i])").evaluate(values, num_nodes=3),
+        np.log2(values["x"]),
+    )
+
+
+def test_logarithm_latex_makes_each_base_explicit():
+    assert engine.parse("log(x)").to_str(latex=True) == r"\ln\left(x\right)"
+    assert engine.parse("lg(x)").to_str(latex=True) == r"\log_{10}\left(x\right)"
+    assert engine.parse("log2(x)").to_str(latex=True) == r"\log_{2}\left(x\right)"
+
+
+def test_logarithm_aliases_share_the_same_non_positive_domain_behavior():
+    values = {"x": np.array([-1.0, 0.0, 1.0])}
+
+    for alias, canonical in (("ln", "log"), ("lg", "log10")):
+        alias_values = engine.parse(f"{alias}(x)").evaluate(values)
+        canonical_values = engine.parse(f"{canonical}(x)").evaluate(values)
+        assert np.array_equal(alias_values, canonical_values, equal_nan=True)
+
+
 def test_known_constants_can_be_bound_while_parsing():
     model = engine.parse("pi * r**2", symbols={"pi": np.pi})
 

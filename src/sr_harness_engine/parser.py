@@ -28,8 +28,15 @@ from .expression import (
 
 FUNCTIONS = {
     "abs", "arccos", "arcsin", "arctan", "cos", "cosh", "cot", "csc", "exp", "inv",
-    "log", "log10", "sec", "sech", "sigmoid", "sign", "sin", "sinh", "sqrt", "tan",
+    "log", "log10", "log2", "sec", "sech", "sigmoid", "sign", "sin", "sinh", "sqrt", "tan",
     "tanh", "pow2", "pow3",
+}
+FUNCTION_ALIASES = {
+    "acos": "arccos",
+    "asin": "arcsin",
+    "atan": "arctan",
+    "lg": "log10",
+    "ln": "log",
 }
 BINARY_FUNCTIONS = {"max", "min"}
 
@@ -156,10 +163,11 @@ class ExpressionParser(ast.NodeVisitor):
             relation, operand = (None, arguments[0]) if len(arguments) == 1 else arguments
             return Reduction(self._indices(node.func.slice), operand, relation)
 
-        name = self._name(node.func)
+        source_name = self._name(node.func)
+        name = FUNCTION_ALIASES.get(source_name, source_name)
         if name in FUNCTIONS:
             if node.keywords or len(node.args) != 1:
-                raise ValueError(f"{name}(...) expects exactly one positional argument.")
+                raise ValueError(f"{source_name}(...) expects exactly one positional argument.")
             return Function(name, (self.visit(node.args[0]),))
         if name in BINARY_FUNCTIONS:
             if node.keywords or len(node.args) != 2:

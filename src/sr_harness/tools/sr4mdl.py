@@ -85,6 +85,7 @@ class SR4MDLTool(BaseTool):
                 "SR4MDL checkpoint not found. Set SR4MDL_CHECKPOINT to checkpoint.pth."
             )
 
+        unary_operators = ["log" if name == "ln" else name for name in unary_operators]
         unknown_binary = sorted(set(binary_operators) - self.BINARY_OPERATORS.keys())
         unknown_unary = sorted(set(unary_operators) - self.UNARY_OPERATORS.keys())
         if unknown_binary or unknown_unary:

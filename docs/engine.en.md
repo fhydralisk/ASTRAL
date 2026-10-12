@@ -45,9 +45,11 @@ Built-in elementwise functions are:
 ```text
 sin cos tan sinh cosh tanh
 arcsin arccos arctan
-exp log log10 sqrt abs
+exp log log10 log2 sqrt abs
 sigmoid sign sec sech csc cot inv
 ```
+
+`log(x)` and its alias `ln(x)` are natural logarithms; `log10(x)` and its alias `lg(x)` are base-10 logarithms; `log2(x)` is the base-2 logarithm. Inverse trigonometric functions accept `arcsin`/`asin`, `arccos`/`acos`, and `arctan`/`atan`. Parsing always uses the former canonical names so aliases do not create duplicate candidates.
 
 Expressions can also be constructed through Python:
 

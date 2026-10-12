@@ -30,9 +30,11 @@ Available one-argument functions are:
 
 ```text
 abs  arccos  arcsin  arctan  cos  cosh  cot  csc  exp  inv
-log  log10  pow2  pow3  sec  sech  sigmoid  sign  sin  sinh
+log  log10  log2  pow2  pow3  sec  sech  sigmoid  sign  sin  sinh
 sqrt  tan  tanh
 ```
+
+`log(x)` is the natural logarithm. The parser accepts `ln` as its alias, `lg` as an alias for base-10 `log10`, and `asin`/`acos`/`atan` as aliases for `arcsin`/`arccos`/`arctan`. Prefer the canonical names shown above in generated formulas.
 
 `min(a, b)` and `max(a, b)` accept exactly two arguments. Function names must be bare names: use `sin(x)`, never `np.sin(x)` or `numpy.sin(x)`.
 

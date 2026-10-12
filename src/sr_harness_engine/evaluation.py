@@ -142,6 +142,7 @@ class _ExpressionEvaluator:
             "inv": lambda value: 1.0 / value,
             "log": np.log,
             "log10": np.log10,
+            "log2": np.log2,
             "max": np.maximum,
             "min": np.minimum,
             "pow2": lambda value: value**2,
