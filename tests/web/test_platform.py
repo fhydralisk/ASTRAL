@@ -480,8 +480,28 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert '.data-agent-send.stop' in page.text
     assert '.data-agent-card{display:grid;grid-template-columns:minmax(0,1fr)' in page.text
     assert '.reasoning-block.expanded .reasoning-content{display:block;width:100%' in page.text
-    assert "previewBlock(card,p.content,'message-preview-block')" in page.text
-    assert "if(dataMode)previewBlock(card,state.content,'message-preview-block stream-content')" in page.text
+    assert "previewBlock(card,p.content,'message-preview-block',true)" in page.text
+    assert "if(dataMode)previewBlock(card,state.content,'message-preview-block stream-content',true)" in page.text
+    assert "localStorage.getItem('sr-harness-markdown')==='true'" in page.text
+    assert "function markdownFragment(value)" in page.text
+    assert "function texMath(source,display=false)" in page.text
+    assert "negthinspace:'-0.1667em'" in page.text
+    assert "space.style.marginInlineStart=width" in page.text
+    assert "function renderVisibleAgentOutput(node)" in page.text
+    assert "new IntersectionObserver(entries=>" in page.text
+    assert "{rootMargin:'240px 0px'}" in page.text
+    assert "node.textContent=agentOutputSources.get(node)??''" in page.text
+    assert "for(const block of document.querySelectorAll('.reasoning-block'))layoutPreview(block)" not in page.text
+    assert "markdown-switch-control" in page.text
+    assert "mountMarkdownSwitch();" in page.text
+    assert "function parseCandidateFormula(source)" in page.text
+    assert "function candidateFormulaLatex(source)" in page.text
+    assert "candidateFormulaMode==='latex'" in page.text
+    assert "localStorage.setItem('sr-harness-candidate-formula-mode',mode)" in page.text
+    assert "localStorage.setItem('sr-harness-candidate-number-mode',candidateFormulaNumberMode)" in page.text
+    assert "localStorage.setItem('sr-harness-candidate-number-digits',String(candidateFormulaDigits))" in page.text
+    assert "candidateFormulaNumberMode==='scientific'?number.toExponential(candidateFormulaDigits):number.toFixed(candidateFormulaDigits)" in page.text
+    assert "mountCandidateFormulaControl();" in page.text
     assert "state.reasoningExpanded=reasoning.classList.contains('expanded')" in page.text
     assert "state.contentExpanded=content.classList.contains('expanded')" in page.text
     assert "const restoreExpansion=()=>" in page.text
@@ -489,7 +509,9 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert 'id="up"' not in page.text
     assert 'id="path"' not in page.text
     assert 'function applyPromptPreview(preview,systemOnly=false)' in page.text
-    assert 'const hasPreparedData=Boolean(session?.supplied_data||useCommittedContext)' in page.text
+    assert 'const hasPreparedData=useCommittedContext' in page.text
+    assert 'session?.supplied_data' not in page.text
+    assert 'if(s.supplied_data)' not in page.text
     assert 'applyPromptPreview(preview,!hasPreparedData)' in page.text
     assert "if(s.state==='idle')return refreshPromptPreview()" in page.text
     assert client.get('/viewer').status_code == 200
@@ -536,7 +558,7 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert '- x1: first input' in prompts.json()['user_prompt']
     assert '- y: measured response' in prompts.json()['user_prompt']
     assert client.post('/api/data/prompts', json={
-        'dataset': 'demo.csv', 'target': 'y', 'features': 'x',
+        'target': 'y', 'features': 'x',
     }).status_code == 400
     assert client.put('/api/workspace/upload?path=data/sample.csv', content=b'overwrite').status_code == 409
     for path in ['../outside', '/tmp/outside']:
@@ -547,7 +569,6 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert client.get('/api/workspace/download?path=link').status_code == 400
     assert client.post('/api/session/start', json={'max_refinement_depth': 0}).status_code == 400
     assert session.state == 'idle'
-    assert client.post('/api/session/start', json={'dataset': 'missing.csv'}).status_code == 400
 
 
 @pytest.mark.parametrize(
@@ -596,6 +617,155 @@ def test_demo_dataset_rejects_unknown_kind(tmp_path):
     session = InteractiveSession(tmp_path)
     with pytest.raises(ValueError, match='Unknown sample dataset'):
         session.create_demo('unknown')
+
+
+def test_start_requires_loaded_context_data_and_never_creates_demo(tmp_path):
+    session = InteractiveSession(tmp_path)
+    np.save(session.workspace / 'x.npy', np.arange(5, dtype=float))
+    np.save(session.workspace / 'y.npy', np.arange(5, dtype=float) ** 2)
+    app = create_app(tmp_path, session=session)
+
+    with TestClient(app) as client:
+        response = client.post('/api/session/start', json={})
+
+    assert response.status_code == 400
+    assert response.json()['detail'] == (
+        'Create and load a valid context.data dataset before starting'
+    )
+    assert not (session.workspace / 'context.data').exists()
+    assert session.thread is None
+    assert session.state == 'idle'
+
+
+def test_start_rejects_legacy_dataset_option(tmp_path):
+    session = InteractiveSession(tmp_path)
+    app = create_app(tmp_path, session=session)
+
+    with TestClient(app) as client:
+        response = client.post('/api/session/start', json={
+            'dataset': 'legacy.csv',
+        })
+
+    assert response.status_code == 400
+    assert response.json()['detail'] == (
+        'The dataset start option is no longer supported; prepare context.data first'
+    )
+    assert not (session.workspace / 'context.data').exists()
+    assert session.thread is None
+
+
+def test_start_preserves_manifest_axis_descriptions_missing_from_payload(
+    tmp_path,
+    monkeypatch,
+):
+    session = InteractiveSession(tmp_path)
+    directory = session.workspace / 'context.data'
+    directory.mkdir()
+    np.save(directory / 'x.npy', np.arange(5, dtype=float))
+    np.save(directory / 'y.npy', np.arange(5, dtype=float) ** 2)
+    (directory / 'manifest.json').write_text(json.dumps({
+        'variables': {
+            'x': {'file': 'x.npy', 'description': 'Input.', 'axes': ['sample']},
+            'y': {'file': 'y.npy', 'description': 'Output.', 'axes': ['sample']},
+        },
+        'axes': {'sample': {'size': 5, 'description': 'Row index.'}},
+    }))
+    session.context.commit_context_data(load_context_data(directory))
+    session.context.target = 'y'
+    monkeypatch.setattr(session, '_run', lambda *args: None)
+
+    snapshot = session.start({
+        'target': 'y',
+        'features': ['x'],
+        'variable_descriptions': {'x': 'Payload input.', 'y': 'Payload output.'},
+    })
+    session.thread.join(2)
+
+    assert snapshot['data_context']['variable_descriptions'] == {
+        'sample': 'Row index.',
+        'x': 'Payload input.',
+        'y': 'Payload output.',
+    }
+
+
+def test_invalid_manifest_descriptions_fail_before_search_thread_starts(tmp_path):
+    session = InteractiveSession(tmp_path)
+    directory = session.create_demo()
+    manifest_path = directory / 'manifest.json'
+    manifest = json.loads(manifest_path.read_text())
+    del manifest['axes']['sample']['description']
+    manifest_path.write_text(json.dumps(manifest))
+
+    with pytest.raises(ValueError, match='Invalid context.data manifest descriptions'):
+        session.start({'target': 'y', 'features': ['x1', 'x2']})
+
+    assert session.thread is None
+    assert session.state == 'idle'
+
+
+@pytest.mark.parametrize('invalid_description', ['', 123])
+def test_empty_or_non_string_manifest_description_fails_before_thread(
+    tmp_path, invalid_description
+):
+    session = InteractiveSession(tmp_path)
+    directory = session.create_demo()
+    manifest_path = directory / 'manifest.json'
+    manifest = json.loads(manifest_path.read_text())
+    manifest['axes']['sample']['description'] = invalid_description
+    manifest_path.write_text(json.dumps(manifest))
+
+    with pytest.raises(ValueError, match=r'axes\.sample\.description'):
+        session.start({'target': 'y', 'features': ['x1', 'x2']})
+
+    assert session.thread is None
+    assert session.state == 'idle'
+
+
+def test_snapshot_failure_does_not_leave_a_search_thread_running(tmp_path, monkeypatch):
+    session = InteractiveSession(tmp_path)
+    session.create_demo()
+    monkeypatch.setattr(session, 'snapshot', lambda: (_ for _ in ()).throw(RuntimeError('boom')))
+
+    with pytest.raises(RuntimeError, match='boom'):
+        session.start({})
+
+    assert session.thread is None
+    assert session.state == 'idle'
+    assert session.result['failure_stage'] == 'start_preflight'
+
+
+def test_start_api_distinguishes_preflight_response_failure(tmp_path, monkeypatch):
+    session = InteractiveSession(tmp_path)
+    session.create_demo()
+    app = create_app(tmp_path, session=session)
+    monkeypatch.setattr(session, 'snapshot', lambda: (_ for _ in ()).throw(RuntimeError('boom')))
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post('/api/session/start', json={})
+
+    assert response.status_code == 500
+    assert response.json()['detail'] == {
+        'code': 'start_preflight_failed',
+        'message': 'boom',
+        'run_id': session.run_id,
+        'started': False,
+    }
+
+
+def test_repeated_start_idempotency_key_reuses_the_active_run(tmp_path, monkeypatch):
+    session = InteractiveSession(tmp_path)
+    session.create_demo()
+    release = threading.Event()
+    monkeypatch.setattr(session, '_run', lambda *args: release.wait(2))
+
+    first = session.start({'idempotency_key': 'request-1'})
+    thread = session.thread
+    second = session.start({'idempotency_key': 'request-1'})
+
+    assert first['run_id'] == second['run_id'] == session.run_id
+    assert session.thread is thread
+    release.set()
+    thread.join(2)
 
 
 def test_workspace_npy_preview(platform):
@@ -1759,6 +1929,7 @@ def test_data_agent_has_no_turn_limit_and_keeps_cumulative_turns(platform, monke
 
 def test_real_search_loop_with_fake_llm(platform, monkeypatch):
     client, session = platform
+    session.create_demo()
     prompts = []
     models = []
 
@@ -1775,10 +1946,15 @@ def test_real_search_loop_with_fake_llm(platform, monkeypatch):
                     'max_refinement_depth': 3,
                 })
             def generate():
-                call = ToolCall('evaluate_formula', {'f': 'x**2 + 2*x + 1'}, id='test')
+                call = ToolCall(
+                    'evaluate_formula',
+                    {'f': 'x1**2 + 2*x1*x2 + 1'},
+                    id='test',
+                )
                 message = {'role': 'assistant', 'content': 'Evaluate a quadratic.', 'reasoning': 'Model reasoning',
                            'tool_calls': [{'id': 'test', 'type': 'function', 'function': {
-                               'name': call.name, 'arguments': '{"f":"x**2 + 2*x + 1"}'}}]}
+                               'name': call.name,
+                               'arguments': '{"f":"x1**2 + 2*x1*x2 + 1"}'}}]}
                 yield {'content': message['content'], 'tool_call': [call], 'message': message}
                 return {'usage': {'token': {}, 'price': {}}, 'responses': []}
             return APICallResult(generate())
@@ -1829,6 +2005,7 @@ def test_real_search_loop_with_fake_llm(platform, monkeypatch):
 
 def test_advance_to_next_branch_and_restart(platform, monkeypatch):
     client, session = platform
+    session.create_demo()
     calls = 0
 
     class AdvancingAPI(CancellableFakeAPI):
@@ -1871,6 +2048,7 @@ def test_advance_to_next_branch_and_restart(platform, monkeypatch):
 
 def test_tool_free_search_response_pauses_without_question_card(platform, monkeypatch):
     client, session = platform
+    session.create_demo()
     prompts = []
 
     class YieldingAPI(CancellableFakeAPI):
@@ -1912,24 +2090,21 @@ def test_tool_free_search_response_pauses_without_question_card(platform, monkey
     )
 
 
-def test_csv_input_and_failure_state(platform, monkeypatch):
+def test_context_data_search_failure_state(platform, monkeypatch):
     client, session = platform
-    client.put('/api/workspace/upload?path=measurements.csv',
-               content=(b'temperature,humidity,station,pressure\n'
-                        b'1,10,a,2\n2,20,b,4\n3,30,c,6\n4,40,d,8\n5,50,e,10\n'))
+    session.create_demo()
     seen = {}
     def fail_run(self, X, y, description):
         seen.update(X=X, y=y, description=description)
         raise RuntimeError('test provider unavailable')
     monkeypatch.setattr(SRAgentInteractive, 'run', fail_run)
     response = client.post('/api/session/start', json={
-        'dataset': 'measurements.csv', 'target': 'pressure',
-        'features': ['humidity'], 'prompt': 'Fit pressure'})
+        'target': 'y', 'features': ['x1'], 'prompt': 'Fit y'})
     assert response.status_code == 200
     session.thread.join(10)
-    assert list(seen['X']) == ['humidity']
-    assert list(seen['y']) == ['pressure']
-    assert seen['description'] == 'Fit pressure'
+    assert list(seen['X']) == ['x1']
+    assert list(seen['y']) == ['y']
+    assert seen['description'] == 'Fit y'
     assert session.state == 'failed'
     assert client.get('/api/session').json()['result']['error'] == 'test provider unavailable'
     assert session.run_state is not None

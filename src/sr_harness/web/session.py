@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 import ast
+import logging
 import os
-import shutil
 import stat
 import tempfile
 import threading
@@ -23,7 +23,7 @@ from ..agents.evaluator_construction_agent import EvaluatorConstructionAgent
 from ..agents.sr_agent_interactive import SRAgentInteractive
 from ..api import BaseAPI
 from ..core import AgentContext, SearchRunState, json_value, load_context_data
-from ..evaluator import DefaultEvaluator, GraphEvaluator, load_custom_evaluator
+from ..evaluator import GraphEvaluator, load_custom_evaluator
 from ..evaluator.load_custom_evaluator import (
     BUILTIN_EVALUATOR_CLASS_NAMES,
     CUSTOM_TEMPLATE,
@@ -39,6 +39,8 @@ from ..tools import BaseTool, ModelTestTool, ValidateEvaluatorTool
 from ..runtime.workspace import Workspace
 from .demo_data import build_demo
 
+
+_logger = logging.getLogger(__name__)
 
 RUNTIME_SETTING_NAMES = (
     "llm_provider", "llm_model", "strong_llm_provider", "strong_llm_model",
@@ -58,6 +60,15 @@ EVALUATOR_CONTEXT_SETTING_NAMES = (
     "validation_fraction", "split_random_state", "split_by",
     "split_ood_variable", "ranking_metric", "larger_is_better",
 )
+
+
+class SessionStartError(RuntimeError):
+    """Report which phase failed while starting an interactive search."""
+
+    def __init__(self, message: str, *, run_id: str, started: bool):
+        super().__init__(message)
+        self.run_id = run_id
+        self.started = started
 
 HIDDEN_CAPABILITY_TOOLS = frozenset({"code_executor"})
 EVALUATOR_DEFAULT_TOOLS = (
@@ -85,12 +96,12 @@ class InteractiveSession:
         self,
         log_dir,
         agent_options=None,
-        data=None,
         initial_prompt="",
         env_path=None,
         workspace_files=None,
         run_dir=None,
         workspace_path=None,
+        read_only=False,
     ):
         self.sr_interaction_manager = SRInteractionManager()
         self.data_interaction_manager = InteractionManager()
@@ -99,18 +110,24 @@ class InteractiveSession:
         self.model_test_lock = threading.Lock()
         self.evaluator_agent_lock = threading.Lock()
         self.run_id = uuid.uuid4().hex
+        self.conversation_id = None
         self.run_dir = (
             Path(run_dir).expanduser().resolve()
             if run_dir is not None
             else Path(log_dir).expanduser().resolve() / self.run_id
         )
-        self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.read_only = bool(read_only)
+        if self.read_only:
+            if not self.run_dir.is_dir():
+                raise FileNotFoundError(f"Read-only run directory does not exist: {self.run_dir}")
+        else:
+            self.run_dir.mkdir(parents=True, exist_ok=True)
         workspace_root = (
             Path(workspace_path)
             if workspace_path is not None
             else Path(tempfile.mkdtemp(prefix="sr_workspace_"))
         )
-        self.workspace_manager = Workspace(workspace_root)
+        self.workspace_manager = Workspace(workspace_root, read_only=self.read_only)
         for source in workspace_files or ():
             self.workspace_manager.mount(source)
         self.workspace = self.workspace_manager.path
@@ -197,7 +214,6 @@ class InteractiveSession:
             "llm_max_tokens": max(8192, self.data_agent_settings["llm_max_tokens"]),
         })
         self.pending_settings = None
-        self.data = data
         self.initial_prompt = initial_prompt
         self.prompt_overrides = {}
         self.variable_descriptions = {}
@@ -216,6 +232,7 @@ class InteractiveSession:
         self.sr_agent = None
         self._restored_data_agent_buffer = None
         self._manifest_description_revision = None
+        self.start_idempotency_key = None
 
     def interrupt_active_work(self) -> None:
         """Force active model/tool operations toward a safe shutdown boundary."""
@@ -244,7 +261,6 @@ class InteractiveSession:
                 "result": self.result,
                 "run_id": self.run_id,
                 "initial_prompt": self.initial_prompt,
-                "supplied_data": self.data is not None,
                 "context_ready": bool(self.context.data),
                 "workspace": str(self.workspace),
                 "data_state": self.data_state,
@@ -427,14 +443,14 @@ class InteractiveSession:
                 else saved_evaluator_state
             )
 
-    def _sync_manifest_descriptions(self) -> None:
+    def _sync_manifest_descriptions(self, *, strict: bool = False) -> None:
         """Reflect externally edited manifest descriptions in the live context."""
         manifest_path = self.workspace / "context.data" / "manifest.json"
         if not self.context.data or not manifest_path.is_file():
             return
         stat = manifest_path.stat()
         revision = (stat.st_mtime_ns, stat.st_size)
-        if revision == self._manifest_description_revision:
+        if revision == self._manifest_description_revision and not strict:
             return
         try:
             with self.workspace_manager.safe_open(
@@ -446,16 +462,27 @@ class InteractiveSession:
                 for name, spec in manifest[section].items():
                     description = spec["description"]
                     if not isinstance(description, str):
+                        if strict:
+                            raise ValueError(
+                                f"{section}.{name}.description must be a string"
+                            )
                         return
-                    descriptions[name] = description.strip()
-        except (KeyError, TypeError, json.JSONDecodeError, OSError):
+                    description = description.strip()
+                    if strict and not description:
+                        raise ValueError(
+                            f"{section}.{name}.description must not be empty"
+                        )
+                    descriptions[name] = description
+        except (KeyError, TypeError, json.JSONDecodeError, OSError) as exc:
+            if strict:
+                raise ValueError(
+                    f"Invalid context.data manifest descriptions: {exc}"
+                ) from exc
             return
         changed = False
         for name in self.context.data:
-            if (
-                name in descriptions
-                and self.context.variable_descriptions[name] != descriptions[name]
-            ):
+            current = self.context.variable_descriptions.get(name, "")
+            if name in descriptions and current != descriptions[name]:
                 self.context.variable_descriptions[name] = descriptions[name]
                 changed = True
         self._manifest_description_revision = revision
@@ -1048,10 +1075,32 @@ class InteractiveSession:
             payload: Serializable event payload.
         """
         with self.lock:
+            idempotency_key = payload.get("idempotency_key")
+            if idempotency_key is not None:
+                if (
+                    not isinstance(idempotency_key, str)
+                    or not idempotency_key.strip()
+                    or len(idempotency_key) > 200
+                ):
+                    raise ValueError(
+                        "idempotency_key must be a non-empty string up to 200 characters"
+                    )
+                idempotency_key = idempotency_key.strip()
             if self.state != "idle":
+                if idempotency_key is not None and idempotency_key == self.start_idempotency_key:
+                    return self.snapshot()
                 raise ValueError("This server already owns a run. Restart it to begin a new task.")
             if self.data_interaction_manager.state in {"running", "pausing", "interrupting"}:
                 raise ValueError("Wait for the data-preparation agent to finish before starting")
+            if "dataset" in payload:
+                raise ValueError(
+                    "The dataset start option is no longer supported; prepare context.data first"
+                )
+            manifest_path = self.workspace / "context.data" / "manifest.json"
+            if not self.context.data or not manifest_path.is_file():
+                raise ValueError(
+                    "Create and load a valid context.data dataset before starting"
+                )
             options = self.validate_settings(payload, initial=True)
             self.validate_capabilities(options)
             updated_settings = {**self.settings, **options}
@@ -1073,63 +1122,52 @@ class InteractiveSession:
                 if key in payload
             }
             self.variable_descriptions = self.validate_variable_descriptions(payload)
-            if self.data is not None:
-                X, y = self.data
-                if not isinstance(y, dict):
-                    y = {"target": y}
-            elif payload.get("dataset"):
-                import pandas as pd
-
-                path = self.resolve(str(payload["dataset"]))
-                with self.workspace_manager.safe_open(path, "rb") as stream:
-                    frame = (
-                        pd.read_excel(stream)
-                        if path.suffix.lower() == ".xlsx"
-                        else pd.read_csv(stream)
-                    )
-                target = str(payload.get("target", "y"))
-                if target not in frame or len(frame.columns) < 2 or len(frame) < 5:
-                    raise ValueError("CSV needs a target column, at least one feature, and 5 rows.")
-                requested_features = payload.get("features")
-                if requested_features is None:
-                    features = [str(column) for column in frame if column != target]
-                elif (
-                    not isinstance(requested_features, list)
-                    or not requested_features
-                    or any(not isinstance(column, str) for column in requested_features)
-                ):
-                    raise ValueError("features must be a non-empty list of column names")
-                else:
-                    features = list(dict.fromkeys(requested_features))
-                missing = [column for column in features if column not in frame]
-                if missing or target in features:
-                    raise ValueError(
-                        "Features must exist in the CSV and must not include the target"
-                    )
-                try:
-                    values = frame[[*features, target]].to_numpy(dtype=float)
-                except (TypeError, ValueError) as exc:
-                    raise ValueError("Selected target and feature columns must be numeric") from exc
-                if not np.isfinite(values).all():
-                    raise ValueError(
-                        "Selected columns must contain finite values without missing data"
-                    )
-                X = {column: frame[column].to_numpy(dtype=float) for column in features}
-                y = {target: frame[target].to_numpy(dtype=float)}
-            elif self.context.data:
-                target = str(payload.get("target") or self.context.target)
-                features = payload.get("features") or list(self.context.feature_names())
-                X, y = self._select_context_columns(target, features)
-                self.context.variable_descriptions = self.variable_descriptions.copy()
-            else:
-                rng = np.random.default_rng(42)
-                x = rng.uniform(-2, 2, 100)
-                X, y = {"x": x}, {"y": x * x + 2 * x + 1}
-                self.create_demo()
+            self._sync_manifest_descriptions(strict=True)
+            target = str(payload.get("target") or self.context.target)
+            features = payload.get("features") or list(self.context.feature_names())
+            X, y = self._select_context_columns(target, features)
+            descriptions = dict(self.context.variable_descriptions)
+            descriptions.update(self.variable_descriptions)
+            self.context.variable_descriptions = {
+                name: descriptions.get(name, "") for name in self.context.data
+            }
+            self.variable_descriptions = dict(self.context.variable_descriptions)
             self.state = "starting"
-            self.thread = threading.Thread(target=self._run, args=(X, y, description), daemon=True)
-            self.thread.start()
-        return self.snapshot()
+            self.start_idempotency_key = idempotency_key
+            try:
+                response = self.snapshot()
+                self.thread = threading.Thread(
+                    target=self._run,
+                    args=(X, y, description),
+                    daemon=True,
+                )
+                self.thread.start()
+            except Exception as exc:
+                thread = self.thread
+                started = bool(thread is not None and thread.ident is not None)
+                failure_stage = "start_response" if started else "start_preflight"
+                if started and thread.is_alive():
+                    self.interrupt_active_work()
+                    thread.join(timeout=2)
+                self.result = {
+                    "status": "failed",
+                    "error": str(exc),
+                    "failure_stage": failure_stage,
+                }
+                self.state = "failed" if started else "idle"
+                _logger.exception(
+                    "Failed to start conversation=%s run=%s thread_alive=%s stage=%s",
+                    self.conversation_id or self.workspace.name,
+                    self.run_id,
+                    bool(thread and thread.is_alive()),
+                    failure_stage,
+                )
+                raise SessionStartError(
+                    str(exc),
+                    run_id=self.run_id,
+                    started=started,
+                ) from exc
+        return response
 
     def prepare_data(self, instruction: str):
         """Continue the persistent data-agent conversation in the background.
@@ -1276,41 +1314,7 @@ class InteractiveSession:
                 or "Find an interpretable formula explaining the selected target from the selected features.",
             )
         )
-        if self.data is not None:
-            X, y = self.data
-            if not isinstance(y, dict):
-                y = {"target": y}
-        elif payload.get("dataset"):
-            import pandas as pd
-
-            source = self.resolve(str(payload["dataset"]))
-            with self.workspace_manager.safe_open(source, "rb") as stream:
-                frame = (
-                    pd.read_excel(stream, nrows=1)
-                    if source.suffix.lower() == ".xlsx"
-                    else pd.read_csv(stream, nrows=1)
-                )
-            target = str(payload.get("target", ""))
-            requested_features = payload.get("features")
-            if requested_features is None:
-                features = [str(column) for column in frame if str(column) != target]
-            elif (
-                not isinstance(requested_features, list)
-                or not requested_features
-                or any(not isinstance(column, str) for column in requested_features)
-            ):
-                raise ValueError("features must be a non-empty list of column names")
-            else:
-                features = list(dict.fromkeys(requested_features))
-            if (
-                target not in frame
-                or target in features
-                or any(column not in frame for column in features)
-            ):
-                raise ValueError("Select a target and at least one existing feature")
-            X = {str(column): np.empty(1) for column in features}
-            y = {target: np.empty(1)}
-        elif self.context.data:
+        if self.context.data:
             target = str(payload.get("target") or self.context.target or "")
             features = payload.get("features") or list(self.context.feature_names())
             X, y = self._select_context_columns(target, features)

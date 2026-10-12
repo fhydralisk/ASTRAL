@@ -31,6 +31,8 @@ Each conversation owns an Agent workspace, a private session directory, and an `
 
 Drop a file onto the upload bar or use its icon. The refresh action reloads `context.data/`. Four built-in datasets are available: polynomial regression, grouped parameters, an oscillatory ODE, and Kuramoto dynamics on a 10-node BA network.
 
+Uploaded CSV, Excel, or standalone NPY files are preparation inputs and cannot start symbolic regression directly. Before starting, create and load a valid `context.data/manifest.json` and its referenced arrays. The start API neither converts raw files implicitly nor creates a sample dataset automatically.
+
 The Data Preparation Agent can inspect files, clean data, derive variables, and write structured arrays. For example:
 
 > Read trajectory.csv, estimate dx_dt with central differences, retain t and x, and document meaning and units in the manifest.

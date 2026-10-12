@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
 from ..core import json_value, update_context_data_descriptions
-from .session import InteractiveSession
+from .session import InteractiveSession, SessionStartError
 
 MAX_UPLOAD = 256 * 1024 * 1024
 
@@ -95,6 +95,13 @@ def mount_platform(app, session: InteractiveSession):
     def start(payload: dict = Body(...)):
         try:
             return session.start(payload)
+        except SessionStartError as exc:
+            raise HTTPException(500, {
+                "code": "start_response_failed" if exc.started else "start_preflight_failed",
+                "message": str(exc),
+                "run_id": exc.run_id,
+                "started": exc.started,
+            }) from exc
         except (ValueError, OSError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
