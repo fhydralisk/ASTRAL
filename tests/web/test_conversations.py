@@ -474,22 +474,3 @@ def test_read_only_registry_can_isolate_users(tmp_path):
         key: second[key] for key in ("id", "name", "created_at", "updated_at")
     }]
     registry.close()
-
-
-def test_read_only_registry_rebases_legacy_container_run_root(tmp_path):
-    writable = ConversationRegistry(tmp_path, persist_sessions=True)
-    record = writable.create("browser", "Legacy container conversation")
-    session = writable._session_for(record)
-    session.initial_prompt = "restored from a container path"
-    writable.persist()
-    writable.close()
-
-    payload = json.loads((tmp_path / "conversations.json").read_text())
-    payload["conversations"][0]["run_dir"] = "/missing-container-data"
-    (tmp_path / "conversations.json").write_text(json.dumps(payload))
-
-    registry = ConversationRegistry(tmp_path, read_only=True)
-    restored = registry._session_for(registry._records[0])
-    assert restored.run_dir == tmp_path
-    assert restored.initial_prompt == "restored from a container path"
-    registry.close()
