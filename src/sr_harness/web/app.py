@@ -3,13 +3,14 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import re
 from importlib.metadata import version as package_version
 from pathlib import Path
 from typing import Any
 
 import sr_harness_engine as engine
 from fastapi import Body, FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..runtime import SRInteractionManager
@@ -24,6 +25,7 @@ def create_app(
     *,
     session=None,
     conversation_registry=None,
+    read_only: bool = False,
 ) -> FastAPI:
     """Create app.
 
@@ -40,7 +42,26 @@ def create_app(
     app.state.log_dir = Path(log_dir).resolve()
     app.state.session = session
     app.state.conversation_registry = conversation_registry
+    app.state.read_only = bool(
+        read_only or getattr(conversation_registry, "read_only", False)
+    )
     app.state.interaction_manager = SRInteractionManager() if session is None else None
+
+    @app.middleware("http")
+    async def enforce_read_only(request: Request, call_next):
+        if app.state.read_only and request.method not in {"GET", "HEAD", "OPTIONS"}:
+            path = request.url.path
+            selection = (
+                request.method == "POST"
+                and re.fullmatch(r"/api/conversations/[^/]+/select", path) is not None
+            )
+            pure_computation = request.method == "POST" and path == "/api/data/context/heatmap"
+            if not (selection or pure_computation):
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "SRHarness is running in read-only mode"},
+                )
+        return await call_next(request)
     if conversation_registry is not None:
         from .conversations import mount_conversations
         mount_conversations(app, conversation_registry)

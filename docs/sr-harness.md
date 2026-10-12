@@ -28,6 +28,7 @@ sr-harness run [options]
 | `--workspace-dir` | `{SAVE_PATH}` | 对话注册表和各对话工作区的存储目录 |
 | `--isolate-users` | 关闭 | 按浏览器持久 Cookie 隔离不同用户的对话 |
 | `--mount` | 空 | 需要挂载到工作区的文件或目录，可通过 `--mount a b c ...` 提供多个文件和/或目录 |
+| `--read-only` | 关闭 | 只读浏览已有对话；禁用所有变更状态的 API 和后台持久化 |
 
 ### 保存路径与工作区
 
@@ -36,6 +37,7 @@ SRHarness 会在 `--workspace-dir` 中保存对话注册表、每个对话的 Ag
 ```text
 {WORKSPACE_DIR}/
 ├── conversations.json
+├── conversation-visits.jsonl
 ├── workspaces/
 │   └── {CONVERSATION_ID}/
 └── sessions/
@@ -46,7 +48,15 @@ SRHarness 会在 `--workspace-dir` 中保存对话注册表、每个对话的 Ag
 
 `workspaces/` 中的内容可由 Agent 工具访问；`sessions/` 保存每个对话独立的 API Key、代理配置和会话快照，不向工作区工具暴露。对话显示名称只存储在 `conversations.json` 中，因此重命名不会改变目录路径。导出对话时不会包含 `.env`。
 
+首次访问和点击“新建对话”只创建临时会话，不会写入 `conversations.json`，也不会在 `workspaces/`、`sessions/` 或 `runs/` 中留下空目录。只有成功修改工作区、调整对话名称或实际调用 Agent 后，对话才会持久化。每个临时会话会在 `conversation-visits.jsonl` 中写入 `visit_started` 事件；升级后再写入带有原因的 `conversation_persisted` 事件。因此可按 `visitor_id` 去重，并把没有对应持久化事件的访问统计为“只看看”的用户。临时会话的逻辑 ID 不会过期。打开的页面会通过正常状态轮询保持其内存状态；连续空闲一小时后，服务端只释放对应的内存对象和系统临时目录。用户即使隔几天再操作，服务端也会使用浏览器 Cookie 中相同的临时会话 ID 透明重建，不需要刷新页面。只读模式不会写入该日志。
+
 当显式指定了 `--save-path`（或 `--save-dir`）时，SRHarness 会将各对话的运行日志写入 `{SAVE_PATH}/runs/{CONVERSATION_ID}`，并定期更新 `sessions/` 中的会话快照。即使服务中断，也可以使用相同的 `workspace-dir` 和 `save-path` 重启，以恢复时间线、数据、设置、评估器和搜索状态。
+
+只读查看已有存储时，同时指定 `--save-path`、`--workspace-dir` 和 `--read-only`。该模式要求目录以及 `conversations.json` 已存在，并且不能与 `--mount` 同时使用。`--read-only` 与 `--isolate-users` 相互独立：可以只读查看全部对话，也可以根据浏览器持久 Cookie 只读查看当前用户的对话。为提供纵深防护，容器部署还应把该目录以只读 bind mount 挂载；应用层只读开关不能替代操作系统级只读权限。
+
+```bash
+sr-harness run --save-path /data --workspace-dir /data --read-only --host 0.0.0.0 --port 8000
+```
 
 ### 网络暴露
 

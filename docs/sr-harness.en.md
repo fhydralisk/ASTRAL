@@ -24,6 +24,7 @@ SRHarness commands use the form `sr-harness <command> [options]`:
 | `--workspace-dir` | `{SAVE_PATH}` | Storage directory for the conversation registry and conversation workspaces |
 | `--isolate-users` | off | Isolate different users' conversations by persistent browser cookie |
 | `--mount` | empty | Files or directories to mount into each workspace; pass multiple paths as `--mount a b c ...` |
+| `--read-only` | off | Browse existing conversations read-only; disable state-changing APIs and background persistence |
 
 ### Save paths and workspaces
 
@@ -32,6 +33,7 @@ SRHarness stores the conversation registry, per-conversation Agent workspaces, a
 ```text
 {WORKSPACE_DIR}/
 ├── conversations.json
+├── conversation-visits.jsonl
 ├── workspaces/
 │   └── {CONVERSATION_ID}/
 └── sessions/
@@ -42,7 +44,15 @@ SRHarness stores the conversation registry, per-conversation Agent workspaces, a
 
 Agent tools can access files under `workspaces/`. The corresponding `sessions/` directory stores that conversation's API keys, proxy configuration, and session snapshot without exposing them to workspace tools. Display names live only in `conversations.json`, so renaming a conversation does not change its paths. Conversation exports exclude `.env` files.
 
+An initial visit or a click on New conversation creates only a transient session. It does not update `conversations.json` or leave empty directories under `workspaces/`, `sessions/`, or `runs/`. A conversation becomes durable only after a successful workspace mutation, a rename, or actual Agent use. Each transient session appends a `visit_started` event to `conversation-visits.jsonl`; promotion appends a `conversation_persisted` event with its reason. This permits distinct-visitor counts by `visitor_id` and identifies look-only visitors by the absence of a matching persistence event. A transient conversation's logical ID does not expire. Normal status polling keeps its in-memory state alive; after one idle hour, the server releases only the corresponding memory object and operating-system temporary directory. Even if the user returns days later, the server transparently reconstructs the transient under the same ID from the browser cookie, without requiring a page refresh. Read-only mode never writes this log.
+
 When `--save-path` (or `--save-dir`) is specified explicitly, run logs are written to `{SAVE_PATH}/runs/{CONVERSATION_ID}` and the snapshot under `sessions/` is updated periodically. Restart with the same `workspace-dir` and `save-path` to recover timelines, data, settings, Evaluators, and search state after an interruption.
+
+To inspect an existing store, pass `--save-path`, `--workspace-dir`, and `--read-only`. This mode requires the directory and `conversations.json` to exist, and it cannot be combined with `--mount`. `--read-only` and `--isolate-users` are independent: the viewer can expose all conversations or filter them by the browser's persistent client cookie. For defense in depth, container deployments should also bind-mount the directory read-only; the application flag is not a substitute for operating-system-level permissions.
+
+```bash
+sr-harness run --save-path /data --workspace-dir /data --read-only --host 0.0.0.0 --port 8000
+```
 
 Local service:
 

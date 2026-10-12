@@ -43,11 +43,22 @@ def test_run_help_is_delegated(capsys, monkeypatch):
     assert "--anonymize" not in output
     assert "--workspace-dir" in output
     assert "--isolate-users" in output
+    assert "--read-only" in output
     assert "--mount" in output
     assert "--reload" not in output
     assert "--no-browser" not in output
     assert "--llm-provider" not in output
     assert "--llm-model" not in output
+
+
+def test_run_read_only_flag_defaults_off_and_can_be_enabled():
+    default = setup_parser().parse_args(["run"])
+    enabled = setup_parser().parse_args(["run", "--read-only"])
+    combined = setup_parser().parse_args(["run", "--read-only", "--isolate-users"])
+    assert default.read_only is False
+    assert enabled.read_only is True
+    assert combined.read_only is True
+    assert combined.isolate_users is True
 
 
 def test_synthetic_help_is_delegated(capsys, monkeypatch):

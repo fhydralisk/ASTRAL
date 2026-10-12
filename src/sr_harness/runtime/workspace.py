@@ -28,6 +28,8 @@ class Workspace:
     def __init__(
         self,
         path: str | Path,
+        *,
+        read_only: bool = False,
     ) -> None:
         """Create or open a workspace.
 
@@ -36,7 +38,12 @@ class Workspace:
                 decides where it is created and when it is removed.
         """
         self._path = Path(path).resolve()
-        self._path.mkdir(parents=True, exist_ok=True)
+        self._read_only = bool(read_only)
+        if self._read_only:
+            if not self._path.is_dir():
+                raise FileNotFoundError(f"Read-only workspace does not exist: {self._path}")
+        else:
+            self._path.mkdir(parents=True, exist_ok=True)
         self._mount_map: dict[Path, Path] = {}
         self._readonly_mounts: set[Path] = set()
         self._lock_rules: dict[Path, bool] = {}
@@ -46,6 +53,11 @@ class Workspace:
     def path(self) -> Path:
         """Return the workspace root."""
         return self._path
+
+    @property
+    def read_only(self) -> bool:
+        """Return whether every workspace mutation is disabled."""
+        return self._read_only
 
     @property
     def mount_map(self) -> dict[Path, Path]:
@@ -173,6 +185,8 @@ class Workspace:
 
     def _apply_lock_permissions(self) -> None:
         """Apply explicit lock rules through stable descriptors without following links."""
+        if self._read_only:
+            return
         mount_roots = set(self._mount_map)
         paths = [self._path]
         for current_name, directory_names, file_names in os.walk(
@@ -232,6 +246,8 @@ class Workspace:
         """
         if access not in {"read", "write", "create", "remove"}:
             raise ValueError(f"Unknown workspace access intent: {access}")
+        if self._read_only and access != "read":
+            return None
         if not relative_path:
             return self._path
         if os.path.isabs(relative_path):
@@ -545,6 +561,8 @@ class Workspace:
         *,
         access: Literal["write", "create", "remove"],
     ) -> tuple[Path, Path, Path]:
+        if self._read_only:
+            raise PermissionError("Workspace is read-only")
         requested = self._relative_mutation_path(relative_path)
         logical = self._path / requested
         if requested.parts and (mount := self._path / requested.parts[0]) in self._mount_map:
@@ -617,6 +635,8 @@ class Workspace:
         Returns:
             The logical link inside the workspace.
         """
+        if self._read_only:
+            raise PermissionError("Workspace is read-only")
         source = Path(source).expanduser().resolve()
         if not source.exists():
             raise FileNotFoundError(f"Workspace input does not exist: {source}")

@@ -51,6 +51,9 @@ def setup_parser(parser: argparse.ArgumentParser | None = None) -> argparse.Argu
     parser.add_argument("--isolate-users", action="store_true", help=(
         "Only show each browser the conversations created under its own persistent client cookie."
     ))
+    parser.add_argument("--read-only", action="store_true", help=(
+        "Serve an existing conversation store without modifying it. All mutating APIs are disabled; use a filesystem read-only mount for defense in depth."
+    ))
     parser.add_argument("--mount", nargs="+", default=[], metavar="PATH", help=(
         "Files or directories to mount read-only at the workspace root. Source basenames must be unique."
     ))
@@ -89,6 +92,9 @@ def main(args: argparse.Namespace) -> int:
     from sr_harness.web.app import create_app
     from sr_harness.web.conversations import ConversationRegistry
 
+    if args.read_only and args.mount:
+        raise SystemExit("--read-only cannot be combined with --mount")
+
     if args.exp_name is None:
         now = datetime.now()
         args.exp_name = sanitize_filename(
@@ -115,7 +121,11 @@ def main(args: argparse.Namespace) -> int:
         if requested_save_path is not None
         else workspace_dir / "runs" / args.exp_name
     )
-    save_path.mkdir(parents=True, exist_ok=True)
+    if args.read_only:
+        if not save_path.is_dir():
+            raise SystemExit(f"Read-only save path does not exist: {save_path}")
+    else:
+        save_path.mkdir(parents=True, exist_ok=True)
     args.save_path = str(save_path)
     args.workspace_dir = str(workspace_dir)
 
@@ -124,10 +134,16 @@ def main(args: argparse.Namespace) -> int:
         workspace_files=args.mount,
         isolate_users=args.isolate_users,
         run_root=save_path / "runs",
-        persist_sessions=requested_save_path is not None,
+        persist_sessions=requested_save_path is not None and not args.read_only,
+        read_only=args.read_only,
     )
     session = conversations.session_proxy
-    app = create_app(save_path.parent, session=session, conversation_registry=conversations)
+    app = create_app(
+        save_path.parent,
+        session=session,
+        conversation_registry=conversations,
+        read_only=args.read_only,
+    )
     browser_host = "127.0.0.1" if args.host in ("0.0.0.0", "::") else args.host
     url = f"http://{browser_host}:{args.port}"
     print(f"SRHarness Interactive: {url}", flush=True)
