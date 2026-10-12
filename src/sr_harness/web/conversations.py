@@ -415,7 +415,16 @@ class ConversationRegistry:
 
     def _record_path(self, record: dict[str, Any], field: str) -> Path:
         path = Path(record[field])
-        return path if path.is_absolute() else self.workspace_dir / path
+        if not path.is_absolute():
+            return self.workspace_dir / path
+        if (
+            self.read_only
+            and field == "run_dir"
+            and not path.exists()
+            and path.parent == Path(path.anchor)
+        ):
+            return self.workspace_dir
+        return path
 
     def _session_dir(self, record: dict[str, Any]) -> Path:
         temporary = self._transient_roots.get(record["id"])
