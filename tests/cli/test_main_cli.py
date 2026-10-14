@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from sr_harness.cli import entrypoint, main, setup_parser
-from sr_harness.cli.run import _resolve_workspace_dir
+from sr_harness.cli.run import _resolve_workspace_dir, main as run_main
 from sr_harness.cli.synthetic import build_agent_options, make_dataset
 from sr_harness.agents import SRAgent
 
@@ -44,6 +44,7 @@ def test_run_help_is_delegated(capsys, monkeypatch):
     assert "--workspace-dir" in output
     assert "--isolate-users" in output
     assert "--read-only" in output
+    assert "--verbose" in output
     assert "--mount" in output
     assert "--reload" not in output
     assert "--no-browser" not in output
@@ -55,10 +56,28 @@ def test_run_read_only_flag_defaults_off_and_can_be_enabled():
     default = setup_parser().parse_args(["run"])
     enabled = setup_parser().parse_args(["run", "--read-only"])
     combined = setup_parser().parse_args(["run", "--read-only", "--isolate-users"])
+    verbose = setup_parser().parse_args(["run", "--verbose"])
     assert default.read_only is False
+    assert default.verbose is False
     assert enabled.read_only is True
     assert combined.read_only is True
     assert combined.isolate_users is True
+    assert verbose.verbose is True
+
+
+def test_run_read_only_does_not_create_a_missing_save_path(tmp_path):
+    save_path = tmp_path / "missing"
+    args = setup_parser().parse_args([
+        "run",
+        "--read-only",
+        "--save-path",
+        str(save_path),
+    ])
+
+    with pytest.raises(SystemExit, match="Read-only workspace directory does not exist"):
+        run_main(args)
+
+    assert not save_path.exists()
 
 
 def test_synthetic_help_is_delegated(capsys, monkeypatch):
@@ -155,6 +174,15 @@ def test_workspace_dir_accepts_existing_files_and_reports_mounts(tmp_path, capsy
     assert _resolve_workspace_dir(str(workspace), ["input.csv"]) == workspace
     warning = capsys.readouterr().err
     assert "every new conversation workspace" in warning
+
+
+def test_workspace_dir_read_only_resolution_does_not_create_directory(tmp_path):
+    workspace = tmp_path / "missing-workspace"
+
+    with pytest.raises(FileNotFoundError, match="Read-only workspace directory"):
+        _resolve_workspace_dir(str(workspace), [], create=False)
+
+    assert not workspace.exists()
 
 
 def test_benchmark_requires_algorithm(capsys, monkeypatch):

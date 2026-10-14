@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from socket import gethostname
 
-from sr_harness.utils import sanitize_filename
+from sr_harness.utils import sanitize_filename, setup_logging
 
 
 SCRIPT_NAME = "run"
@@ -38,10 +38,12 @@ def setup_parser(parser: argparse.ArgumentParser | None = None) -> argparse.Argu
         "Experiment name. Defaults to a timestamped name."
     ))
     parser.add_argument("--save-dir", default=None, help=(
-        "Root directory for logs and run artifacts. When omitted together with --save-path, a temporary directory is used."
+        "Root directory for logs and run artifacts. When omitted together with "
+        "--save-path, a temporary directory is used."
     ))
     parser.add_argument("--save-path", default=None, help=(
-        "Path to save agent logs and artifacts. Default is auto-generated from --save-dir and --exp-name."
+        "Path to save agent logs and artifacts. Default is auto-generated from "
+        "--save-dir and --exp-name."
     ))
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind.")
     parser.add_argument("--port", default=8000, type=int, help="Port to bind.")
@@ -52,21 +54,34 @@ def setup_parser(parser: argparse.ArgumentParser | None = None) -> argparse.Argu
         "Only show each browser the conversations created under its own persistent client cookie."
     ))
     parser.add_argument("--read-only", action="store_true", help=(
-        "Serve an existing conversation store without modifying it. All mutating APIs are disabled; use a filesystem read-only mount for defense in depth."
+        "Serve an existing conversation store without modifying it. All mutating APIs "
+        "are disabled; use a filesystem read-only mount for defense in depth."
+    ))
+    parser.add_argument("--verbose", action=argparse.BooleanOptionalAction, default=False, help=(
+        "Enable verbose server logging."
     ))
     parser.add_argument("--mount", nargs="+", default=[], metavar="PATH", help=(
-        "Files or directories to mount read-only at the workspace root. Source basenames must be unique."
+        "Files or directories to mount read-only at the workspace root. Source "
+        "basenames must be unique."
     ))
     return parser
 
 
-def _resolve_workspace_dir(workspace_dir: str | None, mounts: list[str]) -> Path | None:
+def _resolve_workspace_dir(
+    workspace_dir: str | None,
+    mounts: list[str],
+    *,
+    create: bool = True,
+) -> Path | None:
     if workspace_dir is None:
         return None
     path = Path(workspace_dir).expanduser().resolve()
     if path.exists() and not path.is_dir():
         raise NotADirectoryError(f"Workspace directory is not a directory: {path}")
-    path.mkdir(parents=True, exist_ok=True)
+    if create:
+        path.mkdir(parents=True, exist_ok=True)
+    elif not path.is_dir():
+        raise FileNotFoundError(f"Read-only workspace directory does not exist: {path}")
     if mounts:
         print(
             "Read-only mount points will be created inside every new conversation workspace.",
@@ -105,11 +120,26 @@ def main(args: argparse.Namespace) -> int:
     requested_save_path = Path(args.save_path).expanduser() if args.save_path else (
         Path(args.save_dir).expanduser() / args.exp_name if args.save_dir else None
     )
-    workspace_dir = _resolve_workspace_dir(args.workspace_dir, args.mount)
+    try:
+        workspace_dir = _resolve_workspace_dir(
+            args.workspace_dir,
+            args.mount,
+            create=not args.read_only,
+        )
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        raise SystemExit(str(exc)) from exc
     if workspace_dir is None and requested_save_path is not None:
         workspace_dir = requested_save_path.resolve()
-        workspace_dir.mkdir(parents=True, exist_ok=True)
+        if args.read_only:
+            if not workspace_dir.is_dir():
+                raise SystemExit(
+                    f"Read-only workspace directory does not exist: {workspace_dir}"
+                )
+        else:
+            workspace_dir.mkdir(parents=True, exist_ok=True)
     elif workspace_dir is None:
+        if args.read_only:
+            raise SystemExit("--read-only requires --save-path or --workspace-dir")
         workspace_dir = Path(tempfile.mkdtemp(prefix="sr_harness_workspace_")).resolve()
         print(
             "\033[31mWarning: Workspaces will be created in a temporary directory; "
@@ -119,7 +149,7 @@ def main(args: argparse.Namespace) -> int:
     save_path = (
         requested_save_path.resolve()
         if requested_save_path is not None
-        else workspace_dir / "runs" / args.exp_name
+        else workspace_dir if args.read_only else workspace_dir / "runs" / args.exp_name
     )
     if args.read_only:
         if not save_path.is_dir():
@@ -128,6 +158,13 @@ def main(args: argparse.Namespace) -> int:
         save_path.mkdir(parents=True, exist_ok=True)
     args.save_path = str(save_path)
     args.workspace_dir = str(workspace_dir)
+
+    setup_logging(
+        info_level="debug" if args.verbose else "info",
+        exp_name=args.exp_name,
+        save_path=None if args.read_only else save_path / "info.log",
+        force=True,
+    )
 
     conversations = ConversationRegistry(
         workspace_dir,
