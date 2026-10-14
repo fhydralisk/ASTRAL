@@ -156,6 +156,27 @@ def test_session_state_is_restored_and_active_work_is_interrupted(tmp_path):
     restored.close()
 
 
+def test_legacy_session_snapshot_receives_stop_setting_defaults(tmp_path):
+    original = InteractiveSession(tmp_path / "original")
+    snapshot = original.export_persistent_state()
+    for name in (
+        "tool_free_stop_review_rounds",
+        "stop_guard_mode",
+        "stop_guard_metric",
+        "stop_guard_threshold",
+        "stop_guard_split",
+        "stop_guard_larger_is_better",
+    ):
+        snapshot["settings"].pop(name)
+
+    restored = InteractiveSession(tmp_path / "restored")
+    restored.restore_persistent_state(snapshot)
+
+    assert restored.settings["tool_free_stop_review_rounds"] == 1
+    assert restored.settings["stop_guard_mode"] == "none"
+    assert restored.settings["stop_guard_threshold"] is None
+
+
 def test_conversation_storage_separates_workspace_session_and_run_data(tmp_path):
     workspace_dir = tmp_path / "workspace-root"
     save_path = tmp_path / "saved-run"

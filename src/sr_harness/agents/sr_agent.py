@@ -584,9 +584,6 @@ class SRAgent(Agent):
             "Plan tool use within this budget: use early rounds for targeted exploration, keep concrete "
             "candidate formulas as the budget shrinks, and avoid open-ended searches near the end. "
             "If possible, try calling multiple tools in each round. "
-            f"At the final refinement round (L={self.max_refinement_depth}), stop exploration and submit the best available "
-            "target formula using the most appropriate final-answer mechanism available; do not wait for another reminder "
-            "after the final round. "
             f"{mse_goal} Please start by analyzing the data to understand the relationship between features and target."
         )
 

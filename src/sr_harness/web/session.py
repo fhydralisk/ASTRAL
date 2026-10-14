@@ -49,6 +49,8 @@ RUNTIME_SETTING_NAMES = (
     "max_restart_loop", "restart_top_k", "max_workers", "validation_fraction",
     "split_by", "split_ood_variable", "split_random_state", "ranking_metric", "larger_is_better",
     "force_initial_diagnostics", "pause_on_truncated_response",
+    "tool_free_stop_review_rounds", "stop_guard_mode", "stop_guard_metric",
+    "stop_guard_threshold", "stop_guard_split", "stop_guard_larger_is_better",
 )
 
 DATA_AGENT_SETTING_NAMES = (
@@ -179,6 +181,12 @@ class InteractiveSession:
             "larger_is_better": False,
             "force_initial_diagnostics": False,
             "pause_on_truncated_response": True,
+            "tool_free_stop_review_rounds": 1,
+            "stop_guard_mode": "none",
+            "stop_guard_metric": None,
+            "stop_guard_threshold": None,
+            "stop_guard_split": "validation",
+            "stop_guard_larger_is_better": True,
         }
         self.settings.update(agent_options or {})
         if self.settings["tools"] is None:
@@ -329,8 +337,16 @@ class InteractiveSession:
         with self.lock:
             self.run_id = str(snapshot["run_id"])
             restored_settings = dict(snapshot["settings"])
-            if set(restored_settings) != set(self.settings):
+            default_settings = self.settings.copy()
+            legacy_stop_fields = {
+                "tool_free_stop_review_rounds", "stop_guard_mode", "stop_guard_metric",
+                "stop_guard_threshold", "stop_guard_split", "stop_guard_larger_is_better",
+            }
+            missing_settings = set(default_settings) - set(restored_settings)
+            if set(restored_settings) - set(default_settings) or not missing_settings <= legacy_stop_fields:
                 raise ValueError("Persisted settings do not match the current session schema")
+            for name in missing_settings:
+                restored_settings[name] = default_settings[name]
             self.settings = restored_settings
             self.pending_settings = snapshot["pending_settings"]
             restored_data_settings = dict(snapshot["data_agent_settings"])
@@ -1056,6 +1072,13 @@ class InteractiveSession:
         Args:
             settings: Runtime settings to validate or apply.
         """
+        if (
+            settings.get("stop_guard_mode") == "metric_threshold"
+            and settings.get("stop_guard_threshold") is None
+        ):
+            raise ValueError(
+                f"{settings['stop_guard_mode']} requires stop_guard_threshold"
+            )
         if not settings.get("force_initial_diagnostics"):
             return
         tools = settings.get("tools")
@@ -1530,7 +1553,7 @@ class InteractiveSession:
             elif k == "llm_max_tokens":
                 if isinstance(v, bool) or not isinstance(v, int) or not 1 <= v <= 1_000_000:
                     raise ValueError("llm_max_tokens must be an integer between 1 and 1000000")
-            elif k in nonnegative_integers:
+            elif k in nonnegative_integers or k == "tool_free_stop_review_rounds":
                 if isinstance(v, bool) or not isinstance(v, int) or not 0 <= v <= 1000:
                     raise ValueError(f"{k} must be an integer between 0 and 1000")
             elif k == "split_random_state":
@@ -1544,6 +1567,7 @@ class InteractiveSession:
                 "larger_is_better",
                 "force_initial_diagnostics",
                 "pause_on_truncated_response",
+                "stop_guard_larger_is_better",
             }:
                 if not isinstance(v, bool):
                     raise ValueError(f"{k} must be a boolean")
@@ -1560,6 +1584,16 @@ class InteractiveSession:
             elif k == "split_ood_variable":
                 if v is not None and (not isinstance(v, str) or not v.strip()):
                     raise ValueError(f"{k} must be null or a non-empty string")
+            elif k == "stop_guard_metric":
+                if v is not None and (not isinstance(v, str) or not v.strip()):
+                    raise ValueError("stop_guard_metric must be null or a non-empty string")
+            elif k == "stop_guard_threshold":
+                if v is not None and (
+                    isinstance(v, bool)
+                    or not isinstance(v, (int, float))
+                    or not np.isfinite(float(v))
+                ):
+                    raise ValueError("stop_guard_threshold must be null or a finite number")
             elif not isinstance(v, str) or not v.strip():
                 raise ValueError(f"{k} must be non-empty")
         if "llm_provider" in result and result["llm_provider"] not in {
@@ -1580,6 +1614,14 @@ class InteractiveSession:
             raise ValueError("Unsupported tool parser")
         if "split_by" in result and result["split_by"] not in {"random", "ood"}:
             raise ValueError("Unsupported validation split strategy")
+        if "stop_guard_mode" in result and result["stop_guard_mode"] not in {
+            "none", "best_in_topk", "metric_threshold", "budget_exhausted",
+        }:
+            raise ValueError("Unsupported stop guard mode")
+        if "stop_guard_split" in result and result["stop_guard_split"] not in {
+            "train", "validation",
+        }:
+            raise ValueError("Unsupported stop guard split")
         return result
 
     @staticmethod

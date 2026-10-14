@@ -397,6 +397,10 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert "systemPromptConfirmHelp:'内置默认提示词，可在发送前编辑。'" in page.text
     assert "composerPurposeHelp:'根据任务配置自动生成，可在发送前直接编辑。'" in page.text
     assert "composerPurposeTitle:'确认用户提示词'" in page.text
+    assert 'function mountStopSettings()' in page.text
+    assert "field('stop-review-rounds','number')" in page.text
+    assert "field('stop-guard-mode','select'" in page.text
+    assert 'tool_free_stop_review_rounds:Number' in page.text
     assert "promptRegenerateButton('composer-purpose-regenerate')" in page.text
     assert "promptRegenerateButton('system-prompt-regenerate')" in page.text
     assert "await refreshPromptPreview(kind)" in page.text
@@ -1229,7 +1233,7 @@ def test_runtime_capabilities_can_be_configured(platform):
     payload = capabilities.json()
     tool_names = {tool['name'] for tool in payload['tools']}
     skill_names = {skill['name'] for skill in payload['skills']}
-    assert {'evaluate_formula', 'workspace_shell'} <= tool_names
+    assert {'evaluate_formula', 'finish_search', 'workspace_shell'} <= tool_names
     assert 'code_executor' not in tool_names
     assert {'validate_context_data', 'validate_evaluator'} <= tool_names
     assert {'commit_data', 'load_context_data'}.isdisjoint(tool_names)
@@ -1253,14 +1257,34 @@ def test_runtime_capabilities_can_be_configured(platform):
         'skills': [],
         'max_refinement_depth': 12,
         'pause_on_truncated_response': False,
+        'tool_free_stop_review_rounds': 3,
+        'stop_guard_mode': 'metric_threshold',
+        'stop_guard_metric': 'r2',
+        'stop_guard_threshold': 0.99,
+        'stop_guard_split': 'validation',
+        'stop_guard_larger_is_better': True,
     })
     assert response.status_code == 200
     assert response.json()['settings']['tools'] == ['evaluate_formula']
     assert response.json()['settings']['skills'] == []
     assert response.json()['settings']['max_refinement_depth'] == 12
     assert response.json()['settings']['pause_on_truncated_response'] is False
+    assert response.json()['settings']['tool_free_stop_review_rounds'] == 3
+    assert response.json()['settings']['stop_guard_mode'] == 'metric_threshold'
+    assert response.json()['settings']['stop_guard_metric'] == 'r2'
+    assert response.json()['settings']['stop_guard_threshold'] == 0.99
+    response = client.post('/api/session/settings', json={
+        'stop_guard_mode': 'best_in_topk',
+        'stop_guard_threshold': None,
+    })
+    assert response.status_code == 200
+    assert response.json()['settings']['stop_guard_mode'] == 'best_in_topk'
     assert client.post('/api/session/settings', json={
         'tools': ['not-a-tool'],
+    }).status_code == 400
+    assert client.post('/api/session/settings', json={
+        'stop_guard_mode': 'metric_threshold',
+        'stop_guard_threshold': None,
     }).status_code == 400
 
 
@@ -2067,7 +2091,24 @@ def test_tool_free_search_response_pauses_without_question_card(platform, monkey
 
             return APICallResult(generate())
 
-    monkeypatch.setattr(BaseAPI, 'create', lambda *args, **kwargs: YieldingAPI())
+    class StopReviewerAPI(CancellableFakeAPI):
+        def __call__(self, prompt, **kwargs):
+            def generate():
+                message = {
+                    'role': 'assistant',
+                    'content': '{"should_stop": true, "reason": "final answer"}',
+                }
+                yield {'content': message['content'], 'tool_call': [], 'message': message}
+                return {'usage': {'token': {}, 'price': {}}, 'responses': []}
+            return APICallResult(generate())
+
+    monkeypatch.setattr(
+        BaseAPI,
+        'create',
+        lambda *args, **kwargs: (
+            StopReviewerAPI() if kwargs.get('tool_list') is None else YieldingAPI()
+        ),
+    )
     response = client.post('/api/session/start', json={'max_refinement_depth': 3})
     assert response.status_code == 200, response.text
     deadline = time.monotonic() + 5

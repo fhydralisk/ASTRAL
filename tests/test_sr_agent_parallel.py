@@ -19,6 +19,7 @@ from sr_harness.agents.sr_agent import SRAgent
 from sr_harness.agents.sr_agent_interactive import SRAgentInteractive
 from sr_harness.runtime import SRInteractionManager
 from sr_harness.tools.base_tool import BaseTool
+from sr_harness.tools.finish_search import FinishSearchTool
 from sr_harness.tools.read_skill import ReadSkill
 from sr_harness.tools.relationship_analysis import RelationshipAnalysisTool
 from sr_harness.tools.statistics_analysis import StatisticsTool
@@ -162,11 +163,15 @@ def test_interactive_refreshes_data_before_queued_human_guidance():
     assert all(event["kind"] != "data_revision" for event in events)
 
 
-def test_interactive_agent_requests_pause_after_tool_free_response():
+def test_interactive_agent_pauses_when_stop_review_accepts_tool_free_response():
     agent = object.__new__(SRAgentInteractive)
     agent._last_iteration_had_tool_calls = False
     agent._last_response_was_truncated = False
     agent._forced_interruption_pending = False
+    agent._pending_stop_at_boundary = False
+    agent.tool_free_stop_review_rounds = 1
+    agent._review_tool_free_stop = lambda buffer, **coordinate: (True, "final answer")
+    agent._stop_rejection_reason = lambda **kwargs: None
     agent.best_candidate = lambda: None
     agent.interaction_manager = SRInteractionManager()
     agent.interaction_manager.start_agent_execution()
@@ -223,17 +228,210 @@ def test_interactive_agent_does_not_special_case_zero_mse_after_tool_call():
     assert buffer == []
 
 
-def test_web_tool_free_response_pauses_without_asking_a_question():
+def test_web_tool_free_response_continues_when_stop_review_rejects_it():
     agent = object.__new__(SRAgentInteractive)
     agent._last_iteration_had_tool_calls = False
     agent._last_response_was_truncated = False
     agent._forced_interruption_pending = False
+    agent._pending_stop_at_boundary = False
+    agent.tool_free_stop_review_rounds = 1
+    agent._review_tool_free_stop = lambda buffer, **coordinate: (False, "unfinished plan")
     agent.best_candidate = lambda: None
     agent.interaction_manager = SRInteractionManager()
     agent.interaction_manager.start_agent_execution()
 
     assert agent.finish_iteration([], R=1, L=2, C=1) is None
-    assert agent.interaction_manager.state == "pausing"
+    assert agent.interaction_manager.state == "running"
+
+
+def test_web_tool_free_stop_rejection_is_added_as_user_prompt():
+    agent = object.__new__(SRAgentInteractive)
+    agent._last_iteration_had_tool_calls = False
+    agent._last_response_was_truncated = False
+    agent._forced_interruption_pending = False
+    agent._pending_stop_at_boundary = False
+    agent.tool_free_stop_review_rounds = 1
+    agent._review_tool_free_stop = lambda buffer, **coordinate: (True, "looks final")
+    agent._stop_rejection_reason = lambda **kwargs: "R2 has not reached 0.99."
+    agent.interaction_manager = SRInteractionManager()
+    agent.interaction_manager.start_agent_execution()
+    buffer = []
+
+    assert agent.finish_iteration(buffer, R=1, L=2, C=1) is None
+    assert agent.interaction_manager.state == "running"
+    assert buffer == [{
+        "role": "user",
+        "content": (
+            "[Stop request rejected]\n"
+            "R2 has not reached 0.99. Continue the symbolic-regression search."
+        ),
+    }]
+
+
+def test_tool_free_stop_review_can_be_disabled():
+    agent = object.__new__(SRAgentInteractive)
+    agent._last_iteration_had_tool_calls = False
+    agent._last_response_was_truncated = False
+    agent._forced_interruption_pending = False
+    agent._pending_stop_at_boundary = False
+    agent.tool_free_stop_review_rounds = 0
+    agent._review_tool_free_stop = lambda *args, **kwargs: pytest.fail("review should be disabled")
+    agent.interaction_manager = SRInteractionManager()
+    agent.interaction_manager.start_agent_execution()
+
+    assert agent.finish_iteration([], R=1, L=2, C=1) is None
+    assert agent.interaction_manager.state == "running"
+
+
+def test_finish_search_returns_stopped_then_pauses_at_safe_boundary(tmp_path):
+    manager = SRInteractionManager()
+    agent = SRAgentInteractive(
+        llm_provider="unused",
+        llm_model="unused",
+        tools=["finish_search"],
+        skills=[],
+        save_path=str(tmp_path),
+        interaction_manager=manager,
+    )
+    agent.tools = [FinishSearchTool(context=AgentContext())]
+    agent._stop_check_L = 2
+    manager.start_agent_execution()
+
+    result = agent.execute_action([
+        ToolCall("finish_search", {"reason": "The best formula is verified."}, id="finish-1"),
+    ])[0]
+
+    assert result.ok is True
+    assert result.result == {
+        "status": "stopped",
+        "reason": "The best formula is verified.",
+    }
+    assert manager.state == "running"
+    agent._last_iteration_had_tool_calls = True
+    agent.finish_iteration([], R=1, L=2, C=1)
+    assert manager.state == "pausing"
+
+
+def test_finish_search_rejection_is_returned_as_tool_result(tmp_path):
+    manager = SRInteractionManager()
+    agent = SRAgentInteractive(
+        llm_provider="unused",
+        llm_model="unused",
+        tools=["finish_search"],
+        skills=[],
+        save_path=str(tmp_path),
+        interaction_manager=manager,
+        max_refinement_depth=4,
+        stop_guard_mode="budget_exhausted",
+    )
+    agent.tools = [FinishSearchTool(context=AgentContext())]
+    agent._stop_check_L = 2
+
+    result = agent.execute_action([
+        ToolCall("finish_search", {"reason": "Enough exploration."}, id="finish-1"),
+    ])[0]
+
+    assert result.ok is True
+    assert result.result["status"] == "rejected"
+    assert "current round L=2" in result.result["reason"]
+    assert agent._pending_stop_at_boundary is False
+
+
+def test_metric_stop_guard_reads_same_response_candidate(tmp_path):
+    manager = SRInteractionManager()
+    agent = SRAgentInteractive(
+        llm_provider="unused",
+        llm_model="unused",
+        tools=[],
+        skills=[],
+        save_path=str(tmp_path),
+        interaction_manager=manager,
+        stop_guard_mode="metric_threshold",
+        stop_guard_metric="r2",
+        stop_guard_threshold=0.99,
+        stop_guard_split="validation",
+        stop_guard_larger_is_better=True,
+    )
+    candidate = ToolCallResult(
+        ok=True,
+        result={
+            "formula": "x",
+            "is_candidate": True,
+            "data_split_results": {"validation": {"metrics": {"r2": 0.995}}},
+        },
+        result_str="candidate",
+        meta_data={},
+    )
+
+    assert agent._stop_rejection_reason(L=1, extra_results=[candidate]) is None
+
+
+def test_topk_stop_guard_requires_a_unique_best_ranking_result(tmp_path):
+    agent = SRAgentInteractive(
+        llm_provider="unused",
+        llm_model="unused",
+        tools=[],
+        skills=[],
+        save_path=str(tmp_path),
+        interaction_manager=SRInteractionManager(),
+        stop_guard_mode="best_in_topk",
+        ranking_metric="mse",
+        larger_is_better=False,
+    )
+
+    def add(formula, mse):
+        agent.push_candidate(CandidateRecord(
+            formula=formula,
+            node_id=formula,
+            details={"data_split_results": {
+                "train": {"metrics": {"mse": mse, "complexity": 1}},
+                "validation": {"metrics": {"mse": mse}},
+            }},
+        ))
+
+    assert "contains no candidate" in agent._stop_rejection_reason(L=1)
+    add("x", 0.2)
+    add("y", 0.2)
+    assert "are tied" in agent._stop_rejection_reason(L=1)
+    add("z", 0.1)
+    assert agent._stop_rejection_reason(L=1) is None
+
+
+def test_topk_stop_guard_includes_same_response_candidates(tmp_path):
+    agent = SRAgentInteractive(
+        llm_provider="unused",
+        llm_model="unused",
+        tools=[],
+        skills=[],
+        save_path=str(tmp_path),
+        interaction_manager=SRInteractionManager(),
+        stop_guard_mode="best_in_topk",
+    )
+    for formula in ("x", "y"):
+        agent.push_candidate(CandidateRecord(
+            formula=formula,
+            node_id=formula,
+            details={"data_split_results": {
+                "train": {"metrics": {"mse": 0.2, "complexity": 1}},
+                "validation": {"metrics": {"mse": 0.2}},
+            }},
+        ))
+    candidate = ToolCallResult(
+        ok=True,
+        result={
+            "formula": "z",
+            "is_candidate": True,
+            "data_split_results": {
+                "train": {"metrics": {"mse": 0.1, "complexity": 1}},
+                "validation": {"metrics": {"mse": 0.1}},
+            },
+        },
+        result_str="candidate",
+        meta_data={},
+    )
+
+    assert "are tied" in agent._stop_rejection_reason(L=1)
+    assert agent._stop_rejection_reason(L=1, extra_results=[candidate]) is None
 
 
 def test_safe_pause_does_not_block_tools_already_requested_this_turn(monkeypatch):
@@ -441,7 +639,7 @@ def test_execute_tool_calls_uses_messages_already_injected_into_tool_context(tmp
     assert results[0][0].result == {"messages": [{"role": "system", "content": "Reusable context"}]}
 
 
-def test_create_initial_buffer_includes_refinement_budget_rule(tmp_path):
+def test_create_initial_buffer_states_budget_without_stop_protocol(tmp_path):
     agent = make_agent(tmp_path)
     agent.max_refinement_depth = 7
 
@@ -454,8 +652,8 @@ def test_create_initial_buffer_includes_refinement_budget_rule(tmp_path):
 
     system_content = prompt[0]["content"]
     assert "at most 7 refinement rounds" in system_content
-    assert "At the final refinement round (L=7)" in system_content
-    assert "final-answer mechanism" in system_content
+    assert "finish_search" not in system_content
+    assert "final-answer mechanism" not in system_content
 
 
 def test_force_initial_diagnostics_runs_and_injects_results(tmp_path):

@@ -103,14 +103,14 @@ flowchart TB
 2. `deepcopy(initial_buffer)` 在每个 `C` 开始时复制初始提示词，以创建从相同起点开始的相互独立分支分别探索。
 3. `prepare_iteration()` 应用本轮开始前的运行时变化，例如暂停运行、刷新工具环境、接受用户消息等等。
 4. `prepare_model_messages()` 构造发送给模型的上下文消息，并在 `L=1` 时添加可选的初始诊断。
-5. `request_llm()` 请求模型生成 `K` 个响应，每个响应包含自然语言内容和若干工具调用。若使用 Web 工作台中的交互式 `SRAgent`，不产生工具调用的响应将触发暂停并让出控制，等用户补充信息后再继续搜索。
+5. `request_llm()` 请求模型生成 `K` 个响应，每个响应包含自然语言内容和若干工具调用。交互式 `SRAgent` 会把无工具回复的最近 `tool_free_stop_review_rounds` 轮信息交给独立的 BaseAPI 调用判断是否应该停止；该值为 0 时跳过判断并继续搜索。
 6. `execute_tool_calls()` 执行各个工具调用并得到对应的 `ToolCallResult`。互不依赖的调用可被配置以并行执行。
 7. `record_search_iteration()` 将生成的 `K` 个模型响应及其工具调用结果添加到搜索树。
 8. `collect_candidates()` 从工具调用结果中收集候选公式以供全局排序、帕累托前沿和最终结果使用。
 9. `update_conversation()` 选择一个产生最佳候选的 `K` 样本作为下一轮的主要上下文。其他样本调用数据分析工具或通用目的工具产生的结果也可被整合到后续上下文中。
-10. `finish_iteration()` 判断是否结束当前分支或搜索。
+10. `finish_iteration()` 在安全边界处理明确的 `finish_search` 请求或无工具回复的停机判断。停止许可条件不满足时，搜索继续。
 
-如果模型给出了普通回复但没有调用任何工具，该回复仍是合法输出。非交互式搜索可以继续进入后续 refinement step；`SRAgentInteractive` 则会自然让出控制，等待用户补充消息后再继续。
+`finish_search` 是交互式搜索的显式停止请求。检查通过时，它返回 `stopped` 并在安全边界暂停；检查不通过时，它把原因作为工具结果返回给模型。无工具回复只有在独立判断认为应该停止且同一检查通过时才暂停；检查不通过的原因会作为 user prompt 加入下一轮。停止许可可配置为无额外条件、`topk_records` 中存在一个在当前排序指标上严格胜过所有其他公式的结果、指定指标达到阈值，或已经耗尽当前分支的 L 预算。禁用 `finish_search` 工具与把 `tool_free_stop_review_rounds` 设为 0 相互独立。
 
 ## 工具调用生命周期
 

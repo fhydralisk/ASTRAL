@@ -129,7 +129,9 @@ Unless documented otherwise, each backend interaction event is rendered as one c
 - Running without text: the square requests a pause.
 - Pause already requested: the red square interrupts the current stream or tool execution.
 
-An assistant response with no tool call simply ends the turn and waits for another user message. There is no separate `ask_human` tool or state.
+The Agent can call `finish_search` to request a stop. If the stop-permission setting passes, the tool returns `stopped` and the run pauses at the next safe boundary; otherwise its tool result explains why the Agent must continue. When an assistant response contains no tool call, the backend defaults to sending the latest Agent turn to a separate tool-free request on the same model. A continue decision starts the next turn; a stop decision still has to pass the same permission check. Set **Tool-free review rounds** to 0 to disable implicit stopping, or disable `finish_search` separately under Capabilities.
+
+Stop permission may be unconditional, require `topk_records` to contain one result that strictly beats every other distinct formula on the current `ranking_metric`, require a train/validation metric threshold, or require the L budget to be exhausted. Candidates produced in the same response but not yet persisted to `topk_records` are included in the check, and duplicate records for the same formula are treated as one method.
 
 ## Search tree and candidates
 

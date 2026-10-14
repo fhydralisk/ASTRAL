@@ -106,14 +106,14 @@ In detail:
 2. `deepcopy(initial_buffer)` copies the initial prompts at the start of each `C`, creating mutually independent branches that explore from the same starting point.
 3. `prepare_iteration()` applies runtime changes before the turn, such as pausing execution, refreshing the tool environment, and accepting user messages.
 4. `prepare_model_messages()` constructs the context messages sent to the model and adds optional initial diagnostics when `L=1`.
-5. `request_llm()` requests `K` responses, each containing natural-language content and tool calls. When using the interactive `SRAgent` in the Web workspace, a response without tool calls triggers a pause and yields control until the user supplies additional information.
+5. `request_llm()` requests `K` responses, each containing natural-language content and tool calls. For an interactive `SRAgent`, a separate tool-free BaseAPI call reviews the latest `tool_free_stop_review_rounds` Agent turns; setting that value to 0 disables this review and continues the search.
 6. `execute_tool_calls()` executes each tool call and returns its corresponding `ToolCallResult`. Independent calls can be configured to run concurrently.
 7. `record_search_iteration()` adds the generated `K` model responses and their tool-call results to the search tree.
 8. `collect_candidates()` collects candidate formulas from tool-call results for global ranking, the Pareto front, and the final result.
 9. `update_conversation()` selects the `K` sample that produced the best candidate as the primary context for the next turn. Results produced when other samples call data-analysis or general-purpose tools may also be incorporated into subsequent context.
-10. `finish_iteration()` determines whether to end the current branch or the search.
+10. `finish_iteration()` handles an explicit `finish_search` request or a reviewed tool-free response at a safe boundary. The search continues when its stop-permission check fails.
 
-A normal model response without tool calls is still valid. A non-interactive search may proceed to its next refinement step, while `SRAgentInteractive` naturally yields control until the user supplies more guidance.
+`finish_search` is the interactive search's explicit stop request. When the configured check passes, the tool returns `stopped` and the run pauses at a safe boundary; otherwise its tool result explains why the search must continue. A tool-free response pauses only when the independent review recommends stopping and the same permission check passes. A failed check is inserted as a user prompt for the next turn. Stop permission can be unconditional, require `topk_records` to contain one result that strictly beats every other distinct formula on the ranking metric, require a metric threshold, or require exhaustion of the branch's L budget. Disabling the `finish_search` tool and setting `tool_free_stop_review_rounds` to 0 are independent controls.
 
 ## Tool-call lifecycle
 

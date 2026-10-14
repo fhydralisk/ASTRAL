@@ -5,7 +5,9 @@
 """
 
 from __future__ import annotations
+import json
 import logging
+import math
 import tempfile
 import time
 from contextlib import contextmanager
@@ -24,6 +26,8 @@ _logger = logging.getLogger(f"sr_harness.{__name__}")
 
 class SRAgentInteractive(SRAgent):
     """Interactive symbolic-regression agent controlled by an interaction manager."""
+
+    DEFAULT_TOOLS = (*SRAgent.DEFAULT_TOOLS, "finish_search")
 
     _LEGACY_WORKSPACE_GUIDANCE = (
         "The structured arrays are already loaded into the scientific tools; analyze them "
@@ -66,6 +70,12 @@ class SRAgentInteractive(SRAgent):
         workspace_files: List[str | Path] | None = None,
         force_initial_diagnostics: bool = False,
         pause_on_truncated_response: bool = True,
+        tool_free_stop_review_rounds: int = 1,
+        stop_guard_mode: str = "none",
+        stop_guard_metric: str | None = None,
+        stop_guard_threshold: float | None = None,
+        stop_guard_split: str = "validation",
+        stop_guard_larger_is_better: bool = True,
         auto_routing: bool = True,
         strong_llm_provider: str | None = None,
         strong_llm_model: str | None = None,
@@ -101,6 +111,13 @@ class SRAgentInteractive(SRAgent):
             interaction_manager: 连接 Agent 与 Web、终端等交互界面的管理器。
             force_initial_diagnostics: 是否在每个分支开始时强制执行初始诊断。
             pause_on_truncated_response: 模型输出因长度限制截断后是否在安全边界暂停。
+            tool_free_stop_review_rounds: 无工具回复触发停机复核时发送的最近轮数；0 表示禁用。
+            stop_guard_mode: 停止许可模式：none、best_in_topk、
+                metric_threshold 或 budget_exhausted。
+            stop_guard_metric: 停止检查使用的指标；None 表示使用 ranking_metric。
+            stop_guard_threshold: metric_threshold 模式的目标指标阈值。
+            stop_guard_split: 停止检查读取的指标分割，train 或 validation。
+            stop_guard_larger_is_better: metric_threshold 模式下指标是否越大越好。
             auto_routing: 是否根据任务复杂度在基础与强模型后端之间自动路由。
             strong_llm_provider: 复杂任务使用的后端；默认沿用 llm_provider。
             strong_llm_model: 复杂任务使用的模型。None 表示仅使用基础模型。
@@ -146,9 +163,19 @@ class SRAgentInteractive(SRAgent):
             raise TypeError("interaction_manager must be an SRInteractionManager")
         self.interaction_manager = interaction_manager
         self.pause_on_truncated_response = pause_on_truncated_response
+        self.tool_free_stop_review_rounds = tool_free_stop_review_rounds
+        self.stop_guard_mode = stop_guard_mode
+        self.stop_guard_metric = stop_guard_metric
+        self.stop_guard_threshold = stop_guard_threshold
+        self.stop_guard_split = stop_guard_split
+        self.stop_guard_larger_is_better = stop_guard_larger_is_better
+        self._validate_stop_settings()
         self._last_iteration_had_tool_calls = True
         self._last_response_was_truncated = False
         self._forced_interruption_pending = False
+        self._pending_stop_at_boundary = False
+        self._stop_check_L: int | None = None
+        self._stop_review_apis: dict[tuple[str, str], BaseAPI] = {}
         self._response_followup_messages: list[Message] = []
         self.initial_messages: list[PendingMessage] = []
         self.prompt_overrides: dict[str, str] = {}
@@ -185,6 +212,32 @@ class SRAgentInteractive(SRAgent):
         """Share the hard-interrupt event with every active tool instance."""
         for tool in self.tools or []:
             tool.cancel_event = self.interaction_manager.cancellation_signal
+
+    def _validate_stop_settings(self) -> None:
+        """Validate settings that control model-requested safe stopping."""
+        if (
+            isinstance(self.tool_free_stop_review_rounds, bool)
+            or not isinstance(self.tool_free_stop_review_rounds, int)
+            or not 0 <= self.tool_free_stop_review_rounds <= 1000
+        ):
+            raise ValueError("tool_free_stop_review_rounds must be between 0 and 1000")
+        if self.stop_guard_mode not in {
+            "none", "best_in_topk", "metric_threshold", "budget_exhausted",
+        }:
+            raise ValueError(f"Unsupported stop_guard_mode: {self.stop_guard_mode}")
+        if self.stop_guard_split not in {"train", "validation"}:
+            raise ValueError("stop_guard_split must be train or validation")
+        if self.stop_guard_metric is not None and (
+            not isinstance(self.stop_guard_metric, str) or not self.stop_guard_metric.strip()
+        ):
+            raise ValueError("stop_guard_metric must be null or a non-empty string")
+        if self.stop_guard_threshold is not None:
+            if isinstance(self.stop_guard_threshold, bool) or not isinstance(
+                self.stop_guard_threshold, (int, float)
+            ) or not math.isfinite(float(self.stop_guard_threshold)):
+                raise ValueError("stop_guard_threshold must be null or a finite number")
+        if self.stop_guard_mode == "metric_threshold" and self.stop_guard_threshold is None:
+            raise ValueError(f"{self.stop_guard_mode} requires stop_guard_threshold")
 
     def initialize_tools(self, context: AgentContext) -> None:
         """Initialize tools and attach the active hard-interrupt event."""
@@ -323,11 +376,18 @@ class SRAgentInteractive(SRAgent):
                 "larger_is_better",
                 "force_initial_diagnostics",
                 "pause_on_truncated_response",
+                "tool_free_stop_review_rounds",
+                "stop_guard_mode",
+                "stop_guard_metric",
+                "stop_guard_threshold",
+                "stop_guard_split",
+                "stop_guard_larger_is_better",
                 "auto_routing",
                 "tool_parser",
             ):
                 if name in settings:
                     setattr(self, name, settings[name])
+            self._validate_stop_settings()
             self.strong_llm_provider = (
                 self.llm_provider
                 if settings.get("strong_llm_provider") is None
@@ -364,6 +424,7 @@ class SRAgentInteractive(SRAgent):
             self.run_state.ranking_metric = self.ranking_metric
             self.run_state.larger_is_better = self.larger_is_better
             self._strong_api = None
+            self._stop_review_apis.clear()
             self._commit_runtime_settings(settings)
             self.interaction_manager.publish_event("settings_applied", settings)
         except Exception as exc:
@@ -386,10 +447,258 @@ class SRAgentInteractive(SRAgent):
             self._append_buffer_messages(buffer, [prompt], R=R, C=C, L=L)
             self._forced_interruption_pending = False
             return None
-        if not self._last_iteration_had_tool_calls and not self._last_response_was_truncated:
+        if getattr(self, "_pending_stop_at_boundary", False):
+            self._pending_stop_at_boundary = False
             self.interaction_manager.request_pause()
+        elif (
+            not self._last_iteration_had_tool_calls
+            and not self._last_response_was_truncated
+            and getattr(self, "tool_free_stop_review_rounds", 1) > 0
+            and self.interaction_manager.state == "running"
+            and not self.interaction_manager.status().get("pending_messages")
+            and self.interaction_manager.status().get("pending_transition") is None
+        ):
+            should_stop, review_reason = self._review_tool_free_stop(buffer, R=R, L=L, C=C)
+            if should_stop:
+                rejection = self._stop_rejection_reason(L=L)
+                if rejection is None:
+                    self.interaction_manager.request_pause()
+                else:
+                    self._append_buffer_messages(buffer, [{
+                        "role": "user",
+                        "content": (
+                            "[Stop request rejected]\n"
+                            f"{rejection} Continue the symbolic-regression search."
+                        ),
+                    }], R=R, C=C, L=L)
+            else:
+                _logger.info("Tool-free response will continue after stop review: %s", review_reason)
         self._last_response_was_truncated = False
         return None
+
+    def _recent_agent_rounds(self, buffer: list[Message]) -> list[Message]:
+        """Return a plain-message suffix containing the configured number of Agent turns."""
+        assistant_indices = [
+            index for index, message in enumerate(buffer) if message.get("role") == "assistant"
+        ]
+        if not assistant_indices:
+            return []
+        start = assistant_indices[-min(self.tool_free_stop_review_rounds, len(assistant_indices))]
+        fields = {"role", "content", "reasoning", "tool_calls", "name"}
+        return [
+            {key: value for key, value in message.items() if key in fields}
+            for message in buffer[start:]
+        ]
+
+    @staticmethod
+    def _parse_stop_review(content: str) -> tuple[bool, str]:
+        """Parse the review model's strict JSON decision conservatively."""
+        try:
+            start = content.index("{")
+            end = content.rindex("}") + 1
+            payload = json.loads(content[start:end])
+            decision = payload.get("should_stop")
+            reason = str(payload.get("reason", "")).strip()
+            if not isinstance(decision, bool):
+                raise ValueError("should_stop is not boolean")
+            return decision, reason
+        except (ValueError, TypeError, json.JSONDecodeError) as exc:
+            return False, f"invalid stop-review response: {exc}"
+
+    def _review_tool_free_stop(
+        self, buffer: list[Message], *, R: int, L: int, C: int,
+    ) -> tuple[bool, str]:
+        """Ask a tool-free BaseAPI call whether the Agent intended to stop."""
+        route = self._last_model_route
+        provider = route.provider if route is not None else self.llm_provider
+        model = route.model if route is not None else self.llm_model
+        key = (provider, model)
+        api = self._stop_review_apis.get(key)
+        if api is None:
+            api = BaseAPI.create(
+                provider,
+                model=model,
+                tool_list=None,
+                tool_parser_name="openai",
+                environment=getattr(self.context.args, "api_environment", None),
+            )
+            self._stop_review_apis[key] = api
+        recent = self._recent_agent_rounds(buffer)
+        messages = [{
+            "role": "system",
+            "content": (
+                "Decide whether the symbolic-regression Agent intends to hand control back "
+                "to the user now. Return JSON only: "
+                '{"should_stop": true|false, "reason": "brief explanation"}. '
+                "Answer false when it is planning, analyzing, describing a next action, or "
+                "otherwise appears to have unfinished autonomous work. Answer true only for "
+                "a final answer, an explicit request for user input, or an explicit decision to stop."
+            ),
+        }, {
+            "role": "user",
+            "content": "Recent Agent rounds:\n" + json.dumps(recent, ensure_ascii=False),
+        }]
+        try:
+            with self.interaction_manager.cancellable(api.cancel):
+                result = api(messages, n=1)
+                responses = list(result)
+            usage = result.returned.get("usage", {"token": {}, "price": {}})
+            for name, value in usage.get("token", {}).items():
+                self.token_counter.add(name, value)
+            for name, value in usage.get("price", {}).items():
+                self.money_counter.add(name, value)
+            content = responses[0][0] if responses else ""
+            decision, reason = self._parse_stop_review(content)
+            if self.save_path is not None:
+                with open(Path(self.save_path) / "stop_reviews.jsonl", "a", encoding="utf-8") as stream:
+                    json.dump({
+                        "progress": self.format_progress(R, L, C),
+                        "provider": provider,
+                        "model": model,
+                        "rounds": recent,
+                        "response": content,
+                        "should_stop": decision,
+                        "reason": reason,
+                        "usage": usage,
+                    }, stream, ensure_ascii=False)
+                    stream.write("\n")
+            return decision, reason
+        except Exception as exc:
+            _logger.warning("Stop review failed; continuing the search: %s", exc)
+            return False, f"stop review failed: {exc}"
+
+    @staticmethod
+    def _result_metric_values(
+        result: ToolCallResult, metric: str, split: str,
+    ) -> list[float]:
+        """Extract finite metric values from one candidate-producing tool result."""
+        candidates = [result.result, *result.result.get("all_formulas", [])]
+        values = []
+        for candidate in candidates:
+            value = (
+                candidate.get("data_split_results", {})
+                .get(split, {})
+                .get("metrics", {})
+                .get(metric)
+            )
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(numeric):
+                values.append(numeric)
+        return values
+
+    def _stop_metric_values(
+        self, metric: str, split: str, extra_results: list[ToolCallResult] | None = None,
+    ) -> list[float]:
+        """Collect stop-check metrics from retained and same-response candidates."""
+        values = []
+        for record in self.run_state.ranked_candidates():
+            try:
+                value = float(record.metric(metric, split))
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(value):
+                values.append(value)
+        for result in extra_results or []:
+            values.extend(self._result_metric_values(result, metric, split))
+        return values
+
+    def _topk_ranking_values(
+        self, extra_results: list[ToolCallResult] | None = None,
+    ) -> dict[str, float]:
+        """Return the best ranking-metric value retained for each distinct formula."""
+        candidates: list[CandidateRecord | dict[str, Any]] = list(
+            self.run_state.ranked_candidates()
+        )
+        for result in extra_results or []:
+            if result.result.get("is_candidate"):
+                candidates.append(result.result)
+            candidates.extend(
+                candidate
+                for candidate in result.result.get("all_formulas", [])
+                if isinstance(candidate, dict)
+            )
+        values: dict[str, float] = {}
+        for index, candidate in enumerate(candidates):
+            formula = (
+                candidate.formula
+                if isinstance(candidate, CandidateRecord)
+                else candidate.get("formula")
+            )
+            _, value = self.get_ranking_metric(candidate)
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(numeric):
+                continue
+            key = str(formula) if formula is not None else f"<unnamed:{index}>"
+            previous = values.get(key)
+            if previous is None or (
+                numeric > previous if self.larger_is_better else numeric < previous
+            ):
+                values[key] = numeric
+        return values
+
+    def _stop_rejection_reason(
+        self, *, L: int, extra_results: list[ToolCallResult] | None = None,
+    ) -> str | None:
+        """Return why stopping is forbidden, or ``None`` when it is allowed."""
+        if self.stop_guard_mode == "none":
+            return None
+        if self.stop_guard_mode == "budget_exhausted":
+            if L < self.max_refinement_depth:
+                return (
+                    f"The configured search budget is not exhausted: current round L={L}, "
+                    f"required L={self.max_refinement_depth}."
+                )
+            return None
+        if self.stop_guard_mode == "best_in_topk":
+            values_by_formula = self._topk_ranking_values(extra_results)
+            if not values_by_formula:
+                return (
+                    f"topk_records contains no candidate with a finite ranking metric "
+                    f"({self.ranking_metric}), so stopping is not allowed."
+                )
+            ordered = sorted(
+                values_by_formula.items(),
+                key=lambda item: item[1],
+                reverse=self.larger_is_better,
+            )
+            if len(ordered) == 1:
+                return None
+            best_formula, best = ordered[0]
+            runner_up_formula, runner_up = ordered[1]
+            strictly_better = best > runner_up if self.larger_is_better else best < runner_up
+            if strictly_better:
+                return None
+            direction = ">" if self.larger_is_better else "<"
+            return (
+                f"No result in topk_records strictly beats every other formula on "
+                f"{self.ranking_metric}: {best_formula!r} and {runner_up_formula!r} are tied "
+                f"at {best:.12g}; stopping requires a unique best value ({direction} all others)."
+            )
+        metric = self.stop_guard_metric or self.ranking_metric
+        values = self._stop_metric_values(
+            metric, self.stop_guard_split, extra_results=extra_results,
+        )
+        if not values:
+            return (
+                f"No candidate has a finite {self.stop_guard_split} {metric} value, "
+                "so the configured stopping condition is not satisfied."
+            )
+        threshold = float(self.stop_guard_threshold)
+        best = max(values) if self.stop_guard_larger_is_better else min(values)
+        passed = best >= threshold if self.stop_guard_larger_is_better else best <= threshold
+        if passed:
+            return None
+        direction = ">=" if self.stop_guard_larger_is_better else "<="
+        return (
+            f"The best {self.stop_guard_split} {metric} is {best:.12g}; stopping requires "
+            f"{metric} {direction} {threshold:.12g}."
+        )
 
     def build_response_followup_messages(
         self,
@@ -669,8 +978,14 @@ class SRAgentInteractive(SRAgent):
         Returns:
             Tool results in call order.
         """
-        results = []
-        for action in actions:
+        results: list[ToolCallResult | None] = [None] * len(actions)
+        finish_indices = []
+        for index, action in enumerate(actions):
+            if action.name == "finish_search" and any(
+                tool.metadata.name == "finish_search" for tool in self.tools
+            ):
+                finish_indices.append(index)
+                continue
             tool_schema = self.tool_schema(action.name)
             self.interaction_manager.publish_event("tool_started", {"call": action, "tool_schema": tool_schema})
             started_at = time.monotonic()
@@ -686,8 +1001,59 @@ class SRAgentInteractive(SRAgent):
                 "duration_seconds": time.monotonic() - started_at,
                 "result": result,
             })
-            results.append(result)
-        return results
+            results[index] = result
+        ordinary_results = [result for result in results if result is not None]
+        for index in finish_indices:
+            action = actions[index]
+            tool = next(item for item in self.tools if item.metadata.name == "finish_search")
+            tool_schema = self.tool_schema(action.name)
+            self.interaction_manager.publish_event(
+                "tool_started", {"call": action, "tool_schema": tool_schema},
+            )
+            started_at = time.monotonic()
+            timestamp = time.time()
+            self.tools_counter.add(action.name)
+            rejection = self._stop_rejection_reason(
+                L=self._stop_check_L or 1,
+                extra_results=ordinary_results,
+            )
+            payload = (
+                {"status": "stopped", "reason": str(action.params.get("reason", "")).strip()}
+                if rejection is None
+                else {"status": "rejected", "reason": rejection}
+            )
+            result = ToolCallResult(
+                ok=True,
+                result=payload,
+                result_str=tool.format_result_dict(payload),
+                meta_data={
+                    "timestamp": timestamp,
+                    "execution_time": time.monotonic() - started_at,
+                    "tool": action.name,
+                },
+            )
+            if rejection is None:
+                self._pending_stop_at_boundary = True
+            self.interaction_manager.publish_event("tool_completed", {
+                "call": action,
+                "tool_schema": tool_schema,
+                "duration_seconds": time.monotonic() - started_at,
+                "result": result,
+            })
+            results[index] = result
+        if any(result is None for result in results):
+            raise RuntimeError("Tool execution did not produce one result per call")
+        return [result for result in results if result is not None]
+
+    def execute_tool_calls(
+        self, response_list: list[ModelResponse], R: int, L: int, C: int,
+    ) -> list[list[ToolCallResult]]:
+        """Expose the current refinement round to the finish-search stop check."""
+        self._stop_check_L = L
+        try:
+            return super().execute_tool_calls(response_list, R=R, L=L, C=C)
+        finally:
+            self._stop_check_L = None
 
     def collect_candidates(self, *args: Any, **kwargs: Any) -> list[CandidateRecord]:
         """Update scientific state and publish its current ranked view.
