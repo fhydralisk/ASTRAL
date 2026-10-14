@@ -77,6 +77,14 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert 'id="data-preparation"' in page.text
     assert 'id="data-setup"' in page.text
     assert 'id="run-setup"' in page.text
+    assert "workflowNextControl('data-preparation-next'" in page.text
+    assert "workflowNextControl('data-setup-next'" in page.text
+    assert "$('data-preparation-next-button').onclick=()=>selectCenterTab('data')" in page.text
+    assert "$('data-setup-next-button').onclick=()=>selectCenterTab('timeline')" in page.text
+    assert "dataButton.disabled=!useCommittedContext" in page.text
+    assert "taskButton.disabled=!taskConfigurationReady()" in page.text
+    assert "selectedFeatures().length&&researchProblemDescription()" in page.text
+    assert '.workflow-next-button:not(:disabled){border-color:var(--accent);background:var(--accent)' in page.text
     assert "connected:'已连接到后端'" in page.text
     assert 'id="pause"' not in page.text
     assert 'id="stop"' not in page.text
@@ -360,6 +368,9 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert "Object.assign(MESSAGE_CATALOGS.zh," not in page.text
     assert "uploadDataHelpPrefix:'上传数据文件，也可以从',uploadDataHelpSuffix:'快速开始'" in page.text
     assert "dataAgentHelp:'用自然语言指导 Agent 整理、清洗、补充或检查数据，结果将被保存在 context.data/ 目录以供使用'" in page.text
+    assert "dataAgentPlaceholder:'例如：将我上传的文件整理成 SR-Harness 可接受的格式'" in page.text
+    assert "dataNextHint:'数据准备完成后，进入下一步',dataNextAction:'任务配置'" in page.text
+    assert "taskNextHint:'任务配置完成后，进入下一步',taskNextAction:'符号回归'" in page.text
     assert "help.textContent=_('dataAgentHelp');link.textContent=_('dataAgentSafety')" in page.text
     assert "dataAgentSafety:'它是否会危害我的系统和数据？'" in page.text
     assert 'id="evaluator-agent-safety" class="data-agent-safety"' in page.text
