@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 CLIENT_COOKIE = "sr_harness_client"
 CONVERSATION_HEADER = "X-SR-Harness-Conversation"
 CONVERSATION_QUERY = "conversation"
+DEFAULT_CONVERSATION_NAME = "Unnamed Conversation"
 # This is a cache lifetime, not a browser-visible conversation lifetime. An
 # evicted transient is reconstructed with the same ID from the next request.
 TRANSIENT_IDLE_SECONDS = 60 * 60
@@ -195,7 +196,7 @@ class ConversationRegistry:
         if self.read_only:
             raise PermissionError("Conversation registry is read-only")
         if name is None:
-            name = f"Conversation {len(self._records) + 1}"
+            name = DEFAULT_CONVERSATION_NAME
         else:
             name = name.strip()
             if not name:
@@ -262,7 +263,7 @@ class ConversationRegistry:
         if self.read_only:
             raise PermissionError("Conversation registry is read-only")
         if name is None:
-            name = f"Conversation {len(self._records) + 1}"
+            name = DEFAULT_CONVERSATION_NAME
         else:
             name = name.strip()
             if not name:

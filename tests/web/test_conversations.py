@@ -76,6 +76,19 @@ def test_conversations_are_persisted_and_can_be_renamed(tmp_path):
     restored.close()
 
 
+def test_new_conversations_use_unnamed_default(tmp_path):
+    registry = ConversationRegistry(tmp_path)
+    app = create_app(tmp_path, session=registry.session_proxy, conversation_registry=registry)
+    with TestClient(app) as client:
+        initial = _list_conversations(client)
+        assert initial["conversations"][0]["name"] == "Unnamed Conversation"
+
+        created = client.post("/api/conversations", json={}).json()
+        assert created["name"] == "Unnamed Conversation"
+
+    registry.close()
+
+
 def test_conversation_registry_rejects_records_from_another_schema(tmp_path):
     (tmp_path / "conversations.json").write_text(json.dumps({
         "version": 1,
