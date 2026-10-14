@@ -222,8 +222,10 @@ def run(args: argparse.Namespace, task: SEDTask) -> SRResult:
                 "model": config["model"], "config": config, "artifacts": str(work)}
     metadata_path = work / "metadata.json"
     metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
-    _logger.info("IGSR start task=%s model=%s config=%s artifacts=%s", task.name,
-                 config["model"], config, work)
+    _logger.info(
+        f"IGSR start task={task.name} model={config['model']} "
+        f"config={config} artifacts={work}"
+    )
 
     python = Path(getattr(args, "igsr_python", sys.executable))
     if not python.is_absolute():
@@ -247,7 +249,7 @@ def run(args: argparse.Namespace, task: SEDTask) -> SRResult:
         with log_path.open("w", encoding="utf-8", buffering=1) as log:
             for line in process.stdout:
                 log.write(line)
-                _logger.info("IGSR worker | %s", line.rstrip())
+                _logger.info(f"IGSR worker | {line.rstrip()}")
 
     reader = threading.Thread(target=relay, name="igsr-log-relay", daemon=True)
     reader.start()
@@ -274,9 +276,12 @@ def run(args: argparse.Namespace, task: SEDTask) -> SRResult:
         if failure:
             metadata["error"] = repr(failure)
         metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
-        _logger.info("IGSR usage task=%s elapsed=%.3fs calls=%d failed_calls=%d tokens=%s money_usd=%.9f artifacts=%s",
-                     task.name, metadata["elapsed_seconds"], summary["calls"], summary["failed_calls"],
-                     summary["token"], summary["price"].get("total", 0.0), work)
+        _logger.info(
+            f"IGSR usage task={task.name} elapsed={metadata['elapsed_seconds']:.3f}s "
+            f"calls={summary['calls']} failed_calls={summary['failed_calls']} "
+            f"tokens={summary['token']} money_usd={summary['price'].get('total', 0.0):.9f} "
+            f"artifacts={work}"
+        )
     if failure:
         raise failure
     result_path = work / "result.json"

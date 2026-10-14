@@ -83,7 +83,9 @@ def run(args: argparse.Namespace, task: SEDTask) -> SRResult:
                         fit_seconds=fit_seconds, finished_at=time.time(),
                         total_seconds=time.time() - started)
         save_metadata()
-        logger.info('PySR %s: %s (fit %.3fs); artifacts: %s', task.name, expression, fit_seconds, directory)
+        logger.info(
+            f"PySR {task.name}: {expression} (fit {fit_seconds:.3f}s); artifacts: {directory}"
+        )
     except BaseException:
         metadata.update(status='failed', finished_at=time.time(), total_seconds=time.time() - started,
                         error=traceback.format_exc())

@@ -47,7 +47,7 @@ class Workspace:
         self._mount_map: dict[Path, Path] = {}
         self._readonly_mounts: set[Path] = set()
         self._lock_rules: dict[Path, bool] = {}
-        _logger.info("Initialized workspace at %s", self._path)
+        _logger.info(f"Initialized workspace at {self._path}")
 
     @property
     def path(self) -> Path:
@@ -660,9 +660,8 @@ class Workspace:
                 self._readonly_mounts.add(destination)
         except Exception as exc:
             _logger.error(
-                "Failed to add %s to workspace: %s",
-                source,
-                log_exception(exc, with_traceback=False),
+                f"Failed to add {source} to workspace: "
+                f"{log_exception(exc, with_traceback=False)}"
             )
             raise
         return destination
