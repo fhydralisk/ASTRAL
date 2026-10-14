@@ -486,7 +486,7 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert '.reasoning-block.expanded .reasoning-content{display:block;width:100%' in page.text
     assert "previewBlock(card,p.content,'message-preview-block',true)" in page.text
     assert "if(dataMode)previewBlock(card,state.content,'message-preview-block stream-content',true)" in page.text
-    assert "localStorage.getItem('sr-harness-markdown')==='true'" in page.text
+    assert "localStorage.getItem('sr-harness-markdown-'+scope)" in page.text
     assert "function markdownFragment(value)" in page.text
     assert "function texMath(source,display=false)" in page.text
     assert "negthinspace:'-0.1667em'" in page.text
@@ -496,8 +496,10 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert "{rootMargin:'240px 0px'}" in page.text
     assert "node.textContent=agentOutputSources.get(node)??''" in page.text
     assert "for(const block of document.querySelectorAll('.reasoning-block'))layoutPreview(block)" not in page.text
-    assert "markdown-switch-control" in page.text
-    assert "mountMarkdownSwitch();" in page.text
+    assert "function mountMarkdownModeButtons()" in page.text
+    assert "mountMarkdownModeButtons();" in page.text
+    assert "target.after(button)" in page.text
+    assert "markdownModes[agentOutputScope(node)]" in page.text
     assert "function parseCandidateFormula(source)" in page.text
     assert "function candidateFormulaLatex(source)" in page.text
     assert "candidateFormulaMode==='latex'" in page.text
