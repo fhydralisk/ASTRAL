@@ -2,28 +2,45 @@
 import logging
 import tempfile
 from pathlib import Path
-from typing import Generator, List, Dict
+from typing import Any, Generator, List, Dict
 from .base_api import BaseAPI
+from ..core import APICallSample, ToolCall
 
 _logger = logging.getLogger(f"sr_harness.{__name__}")
 
 
 @BaseAPI.register("manual")
-class ManualAPI(BaseAPI): # 这个类已经经过人工审核，任何 Coding Agent 不得擅自改动其内容
+class ManualAPI(BaseAPI):
     """Interactive manual-response provider adapter."""
-    supported_models = ["manual"]
 
     def __init__(self, model="manual", save_path=None, **kwargs):
         super().__init__(model=model, **kwargs)
         self.save_path = Path(save_path or tempfile.gettempdir())
 
-    def _request(self, messages: List[Dict[str, str]], n=1) -> Generator[str, None, List | Dict]:
+    def cancel(self) -> str:
+        """Report that terminal input cannot be preempted through the web control."""
+        return (
+            "ManualAPI does not support force-interrupting terminal input. "
+            "The Agent will pause at its next safe boundary."
+        )
+
+    def format_response(
+        self, message: dict[str, Any], tool_calls: list[ToolCall], content: str | None = None
+    ) -> APICallSample:
+        """Convert one manually entered message into one API-call sample."""
+        return self._build_response(message, tool_calls, content)
+
+    @property
+    def model_list(self) -> list[str]:
+        """Return the synthetic model identifier used by the manual provider."""
+        return ["manual"]
+
+    def _request_samples(
+        self, messages: List[Dict[str, str]], n=1, callback=None
+    ) -> Generator[APICallSample, None, dict[str, Any]]:
         import pyperclip, tiktoken
 
-        prompt = "\n---\n".join(
-            f"[role: {msg['role']}] {msg['content']}"
-            for msg in messages
-        )
+        prompt = "\n---\n".join(f"[role: {msg['role']}] {msg['content']}" for msg in messages)
 
         # Copy the prompt to clipboard and save it to a file for manual input
         pyperclip.copy(prompt)
@@ -35,8 +52,11 @@ class ManualAPI(BaseAPI): # 这个类已经经过人工审核，任何 Coding Ag
         )
         details = []
         for idx in range(1, n + 1):
+            self.report_progress(callback, {"type": "start", "sample": idx})
             # Wait for user input or clipboard content
-            content = input(f"Please enter the generated content {idx}/{n} (press Enter to use clipboard): ")
+            content = input(
+                f"Please enter the generated content {idx}/{n} (press Enter to use clipboard): "
+            )
             if not content.strip():
                 content = pyperclip.paste()
             # Calculate token usage
@@ -44,17 +64,34 @@ class ManualAPI(BaseAPI): # 这个类已经经过人工审核，任何 Coding Ag
             prompt_tokens = len(encoding.encode(prompt))
             answer_tokens = len(encoding.encode(content))
             token_usage = {"prompt": prompt_tokens, "answer": answer_tokens}
-            tool_call = self.tool_parser.parse_response(content) if self.tool_parser else []
+            tool_call = self.parse_tool_calls({"role": "assistant", "content": content}, content)
             message = {"role": "assistant", "content": content}
-            details.append({'content': content, 'tool_call': tool_call, 'token_usage': token_usage, 'message': message})
-            yield {'content': content, 'tool_call': tool_call, 'message': message}
-        token_usage = {'prompt': 0, 'answer': 0}
+            details.append(
+                {
+                    "content": content,
+                    "tool_call": tool_call,
+                    "token_usage": token_usage,
+                    "message": message,
+                }
+            )
+            sample_response = self.format_response(message, tool_call, content)
+            if callback is not None:
+                self.report_progress(callback, {
+                    "type": "complete",
+                    "sample": idx,
+                    "content": sample_response.content,
+                    "reasoning": sample_response.reasoning,
+                    "tool_calls": [call.raw for call in sample_response.tool_calls],
+                })
+            yield sample_response
+        token_usage = {"prompt": 0, "answer": 0}
         for detail in details:
-            token_usage['prompt'] += detail['token_usage']['prompt']
-            token_usage['answer'] += detail['token_usage']['answer']
+            token_usage["prompt"] += detail["token_usage"]["prompt"]
+            token_usage["answer"] += detail["token_usage"]["answer"]
         return {
-            "usage": {"token": token_usage, "price": {'prompt': 0, 'answer': 0}},
-            "contents": [detail['content'] for detail in details],
-            "tool_calls": [detail['tool_call'] for detail in details],
-            "responses": None,
+            "ok": True,
+            "error": None,
+            "token_usage": token_usage,
+            "money_usage": {"prompt": 0, "answer": 0},
+            "extra": {},
         }

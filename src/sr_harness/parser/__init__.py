@@ -10,3 +10,6 @@ from .base_parser import BaseParser
 from .text_parser import TextParser
 from .json_parser import JSONParser
 from .openai_parser import OpenAIParser
+from .xml_parser import XMLParser
+
+__all__ = ["BaseParser", "TextParser", "JSONParser", "OpenAIParser", "XMLParser"]

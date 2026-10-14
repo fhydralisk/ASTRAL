@@ -1,14 +1,10 @@
 # Copyright (c) 2026-present, Yumeow. Licensed under the MIT License.
 from __future__ import annotations
-import re
 import json
-import inspect
-from ast import literal_eval
 from logging import getLogger
 from typing import List, Dict, Any
 from .base_parser import BaseParser
 from ..core import ToolCall, ToolCallResult
-from ..tools import BaseTool
 
 _logger = getLogger(f'sr_harness.{__name__}')
 
@@ -17,35 +13,56 @@ _logger = getLogger(f'sr_harness.{__name__}')
 class OpenAIParser(BaseParser):
     """Parser for native OpenAI-compatible tool calls."""
 
-    def format_tools(self) -> str:
-        """Format tools.
+    native_tool_calls = True
 
-        Returns:
-            str: The operation result.
-        """
-        raise ValueError("OpenAIParser.format_tools() should not be called.")
+    def format_tools(self) -> List[Dict[str, Any]]:
+        """Return OpenAI-compatible native function descriptions."""
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": tool.metadata.name,
+                    "description": tool.metadata.description,
+                    "parameters": tool.metadata.parameters,
+                },
+            }
+            for tool in self.tools
+        ]
 
-    def parse_response(self, response: str) -> List[ToolCall]:
-        """Parse response.
-
-        Args:
-            response: Provider response object.
-
-        Returns:
-            List[ToolCall]: The operation result.
-        """
-        raise ValueError("OpenAIParser.parse_response() should not be called.")
-
-    def format_tool_calls(self, tool_calls: List[ToolCall]) -> str:
-        """Format tool calls.
-
-        Args:
-            tool_calls: Tool calls returned by the model.
-
-        Returns:
-            str: The operation result.
-        """
-        raise ValueError("OpenAIParser.format_tool_calls() should not be called.")
+    def parse_response(self, response: Any) -> List[ToolCall]:
+        """Normalize provider-native function calls already extracted by BaseAPI."""
+        normalized = []
+        for tool_call in response or []:
+            if isinstance(tool_call, dict):
+                raw = tool_call
+            elif hasattr(tool_call, "to_dict"):
+                raw = tool_call.to_dict()
+            elif hasattr(tool_call, "model_dump"):
+                raw = tool_call.model_dump()
+            else:
+                raise ValueError(f"Unrecognized tool call format: {tool_call}")
+            function = raw.get("function") or {}
+            name = function.get("name") or raw.get("name") or None
+            params = (
+                function.get("arguments")
+                or raw.get("arguments")
+                or raw.get("arguments_json")
+                or raw.get("args")
+                or {}
+            )
+            try:
+                if isinstance(params, str):
+                    params = json.loads(params) if params.strip() else {}
+            except json.JSONDecodeError as error:
+                _logger.warning(f"Skip malformed native tool call {raw!r}: {error}")
+                continue
+            normalized.append(ToolCall(
+                name=name,
+                params=params,
+                id=raw.get("id") or raw.get("call_id"),
+                raw=raw,
+            ))
+        return normalized
 
     def format_tool_result_messages(
         self,

@@ -31,8 +31,7 @@ class Agent(ABC, FactoryMixin):
     """
 
     context: AgentContext
-    tools: list[BaseTool] | None
-    parser: BaseParser | None
+    tool_box: BaseParser | None
     api: BaseAPI | None
 
     @abstractmethod
@@ -47,21 +46,21 @@ class Agent(ABC, FactoryMixin):
             The result defined by the concrete agent implementation.
         """
 
-    def initialize_tools(self, context: AgentContext) -> None:
-        """Bind one shared context to every tool, parser, and API adapter.
+    def initialize_with_context(self, context: AgentContext) -> None:
+        """Initialize the agent's tools and API from one shared context.
 
         Args:
             context: Shared agent and tool context.
         """
         self.context = context
-        self.tools = [tool_cls(context=context) for tool_cls in self.tool_cls_list]
-        self.parser = BaseParser.create(self.tool_parser, tool_list=self.tools)
+        tools = [tool_cls(context=context) for tool_cls in self.tool_cls_list]
+        self.tool_box = BaseParser.create(self.tool_parser, tool_list=tools)
         self.api = BaseAPI.create(
             self.llm_provider,
             model=self.llm_model,
-            tool_list=self.tools,
-            tool_parser_name=self.tool_parser,
+            tool_box=self.tool_box,
             environment=getattr(context.args, "api_environment", None),
+            save_path=getattr(self, "save_path", None),
         )
 
     def set_messages(self, messages: list[dict[str, Any]]) -> None:
@@ -81,9 +80,14 @@ class Agent(ABC, FactoryMixin):
         Returns:
             Results in the same order as ``actions``.
         """
+        if self.tool_box is None:
+            raise RuntimeError("Agent must be initialized with context before executing tools")
         results: list[ToolCallResult] = []
         for action in actions:
-            tool = next((item for item in self.tools if item.metadata.name == action.name), None)
+            try:
+                tool = self.tool_box[action.name]
+            except KeyError:
+                tool = None
             if tool is None:
                 _logger.trace(f"Unknown tool call: {action.name}. Skipping execution.")
                 results.append(ToolCallResult(
@@ -111,10 +115,15 @@ class Agent(ABC, FactoryMixin):
         Returns:
             Results in the same order as ``actions``.
         """
+        if self.tool_box is None:
+            raise RuntimeError("Agent must be initialized with context before executing tools")
         results: list[ToolCallResult | None] = [None] * len(actions)
         tasks = []
         for index, action in enumerate(actions):
-            tool = next((item for item in self.tools if item.metadata.name == action.name), None)
+            try:
+                tool = self.tool_box[action.name]
+            except KeyError:
+                tool = None
             if tool is None:
                 _logger.trace(f"Unknown tool call: {action.name}. Skipping execution.")
                 results[index] = ToolCallResult(

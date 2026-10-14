@@ -187,8 +187,8 @@ class CreateSkill(BaseTool):
             messages, n=1, max_tokens=min(int(getattr(self.context.args, "llm_max_tokens", 4096) or 4096), 4096),
         )
         content = ""
-        for content, _, _ in result:
-            pass
+        for response in result:
+            content = response.content or ""
         if not content.strip():
             raise ValueError("Skill authoring LLM returned an empty response.")
         return content

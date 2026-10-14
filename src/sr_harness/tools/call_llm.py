@@ -27,10 +27,10 @@ class LLMTool(BaseTool):
 
         api = BaseAPI.create(llm_provider, model=llm_model)
         content = ""
-        for content, _, _ in (llm_result := api(messages, n=1)):
-            pass
+        for response in (llm_result := api(messages, n=1)):
+            content = response.content or ""
         return {
             "content": content,
-            "token_usage": llm_result.usage.get("token", {}),
-            "money_usage": llm_result.usage.get("price", {}),
+            "token_usage": llm_result.token_usage,
+            "money_usage": llm_result.money_usage,
         }

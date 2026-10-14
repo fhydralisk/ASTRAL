@@ -3,6 +3,7 @@
 
 import pytest
 from dotenv import load_dotenv
+from sr_harness.core import APICallSample, APICallSummary
 from sr_harness.tools.call_llm import LLMTool
 
 # 加载环境变量
@@ -20,16 +21,19 @@ class TestLLMTool:
 
     def test_execute_qwen3_8b(self):
         """测试通过 BaseAPI 工厂调用模型。"""
-        class FakeResult:
-            usage = {"token": {"prompt": 1}, "price": {"total": 0.0}}
-
-            def __iter__(self):
-                yield "2", [], {"role": "assistant", "content": "2"}
-
         class FakeAPI:
             def __call__(self, messages, n=1):
                 assert n == 1
-                return FakeResult()
+                def generate():
+                    yield APICallSample(content="2")
+                    return {
+                        "ok": True,
+                        "error": None,
+                        "token_usage": {"prompt": 1},
+                        "money_usage": {"total": 0.0},
+                        "extra": {},
+                    }
+                return APICallSummary(generate())
 
         from sr_harness.api import BaseAPI
 
@@ -53,15 +57,18 @@ class TestLLMTool:
 
     def test_output_structure(self, monkeypatch):
         """测试输出结构完整性。"""
-        class FakeResult:
-            usage = {"token": {}, "price": {}}
-
-            def __iter__(self):
-                yield "Hello", [], {"role": "assistant", "content": "Hello"}
-
         class FakeAPI:
             def __call__(self, messages, n=1):
-                return FakeResult()
+                def generate():
+                    yield APICallSample(content="Hello")
+                    return {
+                        "ok": True,
+                        "error": None,
+                        "token_usage": {},
+                        "money_usage": {},
+                        "extra": {},
+                    }
+                return APICallSummary(generate())
 
         from sr_harness.api import BaseAPI
         monkeypatch.setattr(BaseAPI, "create", lambda *args, **kwargs: FakeAPI())

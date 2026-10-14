@@ -18,12 +18,12 @@ class TestTextParserLLMIntegration:
     @pytest.fixture
     def parser(self):
         """创建 TextParser 实例。"""
-        return TextParser(tool_list=None)
+        return TextParser(tool_list=[tool_class() for tool_class in BaseTool.load_tool_classes()])
 
     @pytest.fixture
     def tool_formats(self):
         """获取格式化的工具描述。"""
-        parser = TextParser(tool_list=None)
+        parser = TextParser(tool_list=[tool_class() for tool_class in BaseTool.load_tool_classes()])
         return parser.format_tools()
 
     def _call_llm_and_parse(self, prompt: str, parser: TextParser, max_retries: int = 2):
@@ -156,7 +156,7 @@ Use the format: Action: tool_name(param1=value1, param2=value2)
             params = actions[0].params
             # 验证关键参数
             assert params.get("max_degree") == 3, f"max_degree should be 3, got {params.get('max_degree')}"
-            assert params.get("include_interactions") is False, f"include_interactions should be False"
+            assert params.get("include_interactions") is False, "include_interactions should be False"
 
     @pytest.mark.paid
     def test_llm_with_formula_evaluation(self, parser, tool_formats):
@@ -186,7 +186,7 @@ Use the format: Action: tool_name(param1=value1, param2=value2)
             eq = params.get("eq", "")
             # 验证公式包含关键元素
             assert "x1" in eq.lower() or "x**2" in eq, f"Formula should contain x1: {eq}"
-            assert params.get("fit") is True, f"fit should be True"
+            assert params.get("fit") is True, "fit should be True"
 
     @pytest.mark.paid
     def test_llm_repeated_calls_consistency(self, parser, tool_formats):

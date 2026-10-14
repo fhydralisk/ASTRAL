@@ -321,9 +321,10 @@ class SearchRunState:
             C: One-based conversation-branch index.
         """
         with self._lock:
-            for K, ((content, tool_calls, message), results) in enumerate(
-                zip(response_list, results_list), 1
-            ):
+            for K, (response, results) in enumerate(zip(response_list, results_list), 1):
+                content = response.content
+                tool_calls = response.tool_calls
+                message = response.message
                 coordinate = SearchCoordinate(R=R, C=C, L=L, K=K)
                 node = SearchNode(
                     run_id=self.run_id,

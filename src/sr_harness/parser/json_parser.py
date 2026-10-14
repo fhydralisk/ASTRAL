@@ -3,12 +3,10 @@ from __future__ import annotations
 import re
 import json
 import inspect
-from ast import literal_eval
+from typing import List
 from logging import getLogger
-from typing import List, Dict, Any, Tuple
-from .base_parser import BaseParser
 from ..core import ToolCall
-from ..tools import BaseTool
+from .base_parser import BaseParser
 
 _logger = getLogger(f'sr_harness.{__name__}')
 
@@ -26,12 +24,12 @@ class JSONParser(BaseParser):
         lines = ["## Available Tools:", ""]
 
         for tool in self.tools:
-            name = tool['name']
-            desc = tool['description']
+            name = tool.metadata.name
+            desc = tool.metadata.description
 
             # 获取工具类的签名
             try:
-                if (tool_cls := BaseTool.REGISTRY_DICT.get(name)):
+                if (tool_cls := type(tool)):
                     sig = inspect.signature(tool_cls.execute)
                     params = []
                     for param_name, param in sig.parameters.items():
@@ -90,21 +88,6 @@ class JSONParser(BaseParser):
             return tool_calls
 
         for action in data["actions"]:
-            tool_calls.append(ToolCall(name=action["tool"], params=action["params"], raw_str=json_str))
+            tool_calls.append(ToolCall(name=action["tool"], params=action["params"], raw=json_str))
 
         return tool_calls
-
-    def format_tool_calls(self, tool_calls: List[ToolCall]) -> str:
-        """Format tool calls.
-
-        Args:
-            tool_calls: Tool calls returned by the model.
-
-        Returns:
-            str: The operation result.
-        """
-        lines = []
-        for call in tool_calls:
-            action = {"tool": call.name, "params": call.params}
-            lines.append("```json\n" + json.dumps(action) + "\n```")
-        return "\n".join(lines)

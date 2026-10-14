@@ -20,13 +20,12 @@ from ..skills import SkillManager
 from ..runtime import ModelRouter
 from ..utils import ParallelTimer, NamedTimer, Timer
 from ..utils import format_pareto_front, render_markdown, tag2ansi, setup_logging
-from ..core import AgentContext, CandidateRecord, ParentLink, SearchRunState, ToolCall, ToolCallResult
+from ..core import APICallSample, AgentContext, CandidateRecord, ParentLink, SearchRunState, ToolCall, ToolCallResult
 from .agent import Agent
 
 _logger = logging.getLogger(f'sr_harness.{__name__}')
 
 Message: TypeAlias = dict[str, Any]
-ModelResponse: TypeAlias = tuple[str, list[ToolCall], Message]
 Usage: TypeAlias = dict[str, Any]
 
 
@@ -181,22 +180,21 @@ class SRAgent(Agent):
         # 关键组件
         self.context = context if context is not None else AgentContext()
         self.skill_manager = skill_manager or SkillManager(workspace=self.context.workspace)
-        requested_tool_names = set(self.DEFAULT_TOOLS if tools is None else tools)
+        requested_tool_names = tuple(self.DEFAULT_TOOLS if tools is None else tools)
+        requested_tools = set(requested_tool_names)
         initially_selected = [
             tool_cls for tool_cls in tool_cls_list
-            if tool_cls.metadata.name in requested_tool_names
+            if tool_cls.metadata.name in requested_tools
         ]
         self.skill_manager.register_tool_docs(initially_selected)
         tool_cls_list += BaseTool.discover_custom_tools(self.skill_manager)
         self.available_tool_classes = {
             tool_cls.metadata.name: tool_cls for tool_cls in tool_cls_list
         }
-        requested_tools = requested_tool_names
         if unknown_tools := requested_tools - self.available_tool_classes.keys():
             raise ValueError(f"Unknown tools: {', '.join(sorted(unknown_tools))}")
         self.tool_cls_list = [
-            tool_cls for name, tool_cls in self.available_tool_classes.items()
-            if name in requested_tools
+            self.available_tool_classes[name] for name in requested_tool_names
         ]
         registered_skills = self.skill_manager.load_skills()
         self.skill_manager.register_tool_docs([
@@ -229,8 +227,7 @@ class SRAgent(Agent):
                 raise ValueError(
                     "force_initial_diagnostics requires the 'discover-symbolic-laws' skill."
                 )
-        self.tools = None # 延迟实例化, 因为需要 content 上下文
-        self.parser = None # 延迟实例化, 因为需要 tools 工具列表
+        self.tool_box = None  # 延迟实例化，因为需要 context 上下文
         self.api = None # 延迟实例化, 因为需要 tools 工具列表
 
         # 附属组件
@@ -312,11 +309,10 @@ class SRAgent(Agent):
         self.context.args.skill_manager = self.skill_manager
         self.context.args.enabled_skills = sorted(self.enabled_skills)
         with self.prepare_tool_context(self.context) as tool_context:
-            self.initialize_tools(tool_context)
-            if self.tool_parser == 'openai':
-                description = json.dumps(self.api.tool_description_json, indent=2)
-            else:
-                description = self.api.tool_description_text
+            self.initialize_with_context(tool_context)
+            description = self.tool_box.format_tools()
+            if isinstance(description, list):
+                description = json.dumps(description, indent=2)
             _logger.debug(
                 f"Using {self.tool_parser} as tool parser. "
                 f"Tools will be described as follows:\n{description}"
@@ -695,7 +691,7 @@ class SRAgent(Agent):
                     v = '\n        '.join(['', *v.splitlines()])
                 log += tag2ansi(f"\n    [blue]{k}[reset]") + '=' + v
             logs.append(log)
-        _logger.debug(f"Messages:\n" + '\n---\n'.join(logs))
+        _logger.debug("Messages:\n" + '\n---\n'.join(logs))
         return prompt
 
     def prepare_iteration(self, buffer: List[Dict[str, Any]], R: int, L: int, C: int) -> str | None:
@@ -809,7 +805,7 @@ class SRAgent(Agent):
 
     # Model and tool execution
 
-    def request_llm(self, prompt: List[Dict[str, Any]], R: int, L: int, C: int, stream_callback: Callable[[dict[str, Any]], None] | None = None) -> tuple[list[ModelResponse], Usage | None]:
+    def request_llm(self, prompt: List[Dict[str, Any]], R: int, L: int, C: int, callback: Callable[[dict[str, Any]], None] | None = None) -> tuple[list[APICallSample], Usage | None]:
         """Run the ``request llm`` operation.
 
         Args:
@@ -817,7 +813,7 @@ class SRAgent(Agent):
             R: One-based restart index.
             L: One-based refinement-step index.
             C: One-based conversation-branch index.
-            stream_callback: Optional callback invoked for streamed model updates.
+            callback: Optional callback invoked for model-call progress updates.
 
         Returns:
             Parsed model responses and recorded usage data.
@@ -835,9 +831,9 @@ class SRAgent(Agent):
                 self._strong_api = BaseAPI.create(
                     route.provider,
                     model=route.model,
-                    tool_list=self.tools,
-                    tool_parser_name=self.tool_parser,
+                    tool_box=self.tool_box,
                     environment=getattr(self.context.args, "api_environment", None),
+                    save_path=self.save_path,
                 )
             api = self._strong_api
         _logger.info(
@@ -848,10 +844,12 @@ class SRAgent(Agent):
             prompt,
             n=self.local_sample_size,
             max_tokens=self.llm_max_tokens,
-            stream_callback=stream_callback,
+            callback=callback,
         )
-        for K, (content, tool_calls, message) in enumerate(llm_result, 1): # K 次重复采样
-            response_list.append((content, tool_calls, message))
+        for K, response in enumerate(llm_result, 1):  # K 次重复采样
+            content = response.content
+            tool_calls = response.tool_calls
+            response_list.append(response)
             content_for_log = render_markdown(content or "(empty)").strip()
             tool_calls_for_log = '\n'.join(str(tool_call) for tool_call in tool_calls)
             content_for_log = '\n        '.join(['', *content_for_log.splitlines()]) if '\n' in content_for_log else content_for_log
@@ -863,9 +861,11 @@ class SRAgent(Agent):
             )
             _logger.debug(tool_calls_for_log)
         usage = self.record_llm_result(llm_result, R=R, L=L, C=C)
+        if llm_result.ok is False:
+            raise RuntimeError(llm_result.error or "Model API request failed.")
         return response_list, usage
 
-    def execute_tool_calls(self, response_list: list[ModelResponse], R: int, L: int, C: int) -> list[list[ToolCallResult]]:
+    def execute_tool_calls(self, response_list: list[APICallSample], R: int, L: int, C: int) -> list[list[ToolCallResult]]:
         """Execute tool calls from model responses and preserve sample grouping.
 
         Args:
@@ -880,9 +880,9 @@ class SRAgent(Agent):
         # 合并 - 调用 - 分割
         all_tool_calls = []
         num_tool_calls = []
-        for _, tool_calls, _ in response_list:
-            all_tool_calls.extend(tool_calls)
-            num_tool_calls.append(len(tool_calls))
+        for response in response_list:
+            all_tool_calls.extend(response.tool_calls)
+            num_tool_calls.append(len(response.tool_calls))
         if self.max_workers and len(all_tool_calls) > 1:
             all_results = self.execute_action_parallel(all_tool_calls, max_workers=self.max_workers)
         else:
@@ -962,13 +962,16 @@ class SRAgent(Agent):
                     selected_priority = priorities[0]
         node_parents[self.run_state.node_id(R=R, C=C, L=L, K=selected_K)] = 'continuation'
         _logger.info(f"Selected LLM branch: {selected_K}/{len(results_list)}")
-        _, tool_calls, message = response_list[selected_K - 1]
+        selected_response = response_list[selected_K - 1]
+        tool_calls = selected_response.tool_calls
+        message = selected_response.message
         results = results_list[selected_K - 1]
         tool_calls = tool_calls.copy()
         message = deepcopy(message)
         results = results.copy()
         # 将其他 (tool_call, result) pairs 中不涉及 formula & metrics 的 pair 也加入 buffer, 以免丢失有用信息
-        for K, ((extra_content, extra_tool_calls, extra_message), extra_results) in enumerate(zip(response_list, results_list), 1):
+        for K, (extra_response, extra_results) in enumerate(zip(response_list, results_list), 1):
+            extra_tool_calls = extra_response.tool_calls
             for tool_call, result in zip(extra_tool_calls, extra_results):
                 # 只考虑不涉及 formula & metrics 的工具调用结果
                 if K == selected_K or result.get('data_split_results', {}).get('train', {}).get('metrics') is not None:
@@ -987,7 +990,7 @@ class SRAgent(Agent):
         # 将 message 和 (tool_call, result) pairs 加入 buffer
         if tool_calls or (message.get('content') or '').strip() or message.get('reasoning'):
             result_messages = (
-                self.parser.format_tool_result_messages(tool_calls, results)
+                self.tool_box.format_tool_result_messages(tool_calls, results)
                 if tool_calls else []
             )
             self._append_buffer_messages(
@@ -1012,7 +1015,7 @@ class SRAgent(Agent):
 
     def build_response_followup_messages(
         self,
-        response_list: list[ModelResponse],
+        response_list: list[APICallSample],
         results_list: list[list[ToolCallResult]],
         *,
         R: int,
@@ -1139,7 +1142,7 @@ class SRAgent(Agent):
                 f"{record.formula!r}"
             )
 
-    def collect_candidates(self, response_list: list[ModelResponse], results_list: list[list[ToolCallResult]], R: int, L: int, C: int) -> list[CandidateRecord]:
+    def collect_candidates(self, response_list: list[APICallSample], results_list: list[list[ToolCallResult]], R: int, L: int, C: int) -> list[CandidateRecord]:
         """Validate candidate tool results and add them to the run state.
 
         Args:
@@ -1154,7 +1157,8 @@ class SRAgent(Agent):
         """
         loader = []
         for K in range(1, len(response_list) + 1):
-            for _, res in zip(response_list[K - 1][1], results_list[K - 1]):
+            response = response_list[K - 1]
+            for _, res in zip(response.tool_calls, results_list[K - 1]):
                 if res.result.get('is_candidate'):
                     loader.append((K, res))
 
@@ -1188,7 +1192,7 @@ class SRAgent(Agent):
                 self.push_candidate(record)
         return self.run_state.ranked_candidates()
 
-    def log_info(self, response_list: list[ModelResponse], R: int, L: int, C: int) -> None:
+    def log_info(self, response_list: list[APICallSample], R: int, L: int, C: int) -> None:
         """Run the ``log info`` operation.
 
         Args:
@@ -1198,8 +1202,8 @@ class SRAgent(Agent):
             C: One-based conversation-branch index.
         """
         new_count = defaultdict(int)
-        for _, tool_calls, _ in response_list:
-            for tool_call in tool_calls:
+        for response in response_list:
+            for tool_call in response.tool_calls:
                 new_count[tool_call.name] += 1
         tool_calls_str = ', '.join(
             f"{name}: {count} ({new_count[name]} new)"
@@ -1236,7 +1240,10 @@ class SRAgent(Agent):
         Returns:
             Dict[str, Any] | None: The operation result.
         """
-        usage = llm_result.returned['usage']
+        usage = {
+            "token": llm_result.token_usage,
+            "price": llm_result.money_usage,
+        }
         for name, num in usage['token'].items():
             self.token_counter.add(name, num)
         for name, num in usage['price'].items():
@@ -1245,7 +1252,7 @@ class SRAgent(Agent):
             model_router = vars(self._last_model_route) if self._last_model_route is not None else None
             with open(Path(self.save_path) / 'response.jsonl', 'a') as f:
                 json.dump({
-                    "responses": llm_result.returned["responses"],
+                    "responses": [response.message for response in llm_result.yielded],
                     "progress": self.format_progress(R, L, C),
                     "usage": usage,
                     "model_route": model_router
@@ -1254,7 +1261,7 @@ class SRAgent(Agent):
         return usage
 
     def record_search_iteration(
-        self, response_list: list[ModelResponse], results_list: list[list[ToolCallResult]],
+        self, response_list: list[APICallSample], results_list: list[list[ToolCallResult]],
         parent_nodes: dict[str, str], prompt: list[Message], usage: Usage | None,
         R: int, L: int, C: int,
     ) -> None:

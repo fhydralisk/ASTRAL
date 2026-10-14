@@ -488,7 +488,7 @@ function appendEvaluatorAgentEvent(kind,payload,timestamp=Date.now()/1000){const
 async function runEvaluatorAgent(){
   const control=evaluatorAgentControlState();
   if(control.action==='message')return sendAgentComposerMessage({input:$('evaluator-agent-input'),button:$('evaluator-agent-send'),request:message=>api('/api/evaluator/agent/start',{message,source:$('evaluator-code').value}),render:renderEvaluatorAgentControl,beforeRequest:()=>$('evaluator-status').textContent=_('evaluatorAgentWorking')});
-  if(control.action)syncSession(await api('/api/evaluator/agent/stop',{}));
+  if(control.action){const result=await api('/api/evaluator/agent/stop',{});syncSession(result);if(result.cancellation_error)notice(result.cancellation_error)}
 }
 function describe(element,description){
   if(description){element.classList.add('has-description');element.dataset.description=description;element.tabIndex=0;element.setAttribute('aria-label',`${element.textContent}：${description}`)}
@@ -537,7 +537,7 @@ function renderPromptAdded(e,feed,scope='search'){
   const next=[...feed.querySelectorAll(':scope > .event')].find(item=>Number(item.dataset.started)>Number(e.timestamp));feed.insertBefore(card,next||null);feed.hidden=false;
 }
 function interactionStateLabel(state){return _({idle:'interactionIdle',running:'interactionRunning',pausing:'interactionPausing',interrupting:'interactionInterrupting',paused:'interactionPaused'}[state]||state)}
-function compactEventContent(e){const p=e.payload||{};if(e.kind==='search_position_changed')return ['R'+p.R,'C'+p.C,'L'+p.L].join(' · ');if(e.kind==='topk_updated')return _('eventTopkUpdated',{count:Array.isArray(p.records)?p.records.length:0});if(e.kind==='state_changed')return _('interactionStateChanged',{previous:interactionStateLabel(p.previous),current:interactionStateLabel(p.current)});if(e.kind==='command_received')return {pause:_('safeStopNotice'),force_pause:_('forceStopNotice')}[p.action]||p.action;return p.message||p.error||p}
+function compactEventContent(e){const p=e.payload||{};if(e.kind==='search_position_changed')return ['R'+p.R,'C'+p.C,'L'+p.L].join(' · ');if(e.kind==='topk_updated')return _('eventTopkUpdated',{count:Array.isArray(p.records)?p.records.length:0});if(e.kind==='state_changed')return _('interactionStateChanged',{previous:interactionStateLabel(p.previous),current:interactionStateLabel(p.current)});if(e.kind==='command_received')return p.error||{pause:_('safeStopNotice'),force_pause:_('forceStopNotice')}[p.action]||p.action;return p.message||p.error||p}
 function eventContent(card,meta,metaTime,value){const text=typeof value==='string'?value.trim():pretty(value);if(text&&!text.includes('\n')&&text.length<=160){card.classList.add('compact-event');metaTime.before(el('span',text,'meta-event-text'));return}previewBlock(card,value,'message-preview-block')}
 function renderGenericEventCard(e,feed){const card=el('article',undefined,'event '+e.kind);card.dataset.started=e.timestamp;const meta=el('div',undefined,'meta'),stateChanged=e.kind==='state_changed',metaTime=el('span',new Date(Number(e.timestamp)*1000).toLocaleTimeString(currentLocale),'meta-time');meta.append(eventBadge(stateChanged?'run':'event',stateChanged?_('eventRun'):e.kind),metaTime);card.append(meta);eventContent(card,meta,metaTime,compactEventContent(e));feed.append(card);feed.hidden=false}
 function scopedTimelineEvent(e,prefix=''){
@@ -1168,7 +1168,7 @@ function renderEvent(e) {
     if(p.result?.error)card.append(el('pre',p.result.error));disclosure(card,_('fullRunResult'),p.result);
   } else if(e.kind==='control') {
     const actionLabel={pause:_('safeStopNotice'),force_pause:_('forceStopNotice'),next_c:_('controlNextC'),next_r:_('controlNextR')}[p.action]||p.action||_('controlAction');
-    metaTime.before(el('span',actionLabel,'meta-coord'));if(p.message)previewBlock(card,p.message,'control-message');
+    metaTime.before(el('span',actionLabel,'meta-coord'));if(p.message||p.error)previewBlock(card,p.message||p.error,'control-message');
   } else {eventContent(card,meta,metaTime,compactEventContent(e))}
   if(!updating)feed.append(card);
   while(feed.children.length>1000)feed.firstChild.remove();
@@ -1510,9 +1510,9 @@ function setupPanelResizer(side){
 }
 applyPanelLayout();setupPanelResizer('left');setupPanelResizer('right');window.addEventListener('resize',applyPanelLayout);
 
-$('send').onclick=guard(async()=>{const control=composerControlState();if(control.action==='start'){await startPreparedRun($('prompt').value.trim());$('prompt').value='';renderComposerControl();return}if(control.action==='message')return sendAgentComposerMessage({input:$('prompt'),button:$('send'),request:message=>api('/api/control/command',{action:'message',message}),apply:result=>syncSession({...session,...result}),render:renderComposerControl});if(control.action){const result=await api('/api/control/command',{action:control.action});syncSession({...session,...result})}});
+$('send').onclick=guard(async()=>{const control=composerControlState();if(control.action==='start'){await startPreparedRun($('prompt').value.trim());$('prompt').value='';renderComposerControl();return}if(control.action==='message')return sendAgentComposerMessage({input:$('prompt'),button:$('send'),request:message=>api('/api/control/command',{action:'message',message}),apply:result=>syncSession({...session,...result}),render:renderComposerControl});if(control.action){const result=await api('/api/control/command',{action:control.action});syncSession({...session,...result});if(result.cancellation_error)notice(result.cancellation_error)}});
 $('prompt').oninput=()=>{renderComposerControl();if((session?.state||'idle')!=='idle')return;promptEdited.user=true};$('system-prompt').oninput=()=>{promptEdited.system=true};bindEnterToSend($('prompt'),$('send'));$('problem-description').oninput=()=>{fitProblemDescription();syncResearchProblem($('problem-description').value)};
-$('data-agent-send').onclick=dataGuard(async()=>{const control=dataAgentControlState();if(control.action==='message')return sendAgentComposerMessage({input:$('data-agent-input'),button:$('data-agent-send'),request:message=>api('/api/data/agent',{message}),render:renderDataAgentControl});if(control.action)syncSession(await api('/api/data/agent/stop',{}))});
+$('data-agent-send').onclick=dataGuard(async()=>{const control=dataAgentControlState();if(control.action==='message')return sendAgentComposerMessage({input:$('data-agent-input'),button:$('data-agent-send'),request:message=>api('/api/data/agent',{message}),render:renderDataAgentControl});if(control.action){const result=await api('/api/data/agent/stop',{});syncSession(result);if(result.cancellation_error)notice(result.cancellation_error)}});
 $('data-agent-input').oninput=renderDataAgentControl;
 bindEnterToSend($('data-agent-input'),$('data-agent-send'));
 for(const button of document.querySelectorAll('[data-data-settings-tab]'))button.onclick=()=>selectDataSettingsTab(button.dataset.dataSettingsTab);

@@ -5,10 +5,9 @@ import json
 import inspect
 from ast import literal_eval
 from logging import getLogger
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any
 from .base_parser import BaseParser
 from ..core import ToolCall
-from ..tools import BaseTool
 
 _logger = getLogger(f'sr_harness.{__name__}')
 
@@ -26,12 +25,12 @@ class TextParser(BaseParser):
         lines = ["## Available Tools:", ""]
 
         for tool in self.tools:
-            name = tool['name']
-            desc = tool['description']
+            name = tool.metadata.name
+            desc = tool.metadata.description
 
             # 获取工具类的签名和 docstring
             try:
-                if (tool_cls := BaseTool.create(name, create_instance=False)):
+                if (tool_cls := type(tool)):
                     # 获取 execute 方法的签名
                     sig = inspect.signature(tool_cls.execute)
                     params = []
@@ -97,25 +96,10 @@ class TextParser(BaseParser):
                         params = self._parse_params(params_str)
                     else:
                         params = {}
-                    tool_calls.append(ToolCall(name=tool_name, params=params, raw_str=line))
+                    tool_calls.append(ToolCall(name=tool_name, params=params, raw=line))
                 else:
                     _logger.warning(f"Failed to parse action line: '{line}'")
         return tool_calls
-
-    def format_tool_calls(self, tool_calls: List[ToolCall]) -> str:
-        """Format tool calls.
-
-        Args:
-            tool_calls: Tool calls returned by the model.
-
-        Returns:
-            str: The operation result.
-        """
-        lines = []
-        for tool_call in tool_calls:
-            params_str = ', '.join(f"{k}={v!r}" for k, v in tool_call.params.items())
-            lines.append(f"Action: {tool_call.name}({params_str})")
-        return "\n".join(lines)
 
     def _parse_params(self, params_str: str) -> Dict[str, Any]:
         """解析参数字符串为字典。

@@ -1,4 +1,5 @@
 """Thread-safe interaction state and event streams for one interactive agent."""
+
 from __future__ import annotations
 
 import threading
@@ -13,11 +14,19 @@ from ..core import json_value
 
 
 InteractionState: TypeAlias = Literal[
-    "idle", "running", "pausing", "interrupting", "paused",
+    "idle",
+    "running",
+    "pausing",
+    "interrupting",
+    "paused",
 ]
 InteractionAction: TypeAlias = Literal["message", "pause", "force_pause"]
 SRInteractionAction: TypeAlias = Literal[
-    "message", "pause", "force_pause", "next_c", "next_r",
+    "message",
+    "pause",
+    "force_pause",
+    "next_c",
+    "next_r",
 ]
 InteractionEventKind: TypeAlias = Literal[
     "prompt_added",
@@ -68,16 +77,32 @@ class InteractionManager:
     _DELTA_KIND = "assistant_delta"
     _TERMINAL_KINDS = {"assistant_completed", "assistant_failed"}
     _EVENT_KINDS = {
-        "prompt_added", "context", "assistant_started", "assistant_delta",
-        "assistant_completed", "assistant_failed", "tool_started",
-        "tool_completed", "settings_applied", "settings_failed",
-        "workspace_changed", "execution_completed", "execution_failed",
-        "command_received", "state_changed", "search_position_changed",
+        "prompt_added",
+        "context",
+        "assistant_started",
+        "assistant_delta",
+        "assistant_completed",
+        "assistant_failed",
+        "tool_started",
+        "tool_completed",
+        "settings_applied",
+        "settings_failed",
+        "workspace_changed",
+        "execution_completed",
+        "execution_failed",
+        "command_received",
+        "state_changed",
+        "search_position_changed",
         "topk_updated",
     }
     _STATE_FIELDS = {
-        "version", "state", "messages", "events", "next_sequence",
-        "discarded_through", "event_capacity",
+        "version",
+        "state",
+        "messages",
+        "events",
+        "next_sequence",
+        "discarded_through",
+        "event_capacity",
     }
 
     def __init__(self, *, event_capacity: int = 1000) -> None:
@@ -89,7 +114,7 @@ class InteractionManager:
         self._events: deque[dict[str, Any]] = deque(maxlen=event_capacity)
         self._next_sequence = 1
         self._discarded_through = 0
-        self._cancel_current: Callable[[], None] | None = None
+        self._cancel_current: Callable[[], str | None] | None = None
         self._cancellation_signal = _CancellationSignal(self)
 
     @property
@@ -152,7 +177,7 @@ class InteractionManager:
         """
         if action not in {"message", "pause", "force_pause"}:
             raise ValueError("action must be message, pause, or force_pause")
-        cancel: Callable[[], None] | None = None
+        cancel: Callable[[], str | None] | None = None
         with self._condition:
             if action == "message":
                 content = (message or "").strip()
@@ -165,12 +190,19 @@ class InteractionManager:
             elif self._state in {"running", "pausing"}:
                 self._set_state_locked("interrupting")
                 cancel = self._cancel_current
-            if action != "message":
-                self._publish_event_locked("command_received", {"action": action})
             self._condition.notify_all()
+        cancellation_error = cancel() if cancel is not None else None
+        with self._condition:
+            if cancellation_error and self._state == "interrupting":
+                self._set_state_locked("pausing")
+            if action != "message":
+                payload = {"action": action}
+                if cancellation_error:
+                    payload["error"] = cancellation_error
+                self._publish_event_locked("command_received", payload)
             result = self.status()
-        if cancel is not None:
-            cancel()
+            if cancellation_error:
+                result["cancellation_error"] = cancellation_error
         return result
 
     def request_pause(self) -> None:
@@ -241,7 +273,7 @@ class InteractionManager:
                         self._set_state_locked("running")
 
     @contextmanager
-    def cancellable(self, cancel: Callable[[], None]) -> Iterator[None]:
+    def cancellable(self, cancel: Callable[[], str | None]) -> Iterator[None]:
         """Register cancellation for the current blocking operation.
 
         Args:
@@ -259,7 +291,16 @@ class InteractionManager:
             self._cancel_current = cancel
             cancel_immediately = self._state == "interrupting"
         if cancel_immediately:
-            cancel()
+            cancellation_error = cancel()
+            if cancellation_error:
+                with self._condition:
+                    if self._state == "interrupting":
+                        self._set_state_locked("pausing")
+                    self._publish_event_locked(
+                        "command_received",
+                        {"action": "force_pause", "error": cancellation_error},
+                    )
+                    self._condition.notify_all()
         try:
             yield
         finally:
@@ -267,7 +308,9 @@ class InteractionManager:
                 if self._cancel_current is cancel:
                     self._cancel_current = None
 
-    def publish_event(self, kind: InteractionEventKind, payload: Mapping[str, Any]) -> dict[str, Any]:
+    def publish_event(
+        self, kind: InteractionEventKind, payload: Mapping[str, Any]
+    ) -> dict[str, Any]:
         """Append one observable event to this agent's timeline.
 
         Args:
@@ -299,7 +342,9 @@ class InteractionManager:
             cursor_reset = after_sequence > latest_sequence
             effective_sequence = 0 if cursor_reset else after_sequence
             return {
-                "events": [dict(event) for event in self._events if event["seq"] > effective_sequence],
+                "events": [
+                    dict(event) for event in self._events if event["seq"] > effective_sequence
+                ],
                 "truncated": effective_sequence < self._discarded_through,
                 "discarded_through": self._discarded_through,
                 "cursor_reset": cursor_reset,
@@ -349,7 +394,9 @@ class InteractionManager:
             if not isinstance(capacity, int) or isinstance(capacity, bool) or capacity < 1:
                 raise ValueError("Persisted event_capacity must be positive")
             events = snapshot["events"]
-            if not isinstance(events, list) or any(not isinstance(event, Mapping) for event in events):
+            if not isinstance(events, list) or any(
+                not isinstance(event, Mapping) for event in events
+            ):
                 raise TypeError("Persisted events must be a list of mappings")
             required_event_fields = {"seq", "id", "kind", "timestamp", "payload"}
             if any(set(event) != required_event_fields for event in events):
@@ -375,7 +422,9 @@ class InteractionManager:
                 maxlen=capacity,
             )
             messages = snapshot["messages"]
-            if not isinstance(messages, list) or any(not isinstance(item, Mapping) for item in messages):
+            if not isinstance(messages, list) or any(
+                not isinstance(item, Mapping) for item in messages
+            ):
                 raise TypeError("Persisted messages must be a list of mappings")
             if any(set(item) != {"content", "created_at"} for item in messages):
                 raise ValueError("Persisted messages must use the current message schema")
@@ -388,8 +437,7 @@ class InteractionManager:
             ):
                 raise TypeError("Persisted messages contain invalid field values")
             self._messages = deque(
-                PendingMessage(item["content"], item["created_at"])
-                for item in messages
+                PendingMessage(item["content"], item["created_at"]) for item in messages
             )
             discarded_through = snapshot["discarded_through"]
             if (
@@ -441,7 +489,9 @@ class InteractionManager:
         self._state = state
         self._publish_event_locked("state_changed", {"previous": previous, "current": state})
 
-    def _publish_event_locked(self, kind: InteractionEventKind, payload: Mapping[str, Any]) -> dict[str, Any]:
+    def _publish_event_locked(
+        self, kind: InteractionEventKind, payload: Mapping[str, Any]
+    ) -> dict[str, Any]:
         payload_dict = cast(dict[str, Any], json_value(dict(payload)))
         sequence = self._next_sequence
         self._next_sequence += 1
@@ -465,7 +515,8 @@ class InteractionManager:
     def _remove_stream_events_locked(self, response_id: str, kinds: set[str]) -> None:
         self._events = deque(
             (
-                event for event in self._events
+                event
+                for event in self._events
                 if not (
                     event["kind"] in kinds
                     and event.get("payload", {}).get("response_id") == response_id

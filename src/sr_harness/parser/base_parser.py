@@ -4,6 +4,7 @@
 负责将工具列表格式化为 LLM 可读的描述，以及从 LLM 响应中解析工具调用。
 """
 from __future__ import annotations
+from collections import Counter
 from logging import getLogger
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any
@@ -17,40 +18,32 @@ _logger = getLogger(f'sr_harness.{__name__}')
 class BaseParser(ABC, FactoryMixin):
     """Base class for model tool-call parsers."""
 
-    def __init__(self, tool_list: List[str] | List[Dict[str, Any]] | None = None):
+    native_tool_calls = False
+
+    def __init__(self, tool_list: list[BaseTool] | None = None) -> None:
         """初始化工具解析器。
 
         Args:
-            tool_list: 可用的工具名称列表，或已加载的工具元数据列表。
-                None 表示使用全部工具。
+            tool_list: Bound tool instances. ``None`` and an empty list both
+                expose no tools.
         """
-        if tool_list is not None and all(isinstance(t, dict) for t in tool_list):
-            self.tools = tool_list
-        elif tool_list is not None and all(isinstance(t, BaseTool) for t in tool_list):
-            self.tools = [
-                {
-                    "name": tool.metadata.name,
-                    "description": tool.metadata.description,
-                    "parameters": tool.metadata.parameters,
-                }
-                for tool in tool_list
-            ]
-        elif tool_list is not None and all(isinstance(t, type) and issubclass(t, BaseTool) for t in tool_list):
-            self.tools = [
-                {
-                    "name": tool.metadata.name,
-                    "description": tool.metadata.description,
-                    "parameters": tool.metadata.parameters,
-                }
-                for tool in tool_list
-            ]
-        elif tool_list is not None:
-            self.tools = [t for t in BaseTool.load_tool_list() if t['name'] in tool_list]
-        else:
-            self.tools = BaseTool.load_tool_list()
+        self.tools = list(tool_list or [])
+        if invalid := [tool for tool in self.tools if not isinstance(tool, BaseTool)]:
+            invalid_names = [type(tool).__name__ for tool in invalid]
+            raise TypeError(
+                f"tool_list must contain only BaseTool instances; got {', '.join(invalid_names)}"
+            )
+        name_counts = Counter(tool.metadata.name for tool in self.tools)
+        if duplicated := sorted(name for name, count in name_counts.items() if count > 1):
+            raise ValueError(f"tool_list contains duplicate tool names: {', '.join(duplicated)}")
+        self._tools_by_name = {tool.metadata.name: tool for tool in self.tools}
+
+    def __getitem__(self, name: str) -> BaseTool:
+        """Return a bound tool by name, raising ``KeyError`` when absent."""
+        return self._tools_by_name[name]
 
     @abstractmethod
-    def format_tools(self) -> str:
+    def format_tools(self) -> str | List[Dict[str, Any]]:
         """Format tools.
 
         Returns:
@@ -59,7 +52,7 @@ class BaseParser(ABC, FactoryMixin):
         pass
 
     @abstractmethod
-    def parse_response(self, response: str) -> List[ToolCall]:
+    def parse_response(self, response: Any) -> List[ToolCall]:
         """Parse response.
 
         Args:
@@ -70,23 +63,7 @@ class BaseParser(ABC, FactoryMixin):
         """
         pass
 
-    @abstractmethod
-    def format_tool_calls(self, tool_calls: List[ToolCall]) -> str:
-        """Format tool calls.
-
-        Args:
-            tool_calls: Tool calls returned by the model.
-
-        Returns:
-            str: The operation result.
-        """
-        pass
-
-    def format_tool_result_messages(
-        self,
-        tool_calls: List[ToolCall],
-        results: List[ToolCallResult],
-    ) -> List[Dict[str, Any]]:
+    def format_tool_result_messages(self, tool_calls: List[ToolCall], results: List[ToolCallResult]) -> List[Dict[str, Any]]:
         """Format tool result messages.
 
         Args:

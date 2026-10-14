@@ -3,22 +3,28 @@ from __future__ import annotations
 import sr_harness_engine as engine
 import numpy as np
 
+from sr_harness.core import APICallSample, APICallSummary
 from sr_harness.utils.symbolic_acc import get_symbolic_acc, llm_judge_equivalence
 
 
 def test_structural_judge_prompt_rejects_near_fit(monkeypatch):
     seen = {}
 
-    class FakeResult:
-        usage = {"token": {}, "price": {}}
-
-        def __iter__(self):
-            yield '{"reason": "Taylor approximation", "equivalent": false}', [], {}
-
     class FakeAPI:
         def __call__(self, messages, **kwargs):
             seen["messages"] = messages
-            return FakeResult()
+            def generate():
+                yield APICallSample(
+                    content='{"reason": "Taylor approximation", "equivalent": false}'
+                )
+                return {
+                    "ok": True,
+                    "error": None,
+                    "token_usage": {},
+                    "money_usage": {},
+                    "extra": {},
+                }
+            return APICallSummary(generate())
 
     monkeypatch.setattr("sr_harness.api.BaseAPI.create", lambda *args, **kwargs: FakeAPI())
     result = llm_judge_equivalence(

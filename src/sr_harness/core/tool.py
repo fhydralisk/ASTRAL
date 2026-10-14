@@ -29,6 +29,13 @@ class ToolCall:
     raw: Any = None
     raw_str: str | None = None
 
+    def __post_init__(self) -> None:
+        """Normalize the former textual raw field into the common raw field."""
+        if self.raw is None and self.raw_str is not None:
+            self.raw = self.raw_str
+        elif self.raw_str is None and isinstance(self.raw, str):
+            self.raw_str = self.raw
+
 
 @dataclass
 class ToolCallResult:

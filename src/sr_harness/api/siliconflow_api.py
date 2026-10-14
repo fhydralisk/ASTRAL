@@ -1,75 +1,208 @@
 # Copyright (c) 2024-present, Yumeow. Licensed under the MIT License.
-import os
+import httpx
 import logging
 import requests
 from dotenv import load_dotenv
-from collections import defaultdict
-from typing import Any, Generator, List, Dict
-from .base_api import BaseAPI
-from ..utils import log_exception
+from typing import Any, Callable, Dict, Generator, List
+
+from .base_api import BaseAPI, ProgressCallback, ProviderSampleResult
+from .utils import RemoteModelCatalog
+from ..core import APICallSample, ToolCall
 
 _logger = logging.getLogger(f"sr_harness.{__name__}")
 
 
+class _SiliconFlowRequestFailed(RuntimeError):
+    """Carry one SiliconFlow request failure already prepared for the frontend."""
+
+
 @BaseAPI.register("siliconflow")
 class SiliconFlowAPI(BaseAPI):
-    """SiliconFlow provider adapter."""
-    supported_models = [
-        "Qwen3-8B",
-        "Deepseek-V3",
-    ]
+    """SiliconFlow adapter for the Qwen3-8B and Deepseek-V3 workflows."""
 
-    def __init__(self, model: str = 'Qwen3-8B', **kwargs: Any) -> None:
+    def __init__(self, model: str = "Qwen3-8B", **kwargs: Any) -> None:
         super().__init__(model=model, **kwargs)
+        self._model_catalog = RemoteModelCatalog(
+            lambda url: httpx.Client(proxy=self.proxy_url(url), trust_env=False)
+        )
 
-    def _request(
+    def cancel(self) -> str:
+        """Report that the current synchronous HTTP request cannot be preempted."""
+        return (
+            "SiliconFlowAPI does not support force-interrupting an active non-streaming "
+            "request. The Agent will pause at its next safe boundary."
+        )
+
+    def format_response(
+        self, message: dict[str, Any], tool_calls: list[ToolCall], content: str | None = None
+    ) -> APICallSample:
+        """Convert one SiliconFlow message into one API-call sample."""
+        return self._build_response(message, tool_calls, content)
+
+    @property
+    def model_list(self) -> list[str]:
+        """Return the current SiliconFlow chat-model catalog."""
+        chat_endpoint = self.get_env(
+            "SILICONFLOW_ENDPOINT",
+            "https://api.siliconflow.cn/v1/chat/completions",
+        )
+        normalized_endpoint = chat_endpoint.rstrip("/")
+        default_models_endpoint = normalized_endpoint.removesuffix("/chat/completions") + "/models"
+        models_endpoint = self.get_env(
+            "SILICONFLOW_MODELS_ENDPOINT",
+            default_models_endpoint,
+        )
+        return self._model_catalog.get(
+            models_endpoint,
+            description="SiliconFlow chat-model catalog",
+            api_key=self.get_env("SILICONFLOW_API_KEY", required=True),
+            params={"sub_type": "chat"},
+        )
+
+    def _post_json(
+        self,
+        url: str,
+        headers: dict[str, str],
+        payload: dict[str, Any],
+        *,
+        description: str,
+        sample: int | None = None,
+        validate: Callable[[dict[str, Any]], None] | None = None,
+        callback: ProgressCallback | None = None,
+    ) -> dict[str, Any]:
+        """POST one SiliconFlow request with provider-local retry handling."""
+        for attempt in range(1, 4):
+            try:
+                proxy = self.proxy_url(url)
+                response = requests.request(
+                    "POST",
+                    url,
+                    json=payload,
+                    headers=headers,
+                    proxies={"http": proxy, "https": proxy} if proxy else None,
+                )
+                if response.status_code != 200:
+                    response.raise_for_status()
+                data = response.json()
+                if validate is not None:
+                    validate(data)
+                return data
+            except InterruptedError:
+                raise
+            except Exception as error:
+                public_error = self.error_message(error, description=description)
+                if attempt == 3:
+                    update = {"type": "failed", "error": public_error}
+                    if sample is not None:
+                        update["sample"] = sample
+                    self.report_progress(callback, update)
+                    raise _SiliconFlowRequestFailed(public_error) from error
+                update = {
+                    "type": "retry",
+                    "attempt": attempt,
+                    "error": public_error,
+                }
+                if sample is not None:
+                    update["sample"] = sample
+                self.report_progress(callback, update)
+                delay = self.retry_delay(error, attempt)
+                _logger.info(
+                    f"Retrying {description} in {delay:g}s (attempt {attempt}/3)."
+                )
+                self.wait_before_retry(delay)
+        raise AssertionError("unreachable")
+
+    @staticmethod
+    def _validate_chat_response(response: dict[str, Any]) -> None:
+        choices = response.get("choices") or []
+        if not choices or any(
+            not (
+                ((choice.get("message") or {}).get("content") or "").strip()
+                or (choice.get("message") or {}).get("tool_calls")
+            )
+            for choice in choices
+        ):
+            raise ValueError("SiliconFlow returned an empty chat completion.")
+
+    def _request_samples(
         self,
         messages: List[Dict[str, str]],
         n=1,
         max_tokens=1024,
         temperature=1.0,
         top_p=1.0,
-    ) -> Generator[str, None, Dict]:
-        ## Ensure this is a generator
+        callback: ProgressCallback | None = None,
+    ) -> Generator[APICallSample, None, dict[str, Any]]:
         yield from []
         load_dotenv()
-        url = 'https://api.siliconflow.cn/v1/chat/completions'
+        url = self.get_env(
+            "SILICONFLOW_ENDPOINT",
+            "https://api.siliconflow.cn/v1/chat/completions",
+        )
         headers = {
-            'Authorization': f"Bearer {self.require_env('SILICONFLOW_API_KEY')}",
-            'Content-Type': 'application/json',
+            "Authorization": f"Bearer {self.get_env('SILICONFLOW_API_KEY', required=True)}",
+            "Content-Type": "application/json",
         }
         payload = {
-            'messages': messages,
-            'n': n,
-            'stop': [],
-            'top_k': 50,
-            'top_p': top_p,
-            'min_p': 0.05,
-            'stream': False,
-            'thinking_budget': 1024,
-            'max_tokens': max_tokens,
-            'temperature': temperature,
-            'frequency_penalty': 0.5,
+            "messages": [dict(message) for message in messages],
+            "n": n,
+            "stop": [],
+            "top_k": 50,
+            "top_p": top_p,
+            "min_p": 0.05,
+            "stream": False,
+            "thinking_budget": 1024,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "frequency_penalty": 0.5,
         }
-        if not self.tool_list:
+        if self.tool_box is None:
             pass
-        elif self.tool_parser:
-            payload["messages"] = self.add_tool_description(payload["messages"])
+        elif not self.tool_box.native_tool_calls:
+            description = (
+                "Use the following tools when a tool call is needed. "
+                "Return tool calls in the specified format.\n\n"
+                f"{self.tool_box.format_tools()}"
+            )
+            if payload["messages"][0]["role"] in {"system", "developer"}:
+                first = payload["messages"][0]
+                payload["messages"][0] = {
+                    **first,
+                    "content": f"{first['content']}\n\n{description}",
+                }
+            else:
+                payload["messages"].insert(0, {"role": "system", "content": description})
         else:
-            payload["tools"] = self.tool_description_json
+            tools = self.tool_box.format_tools()
+            if not isinstance(tools, list):
+                raise TypeError("Native tool parser must return JSON tool descriptions")
+            payload["tools"] = tools
             payload["tool_choice"] = "auto"
-        # Request the LLM API
         model = self.model
-        if model == 'Qwen3-8B':
-            results = yield from self.qwen3_8b(url, headers, payload)
-        elif model == "Deepseek-V3":
-            results = yield from self.deepseek_v3(url, headers, payload)
-        else:
-            raise ValueError(f"Model {model} not supported in SiliconFlowAPI.")
+        try:
+            if model == "Qwen3-8B":
+                results = yield from self._request_qwen3_8b(url, headers, payload, callback)
+            elif model == "Deepseek-V3":
+                results = yield from self._request_deepseek_v3(url, headers, payload, callback)
+            else:
+                raise ValueError(f"Model {model} not supported in SiliconFlowAPI.")
+        except _SiliconFlowRequestFailed as error:
+            return {
+                "ok": False,
+                "error": str(error),
+                "token_usage": {},
+                "money_usage": {},
+                "extra": {},
+            }
         return results
 
-    def qwen3_8b(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> Generator[str, None, Dict]:
-        ## Ensure this is a generator
+    def _request_qwen3_8b(
+        self,
+        url: str,
+        headers: dict[str, str],
+        payload: dict[str, Any],
+        callback: ProgressCallback | None,
+    ) -> Generator[APICallSample, None, dict[str, Any]]:
         """Run the ``qwen3 8b`` operation.
 
         Args:
@@ -78,66 +211,74 @@ class SiliconFlowAPI(BaseAPI):
             payload: Serializable event payload.
 
         Returns:
-            Generator[str, None, Dict]: The operation result.
+            Generator yielding call samples and returning aggregate metadata.
         """
         yield from []
         payload = {
-            'model': 'Qwen/Qwen3-8B',
-            'enable_thinking': True,
-            **payload
+            "model": "Qwen/Qwen3-8B",
+            "enable_thinking": True,
+            **payload,
         }
-        try:
-            res = requests.request(
-                "POST", url, json=payload, headers=headers,
-                proxies=self.requests_proxies(),
-            )
-        except Exception as e:
-            _logger.error(f"Error requesting {self.model}: {log_exception(e)}")
-            return []
-        if res.status_code != 200:
-            _logger.error(f"Error requesting {self.model}: {res.text}")
-            return []
-        responses = res.json()
-        details = []
-        for choice in responses["choices"]:
-            content = choice["message"]["content"]
-            if not self.tool_list:
-                tool_call = []
-            elif self.tool_parser:
-                tool_call = self.tool_parser.parse_response(content)
-            else:
-                tool_call = self.normalize_openai_tool_calls(choice["message"].get("tool_calls"))
-                choice["message"]["tool_calls"] = [call.raw for call in tool_call]
-            details.append({
-                "content": content,
-                "tool_call": tool_call,
-                "token_usage": {},
-                "price_usage": {},
-                "response": {"choices": [choice]},
-            })
-            yield {"content": content, "tool_call": tool_call, "message": choice["message"]}
-        usage = {'token': {}, 'price': {}}
-        usage['token']['prompt'] = (prompt_tokens := responses["usage"]["prompt_tokens"])
-        usage['token']['reason'] = (reason_tokens := responses["usage"].get("completion_tokens_details", {}).get("reasoning_tokens", 0))
-        usage['token']['answer'] = (answer_tokens := responses["usage"]["completion_tokens"] - reason_tokens)
-        if (other := responses["usage"]["total_tokens"] - prompt_tokens - answer_tokens - reason_tokens) != 0:
-            usage['token']['other'] = other
-        usage['price']['prompt'] = 0.00 * prompt_tokens / 1e6
-        usage['price']['answer'] = 0.00 * answer_tokens / 1e6
-        usage['price']['reason'] = 0.00 * reason_tokens / 1e6
-        for detail in details:
-            detail["token_usage"] = {"prompt": prompt_tokens, "answer": answer_tokens, "reason": reason_tokens}
-            detail["price_usage"] = dict(usage["price"])
+        self.report_progress(callback, {"type": "start", "sample": 1})
+        responses = self._post_json(
+            url,
+            headers,
+            payload,
+            description=f"SiliconFlowAPI({self.model})",
+            sample=1,
+            validate=self._validate_chat_response,
+            callback=callback,
+        )
+        for sample, choice in enumerate(responses["choices"], 1):
+            content = choice["message"].get("content") or ""
+            tool_call = self.parse_tool_calls(choice["message"], content)
+            sample_response = self.format_response(choice["message"], tool_call, content)
+            if callback is not None:
+                self.report_progress(callback, {
+                    "type": "complete",
+                    "sample": sample,
+                    "content": sample_response.content,
+                    "reasoning": sample_response.reasoning,
+                    "tool_calls": [call.raw for call in sample_response.tool_calls],
+                })
+                if sample < len(responses["choices"]):
+                    self.report_progress(callback, {
+                        "type": "start",
+                        "sample": sample + 1,
+                    })
+            yield sample_response
+        prompt_tokens = responses["usage"]["prompt_tokens"]
+        reason_tokens = (
+            responses["usage"].get("completion_tokens_details", {}).get("reasoning_tokens", 0)
+        )
+        answer_tokens = responses["usage"]["completion_tokens"] - reason_tokens
+        token_usage = {
+            "prompt": prompt_tokens,
+            "answer": answer_tokens,
+            "reason": reason_tokens,
+        }
+        if (
+            other := responses["usage"]["total_tokens"]
+            - prompt_tokens
+            - answer_tokens
+            - reason_tokens
+        ) != 0:
+            token_usage["other"] = other
         return {
-            "usage": usage,
-            "contents": [detail["content"] for detail in details],
-            "response_message": details[0]["content"] if details else "",
-            "tool_calls": details[0]["tool_call"] if len(details) == 1 else [detail["tool_call"] for detail in details],
-            "responses": [responses],
+            "ok": True,
+            "error": None,
+            "token_usage": token_usage,
+            "money_usage": {"prompt": 0.0, "answer": 0.0, "reason": 0.0},
+            "extra": {"responses": [responses]},
         }
 
-    def deepseek_v3(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> Generator[str, None, Dict]:
-        ## Ensure this is a generator
+    def _request_deepseek_v3(
+        self,
+        url: str,
+        headers: dict[str, str],
+        payload: dict[str, Any],
+        callback: ProgressCallback | None,
+    ) -> Generator[APICallSample, None, dict[str, Any]]:
         """Run the ``deepseek v3`` operation.
 
         Args:
@@ -146,60 +287,55 @@ class SiliconFlowAPI(BaseAPI):
             payload: Serializable event payload.
 
         Returns:
-            Generator[str, None, Dict]: The operation result.
+            Generator yielding call samples and returning aggregate metadata.
         """
         yield from []
         payload = {
-            'model': 'deepseek-ai/DeepSeek-V3',
+            "model": "deepseek-ai/DeepSeek-V3",
             **payload,
         }
-        n, payload['n'] = payload['n'], 1  # Deepseek-V3 does not support n>1 in one request
-        model = payload['model']
-        usage = dict(token=defaultdict(float), price=defaultdict(float))
+        n, payload["n"] = payload["n"], 1
+        model = payload["model"]
         details = []
-        for _ in range(n):
-            try:
-                res = requests.request(
-                    "POST", url, json=payload, headers=headers,
-                    proxies=self.requests_proxies(),
-                )
-            except Exception as e:
-                _logger.error(f"Error requesting {type(self).__name__}({model}): {log_exception(e)}")
-                continue
-            if res.status_code != 200:
-                _logger.error(f"Error requesting {type(self).__name__}({model}): {res.text}")
-                continue
-            response = res.json()
-            usage['token']['prompt'] += (prompt_tokens := response["usage"]["prompt_tokens"])
-            usage['token']['answer'] += (answer_tokens := response["usage"]["completion_tokens"])
+        for idx in range(1, n + 1):
+            self.report_progress(callback, {"type": "start", "sample": idx})
+            response = self._post_json(
+                url,
+                headers,
+                payload,
+                description=f"SiliconFlowAPI({model})",
+                sample=idx,
+                validate=self._validate_chat_response,
+                callback=callback,
+            )
+            prompt_tokens = response["usage"]["prompt_tokens"]
+            answer_tokens = response["usage"]["completion_tokens"]
+            token_usage = {"prompt": prompt_tokens, "answer": answer_tokens}
             if (other := response["usage"]["total_tokens"] - prompt_tokens - answer_tokens) > 0:
-                usage['token']['other'] += other
-            usage['price']['prompt'] += 2/7.0 * prompt_tokens / 1e6 # 7.0 CNY ~ 1.0 USD
-            usage['price']['answer'] += 8/7.0 * answer_tokens / 1e6
+                token_usage["other"] = other
+            price_usage = {
+                "prompt": 2 / 7.0 * prompt_tokens / 1e6,
+                "answer": 8 / 7.0 * answer_tokens / 1e6,
+            }
             message = response["choices"][0]["message"]
             content = message["content"] or ""
-            if not self.tool_list:
-                tool_call = []
-            elif self.tool_parser:
-                tool_call = self.tool_parser.parse_response(content)
-            else:
-                tool_call = self.normalize_openai_tool_calls(message.get("tool_calls"))
-                message["tool_calls"] = [call.raw for call in tool_call]
-            details.append({
-                "content": content,
-                "tool_call": tool_call,
-                "token_usage": {"prompt": prompt_tokens, "answer": answer_tokens},
-                "price_usage": {
-                    "prompt": 2/7.0 * prompt_tokens / 1e6,
-                    "answer": 8/7.0 * answer_tokens / 1e6,
-                },
-                "response": response,
-            })
-            yield {"content": content, "tool_call": tool_call, "message": message}
-        return {
-            "usage": usage,
-            "contents": [detail["content"] for detail in details],
-            "response_message": details[0]["content"] if details else "",
-            "tool_calls": details[0]["tool_call"] if len(details) == 1 else [detail["tool_call"] for detail in details],
-            "responses": [detail["response"] for detail in details],
-        }
+            tool_call = self.parse_tool_calls(message, content)
+            sample_response = self.format_response(message, tool_call, content)
+            details.append(
+                ProviderSampleResult(
+                    response=sample_response,
+                    token_usage=token_usage,
+                    money_usage=price_usage,
+                    raw_response=response,
+                )
+            )
+            if callback is not None:
+                self.report_progress(callback, {
+                    "type": "complete",
+                    "sample": idx,
+                    "content": sample_response.content,
+                    "reasoning": sample_response.reasoning,
+                    "tool_calls": [call.raw for call in sample_response.tool_calls],
+                })
+            yield sample_response
+        return self.aggregate_sample_results(details)

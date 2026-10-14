@@ -1,20 +1,21 @@
 from __future__ import annotations
 import argparse
-from sr_harness.core import AgentContext
 
 import json
 import numpy as np
 import pytest
 from types import SimpleNamespace
 
-from sr_harness.api import ModelResponseTruncatedError
 from sr_harness.core import (
+    APICallSample,
+    APICallSummary,
     AgentContext,
     CandidateRecord,
     ToolCall,
     ToolCallResult,
     ToolMetadata,
 )
+from sr_harness.parser import BaseParser
 from sr_harness.agents.sr_agent import SRAgent
 from sr_harness.agents.sr_agent_interactive import SRAgentInteractive
 from sr_harness.runtime import SRInteractionManager
@@ -50,8 +51,20 @@ def make_agent(tmp_path):
         tools=["unit_parallel_tool"],
         save_path=str(tmp_path),
     )
-    agent.tools = [UnitParallelTool(context=AgentContext(args=argparse.Namespace(offset=10)))]
+    agent.tool_box = BaseParser.create(
+        "openai",
+        tool_list=[UnitParallelTool(context=AgentContext(args=argparse.Namespace(offset=10)))],
+    )
     return agent
+
+
+def api_sample(content="", tool_calls=None, message=None):
+    message = message or {"role": "assistant", "content": content}
+    return APICallSample(
+        content=content,
+        tool_calls=tool_calls or [],
+        message_extra={key: value for key, value in message.items() if key != "content"},
+    )
 
 
 def test_interactive_agent_reuses_shared_run_loop():
@@ -75,7 +88,7 @@ def test_interactive_initial_buffer_uses_narrow_customization_hooks(tmp_path):
         save_path=str(tmp_path),
         interaction_manager=manager,
     )
-    agent.tools = []
+    agent.tool_box = BaseParser.create("openai", tool_list=[])
     agent.variable_descriptions = {"x": "input", "y": "output"}
 
     messages = agent.create_initial_buffer(
@@ -293,7 +306,7 @@ def test_finish_search_returns_stopped_then_pauses_at_safe_boundary(tmp_path):
         save_path=str(tmp_path),
         interaction_manager=manager,
     )
-    agent.tools = [FinishSearchTool(context=AgentContext())]
+    agent.tool_box = BaseParser.create("openai", tool_list=[FinishSearchTool(context=AgentContext())])
     agent._stop_check_L = 2
     manager.start_agent_execution()
 
@@ -324,7 +337,7 @@ def test_finish_search_rejection_is_returned_as_tool_result(tmp_path):
         max_refinement_depth=4,
         stop_guard_mode="budget_exhausted",
     )
-    agent.tools = [FinishSearchTool(context=AgentContext())]
+    agent.tool_box = BaseParser.create("openai", tool_list=[FinishSearchTool(context=AgentContext())])
     agent._stop_check_L = 2
 
     result = agent.execute_action([
@@ -436,7 +449,7 @@ def test_topk_stop_guard_includes_same_response_candidates(tmp_path):
 
 def test_safe_pause_does_not_block_tools_already_requested_this_turn(monkeypatch):
     agent = object.__new__(SRAgentInteractive)
-    agent.tools = []
+    agent.tool_box = BaseParser.create("openai", tool_list=[])
     agent.interaction_manager = SRInteractionManager()
     agent.interaction_manager.start_agent_execution()
     result = ToolCallResult(ok=True, result={"mse": 0.0}, result_str="MSE=0", meta_data={})
@@ -465,11 +478,7 @@ def test_interactive_agent_honors_pending_control_before_automatic_guidance():
     assert buffer == []
 
 
-@pytest.mark.parametrize("pause_on_truncation", [True, False])
-def test_interactive_truncated_response_completes_iteration_before_optional_pause(
-    tmp_path,
-    pause_on_truncation,
-):
+def test_interactive_truncated_response_uses_normal_call_error_path(tmp_path):
     manager = SRInteractionManager()
     manager.start_agent_execution()
     agent = SRAgentInteractive(
@@ -479,48 +488,38 @@ def test_interactive_truncated_response_completes_iteration_before_optional_paus
         skills=[],
         save_path=str(tmp_path),
         interaction_manager=manager,
-        pause_on_truncated_response=pause_on_truncation,
+        pause_on_truncated_response=False,
     )
-    agent.tools = []
+    agent.tool_box = BaseParser.create("openai", tool_list=[])
 
     class TruncatedAPI:
         def cancel(self):
             pass
 
         def __call__(self, *args, **kwargs):
-            raise ModelResponseTruncatedError(
-                "maximum output length reached",
-                partial_message={
-                    "role": "assistant",
-                    "content": "",
-                    "reasoning": "partial reasoning",
-                },
-                tool_calls=[],
-                usage={"token": {"answer": 4096}, "price": {"total": 0.01}},
-                sample=1,
-            )
+            def generate():
+                yield APICallSample(
+                    content="",
+                    message_extra={"role": "assistant", "reasoning": "partial reasoning"},
+                )
+                return {
+                    "ok": False,
+                    "error": "maximum output length reached",
+                    "token_usage": {"answer": 4096},
+                    "money_usage": {"total": 0.01},
+                }
+
+            return APICallSummary(generate())
 
     agent.api = TruncatedAPI()
-    responses, usage = agent.request_llm(
-        [{"role": "user", "content": "Find a formula."}],
-        R=1,
-        L=1,
-        C=1,
-    )
-    results = agent.execute_tool_calls(responses, R=1, L=1, C=1)
-    buffer = []
-    agent.update_conversation(buffer, responses, results, {}, R=1, L=1, C=1)
-    agent.finish_iteration(buffer, R=1, L=1, C=1)
+    with pytest.raises(RuntimeError, match="maximum output length reached"):
+        agent.request_llm(
+            [{"role": "user", "content": "Find a formula."}],
+            R=1,
+            L=1,
+            C=1,
+        )
 
-    assert responses[0][1] == []
-    assert responses[0][2]["reasoning"] == "partial reasoning"
-    assert usage["token"]["answer"] == 4096
-    assert buffer[0]["role"] == "assistant"
-    assert buffer[0]["reasoning"] == "partial reasoning"
-    assert buffer[1]["role"] == "user"
-    assert "Previous model response was truncated" in buffer[1]["content"]
-    assert "Current progress" in buffer[2]["content"]
-    assert manager.state == ("pausing" if pause_on_truncation else "running")
     assert any(
         event["kind"] == "assistant_failed"
         and "maximum output length reached" in event["payload"]["error"]
@@ -565,7 +564,7 @@ def test_agent_exposes_only_skills_from_enabled_tools(tmp_path):
     assert "Supported commands" in result.result_str
     assert "Skill directory tree:\n- SKILL.md" in result.result_str
 
-    enabled.tools = [enabled_reader]
+    enabled.tool_box = BaseParser.create("openai", tool_list=[enabled_reader])
     parallel_result = enabled.execute_action_parallel(
         [ToolCall(name="read_skill", params={"name": "workspace-shell"})],
         max_workers=2,
@@ -618,22 +617,33 @@ def test_execute_action_parallel_preserves_order_and_records_usage(tmp_path):
     assert agent.tools_counter.named_count == {"unit_parallel_tool": 2}
 
 
+def test_execute_action_requires_context_initialization():
+    agent = object.__new__(SRAgent)
+    agent.tool_box = None
+
+    with pytest.raises(RuntimeError, match="initialized with context"):
+        agent.execute_action([ToolCall(name="unit_parallel_tool", params={"value": 1})])
+    with pytest.raises(RuntimeError, match="initialized with context"):
+        agent.execute_action_parallel(
+            [ToolCall(name="unit_parallel_tool", params={"value": 1})],
+            max_workers=1,
+        )
+
+
 def test_execute_tool_calls_uses_messages_already_injected_into_tool_context(tmp_path):
     agent = make_agent(tmp_path)
-    agent.tools = [UnitMessagesTool()]
+    agent.tool_box = BaseParser.create("openai", tool_list=[UnitMessagesTool()])
     agent.max_workers = 2
     prompt = [{"role": "system", "content": "Reusable context"}]
-    agent.tools[0].context.args.messages = prompt
-    response_list = [
-        (
+    agent.tool_box.tools[0].context.args.messages = prompt
+    response_list = [api_sample(
             "",
             [
                 ToolCall(name="unit_messages_tool", params={}),
                 ToolCall(name="unit_messages_tool", params={}),
             ],
-            {},
-        )
-    ]
+            {"role": "assistant", "content": ""},
+        )]
 
     results = agent.execute_tool_calls(response_list, R=1, L=1, C=1)
     assert results[0][0].result == {"messages": [{"role": "system", "content": "Reusable context"}]}
@@ -673,11 +683,11 @@ def test_force_initial_diagnostics_runs_and_injects_results(tmp_path):
         data=data,
         target="y",
     )
-    agent.tools = [
+    agent.tool_box = BaseParser.create("openai", tool_list=[
         StatisticsTool(context=context),
         RelationshipAnalysisTool(context=context),
         ReadSkill(context=context),
-    ]
+    ])
 
     buffer = [{"role": "user", "content": "Find y=f(x)."}]
     prompt = agent.prepare_model_messages(buffer, R=1, L=1, C=1)
@@ -891,7 +901,7 @@ def test_update_conversation_injects_iteration_status(tmp_path):
         {"role": "user", "content": "Solve the task."},
     ]
     original_buffer = list(buffer)
-    response_list = [("", [], {"role": "assistant", "content": ""})]
+    response_list = [api_sample()]
     results_list = [[]]
 
     updated, _ = agent.update_conversation(buffer, response_list, results_list, {}, R=1, L=2, C=1)
@@ -923,7 +933,7 @@ def test_update_conversation_injects_current_pareto_front(tmp_path):
 
     agent.update_conversation(
         buffer,
-        [("", [], {"role": "assistant", "content": ""})],
+        [api_sample()],
         [[]],
         {},
         R=1,
@@ -944,7 +954,7 @@ def test_update_conversation_final_round_tells_agent_to_submit(tmp_path):
         {"role": "system", "content": "Base system."},
         {"role": "user", "content": "Solve the task."},
     ]
-    response_list = [("", [], {"role": "assistant", "content": ""})]
+    response_list = [api_sample()]
     results_list = [[]]
 
     agent.update_conversation(buffer, response_list, results_list, {}, R=1, L=4, C=1)
@@ -970,12 +980,9 @@ def test_get_ranking_metric_ignores_non_candidate_tool_results(tmp_path):
 
 def test_update_conversation_sorts_unwrapped_tool_results(tmp_path):
     agent = make_agent(tmp_path)
-    agent.parser = SimpleNamespace(format_tool_result_messages=lambda *args: [])
+    agent.tool_box = SimpleNamespace(format_tool_result_messages=lambda *args: [])
     buffer = [{"role": "user", "content": "Find a formula."}]
-    response_list = [
-        ("diagnostic", [], {"role": "assistant", "content": "diagnostic"}),
-        ("candidate", [], {"role": "assistant", "content": "candidate"}),
-    ]
+    response_list = [api_sample("diagnostic"), api_sample("candidate")]
     results_list = [
         [ToolCallResult(True, {"content": "diagnostic"}, "diagnostic", {})],
         [
@@ -998,14 +1005,14 @@ def test_update_conversation_sorts_unwrapped_tool_results(tmp_path):
 def test_collect_candidates_records_pareto_front(tmp_path):
     agent = make_agent(tmp_path)
     response_list = [
-        (
+        api_sample(
             "",
             [
                 ToolCall(name="evaluate_formula", params={"eq": "x"}),
                 ToolCall(name="evaluate_formula", params={"eq": "x + y"}),
                 ToolCall(name="evaluate_formula", params={"eq": "x + y + z"}),
             ],
-            {},
+            {"role": "assistant", "content": ""},
         ),
     ]
     results_list = [
@@ -1078,13 +1085,13 @@ def test_no_file_mode_keeps_search_identity_in_memory():
 def test_collect_candidates_rejects_non_finite_candidate_metrics(tmp_path):
     agent = make_agent(tmp_path)
     response_list = [
-        (
+        api_sample(
             "",
             [
                 ToolCall(name="evaluate_formula", params={"f": "1.966*P*log(0.0423/P)"}),
                 ToolCall(name="evaluate_formula", params={"f": "P"}),
             ],
-            {},
+            {"role": "assistant", "content": ""},
         ),
     ]
     results_list = [

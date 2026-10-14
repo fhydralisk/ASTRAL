@@ -1,10 +1,4 @@
-from sr_harness.api import public_model_api_error
-
-
-class StatusError(RuntimeError):
-    def __init__(self, message, status_code):
-        super().__init__(message)
-        self.status_code = status_code
+from sr_harness.api import OpenRouterAPI
 
 
 def wrapped(cause):
@@ -17,25 +11,40 @@ def wrapped(cause):
             return outer
 
 
-def test_public_model_error_reports_insufficient_balance_without_details():
-    error = public_model_api_error(wrapped(StatusError("secret upstream body", 402)))
+def test_provider_error_is_returned_directly_and_logged(caplog):
+    api = OpenRouterAPI()
 
-    assert error["error_kind"] == "insufficient_balance"
-    assert "balance or quota" in error["error"]
-    assert "secret upstream body" not in error["error"]
+    with caplog.at_level("ERROR", logger="sr_harness.sr_harness.api.base_api"):
+        message = api.error_message(ValueError("upstream rejected this request"))
 
-
-def test_public_model_error_reports_network_failure():
-    error = public_model_api_error(wrapped(ConnectionError("connection refused")))
-
-    assert error["error_kind"] == "network_unreachable"
-    assert "unreachable" in error["error"]
+    assert message == "upstream rejected this request"
+    assert "upstream rejected this request" in caplog.text
 
 
-def test_public_model_error_uses_safe_unknown_fallback():
-    error = public_model_api_error(wrapped(ValueError("private malformed response")))
+def test_private_path_marker_withholds_frontend_error_but_remains_in_log(caplog):
+    api = OpenRouterAPI()
+    error = wrapped(ValueError("failed under /data2/yuzihan/private/config"))
 
-    assert error == {
-        "error_kind": "unknown",
-        "error": "Model API request failed for an unknown reason. Check the server logs for details.",
-    }
+    with caplog.at_level("ERROR", logger="sr_harness.sr_harness.api.base_api"):
+        message = api.error_message(error)
+
+    assert "sensitive information" in message
+    assert "yuzihan" not in message
+    assert "yuzihan" in caplog.text
+
+
+def test_api_key_suffix_marker_withholds_frontend_error(caplog):
+    api = OpenRouterAPI(environment={"OPENROUTER_API_KEY": "sk-example-secret-4a9"})
+
+    with caplog.at_level("ERROR", logger="sr_harness.sr_harness.api.base_api"):
+        message = api.error_message(ValueError("upstream echoed credential suffix 4a9"))
+
+    assert "sensitive information" in message
+    assert "4a9" not in message
+    assert "4a9" in caplog.text
+
+
+def test_short_test_key_suffix_does_not_trigger_temporary_filter():
+    api = OpenRouterAPI(environment={"OPENROUTER_API_KEY": "test-key"})
+
+    assert api.error_message(ValueError("invalid API key")) == "invalid API key"

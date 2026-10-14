@@ -1,5 +1,5 @@
 """Dependency-light domain types and runtime state for SRHarness."""
-from .api import APICallResult
+from .api import APICallSample, APICallSummary
 from .context import AgentContext
 from .context_data import (
     ContextManifestError,
@@ -20,7 +20,8 @@ from .search import (
 from .tool import ToolCall, ToolCallResult, ToolMetadata
 
 __all__ = [
-    "APICallResult",
+    "APICallSample",
+    "APICallSummary",
     "AgentContext",
     "CandidateRecord",
     "ContextManifestError",

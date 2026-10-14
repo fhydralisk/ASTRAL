@@ -1,64 +1,72 @@
 # Copyright (c) 2024-present, Yumeow. Licensed under the MIT License.
-import os
-import time
-import logging
-from openai import OpenAI
+import httpx
+from openai import DefaultHttpxClient, OpenAI
 from dotenv import load_dotenv
-from typing import Any, Generator, List, Dict
-from .base_api import BaseAPI, ModelResponseTruncatedError, StreamCallback
-from ..utils import log_exception
-
-_logger = logging.getLogger(f"sr_harness.{__name__}")
+from typing import Any
+from .base_api import BaseAPI, ProgressCallback, ProviderSampleResult
+from .utils import RemoteModelCatalog
+from ..core import APICallSample, ToolCall
 
 
 @BaseAPI.register("openrouter")
 class OpenRouterAPI(BaseAPI):
-    """OpenRouter provider adapter."""
-    supports_streaming = True
-    supported_models = [
-        "qwen/qwen3.6-flash",
-        "moonshotai/kimi-k2",
-        "google/gemini-2.5-pro",
-        "google/gemini-2.5-flash",
-        "openai/gpt-5.5",
-        "openai/gpt-5.4-mini",
-        "google/gemini-3.1-pro-preview",
-        "google/gemini-3.1-flash-lite-preview",
-        "~anthropic/claude-sonnet-latest",
-        "deepseek/deepseek-v4-pro",
-        "deepseek/deepseek-v4-pro-0813",
-        "deepseek/deepseek-v4-flash",
-        "deepseek/deepseek-v4-flash-0731",
-        "openai/gpt-oss-120b",
-        "qwen/qwen3.6-max-preview",
-        "qwen/qwen3.6-plus",
-        "z-ai/glm-5-turbo",
-    ]
+    """OpenRouter adapter accepting text-generation models in its live catalog."""
 
-    def __init__(self, model: str = 'qwen/qwen3.6-plus', **kwargs: Any) -> None:
+    def __init__(self, model: str = "qwen/qwen3.6-plus", **kwargs: Any) -> None:
         super().__init__(model=model, **kwargs)
+        self._model_catalog = RemoteModelCatalog(
+            lambda url: httpx.Client(proxy=self.proxy_url(url), trust_env=False)
+        )
 
-    def _request(
+    def format_response(
+        self, message: dict[str, Any], tool_calls: list[ToolCall], content: str | None = None
+    ) -> APICallSample:
+        """Convert one OpenRouter message into the public response contract."""
+        return self._build_response(message, tool_calls, content)
+
+    @property
+    def model_list(self) -> list[str]:
+        """Return the current OpenRouter text-generation model catalog."""
+        endpoint = self.get_env("OPENROUTER_ENDPOINT", "https://openrouter.ai/api/v1")
+
+        def supports_text_output(record: dict[str, Any]) -> bool:
+            architecture = record.get("architecture")
+            if not isinstance(architecture, dict):
+                return True
+            output_modalities = architecture.get("output_modalities")
+            return not isinstance(output_modalities, list) or "text" in output_modalities
+
+        return self._model_catalog.get(
+            f"{endpoint.rstrip('/')}/models",
+            description="OpenRouter model catalog",
+            api_key=self.get_env("OPENROUTER_API_KEY"),
+            include=supports_text_output,
+        )
+
+    def _request_sample(
         self,
-        messages: List[Dict[str, str]],
-        n=1,
+        messages: list[dict[str, Any]],
+        *,
+        sample_index: int,
         max_tokens=4096,
         temperature=1.0,
         top_p=1.0,
-        stream_callback: StreamCallback | None = None,
-    ) -> Generator[str, None, Dict]:
-        yield from []
+        callback: ProgressCallback | None = None,
+    ) -> ProviderSampleResult:
         load_dotenv()
-        api_key = self.require_env("OPENROUTER_API_KEY")
-        endpoint = self.getenv("OPENROUTER_ENDPOINT", "https://openrouter.ai/api/v1")
+        api_key = self.get_env("OPENROUTER_API_KEY", required=True)
+        endpoint = self.get_env("OPENROUTER_ENDPOINT", "https://openrouter.ai/api/v1")
         client = OpenAI(
             base_url=endpoint,
             api_key=api_key,
-            http_client=self.openai_http_client(endpoint),
+            http_client=DefaultHttpxClient(
+                proxy=self.proxy_url(endpoint),
+                trust_env=False,
+            ),
         )
         payload = {
             "model": self.model,
-            "messages": messages,
+            "messages": [dict(message) for message in messages],
             "top_p": top_p,
             "max_tokens": max_tokens,
             "temperature": temperature,
@@ -73,241 +81,65 @@ class OpenRouterAPI(BaseAPI):
                     "allow_fallbacks": False,
                 }
             }
-        if not self.tool_list:
+        if self.tool_box is None:
             pass
-        elif self.tool_parser:
-            payload["messages"] = self.add_tool_description(payload["messages"])
+        elif not self.tool_box.native_tool_calls:
+            description = (
+                "Use the following tools when a tool call is needed. "
+                "Return tool calls in the specified format.\n\n"
+                f"{self.tool_box.format_tools()}"
+            )
+            if payload["messages"][0]["role"] in {"system", "developer"}:
+                first = payload["messages"][0]
+                payload["messages"][0] = {
+                    **first,
+                    "content": f"{first['content']}\n\n{description}",
+                }
+            else:
+                payload["messages"].insert(0, {"role": "system", "content": description})
         else:
-            payload["tools"] = self.tool_description_json
+            tools = self.tool_box.format_tools()
+            if not isinstance(tools, list):
+                raise TypeError("Native tool parser must return JSON tool descriptions")
+            payload["tools"] = tools
             payload["tool_choice"] = "auto"
 
-        def get_tool_call(message, content):
-            if not self.tool_list:
-                tool_call = []
-            elif self.tool_parser:
-                tool_call = self.tool_parser.parse_response(content)
-            elif 'tool_calls' in message:
-                tool_call = self.normalize_openai_tool_calls(message['tool_calls'])
-                message['tool_calls'] = [call.raw for call in tool_call]
-            else:
-                tool_call = []
-            return tool_call
-
-        def get_usage(completion):
-            token_usage = {}
-            price_usage = {}
-            if usage := completion.usage:
-                token_usage["prompt"] = usage.prompt_tokens
-                token_usage["answer"] = usage.completion_tokens
-                total_tokens = getattr(usage, "total_tokens", usage.prompt_tokens + usage.completion_tokens)
-                if (other := total_tokens - usage.prompt_tokens - usage.completion_tokens) > 0:
-                    token_usage["others"] = other
-                price_usage['total'] = getattr(usage, "cost", 0)
-            return token_usage, price_usage
-
-        # OpenRouter does not support `n` parameter now,
-        # see https://github.com/OpenRouterTeam/openrouter-runner/issues/99
-        details = []
-        for idx in range(1, n + 1):
-            max_retry = 3
-            for attempt in range(1, max_retry + 1):
-                try:
-                    if stream_callback is None:
-                        completion = client.chat.completions.create(**payload)
-                        response_dict = completion.to_dict()
-                        message = completion.choices[0].message.to_dict()
-                        content = message['content'] or ""
-                    else:
-                        completion, response_dict, message, content = self._stream_completion(
-                            client,
-                            payload,
-                            sample=idx,
-                            callback=stream_callback,
-                        )
-                except Exception as e:
-                    tool_call = []
-                    retry_error = e
-                else:
-                    tool_call = get_tool_call(message, content)
-                    choices = response_dict.get("choices") or [{}]
-                    finish_reason = (
-                        response_dict.get("finish_reason")
-                        or choices[0].get("finish_reason")
-                    )
-                    if finish_reason == "length":
-                        token_usage, price_usage = get_usage(completion)
-                        partial_message = dict(message)
-                        partial_message.pop("tool_calls", None)
-                        raise ModelResponseTruncatedError(
-                            f"OpenRouterAPI({self.model}) exhausted max_tokens={max_tokens}; "
-                            "the response was truncated before the model completed its turn. "
-                            "Increase the Agent's maximum output length and retry. "
-                            f"模型已耗尽 max_tokens={max_tokens}，响应在本轮完成前被截断；"
-                            "请增大 Agent 的最大输出长度后重试。",
-                            partial_message=partial_message,
-                            tool_calls=[],
-                            usage={"token": token_usage, "price": price_usage},
-                            sample=idx,
-                        )
-                    if not (tool_call or content.strip()):
-                        retry_error = ValueError(f"OpenRouterAPI({self.model}) returned empty content and no usable tool calls.")
-                    else:
-                        retry_error = None
-                if retry_error is None:
-                    token_usage, price_usage = get_usage(completion)
-                    break
-                elif attempt < max_retry:
-                    if stream_callback is not None:
-                        stream_callback({
-                            "type": "retry",
-                            "sample": idx,
-                            "attempt": attempt,
-                            "error": str(retry_error),
-                        })
-                    _logger.error(f"Error requesting OpenRouterAPI({self.model}) since {log_exception(retry_error, with_traceback=False)}")
-                    delay = self._retry_delay(retry_error, attempt)
-                    _logger.info(f"Retrying OpenRouterAPI({self.model}) in {delay:g}s (attempt {attempt}/{max_retry}).")
-                    time.sleep(delay)
-                else:
-                    _logger.error(f"Error requesting OpenRouterAPI({self.model}) since {log_exception(retry_error, with_traceback=False)}")
-                    raise RuntimeError(f"OpenRouterAPI({self.model}) failed after {max_retry} attempts for sample {idx}/{n}.") from retry_error
-
-            details.append({
-                "content": content,
-                "tool_call": tool_call,
-                "token_usage": token_usage,
-                "price_usage": price_usage,
-                "response": response_dict,
-            })
-            yield {'content': content, 'tool_call': tool_call, 'message': message}
-
-        token_usage = {}
-        for detail in details:
-            for key, value in detail["token_usage"].items():
-                token_usage[key] = token_usage.get(key, 0) + value
-        price_usage = {}
-        for detail in details:
-            for key, value in detail["price_usage"].items():
-                price_usage[key] = price_usage.get(key, 0) + value
-        return {
-            "usage": {"token": token_usage, "price": price_usage},
-            "contents": [detail["content"] for detail in details],
-            "response_message": details[0]["content"] if details else "",
-            "tool_calls": details[0]["tool_call"] if len(details) == 1 else [detail["tool_call"] for detail in details],
-            "responses": [detail["response"] for detail in details],
-        }
-
-    def _stream_completion(
-        self,
-        client,
-        payload: dict[str, Any],
-        *,
-        sample: int,
-        callback: StreamCallback,
-    ):
-        """Consume one OpenAI-compatible stream and expose provider-neutral snapshots."""
-        stream = client.chat.completions.create(
-            **payload,
-            stream=True,
-            stream_options={"include_usage": True},
+        completion, raw_response, message, content = self.openai_chat_completion(
+            client,
+            payload,
+            sample=sample_index,
+            callback=callback,
         )
-        content_parts: list[str] = []
-        reasoning_parts: list[str] = []
-        reasoning_details: list[Any] = []
-        raw_chunks: list[dict[str, Any]] = []
-        raw_tool_calls: dict[int, dict[str, Any]] = {}
-        usage = None
-        finish_reason = None
-        callback({"type": "start", "sample": sample})
-        for chunk in stream:
-            chunk_dict = chunk.to_dict() if hasattr(chunk, "to_dict") else {}
-            raw_chunks.append(chunk_dict)
-            if getattr(chunk, "usage", None) is not None:
-                usage = chunk.usage
-            choices = getattr(chunk, "choices", None) or []
-            if not choices:
-                continue
-            choice = choices[0]
-            if getattr(choice, "finish_reason", None) is not None:
-                finish_reason = choice.finish_reason
-            delta = choice.delta
-            if text := getattr(delta, "content", None):
-                content_parts.append(text)
-            reasoning_delta = (
-                getattr(delta, "reasoning", None)
-                or getattr(delta, "reasoning_content", None)
-                or ""
+        tool_calls = self.parse_tool_calls(message, content)
+        choices = raw_response.get("choices") or [{}]
+        finish_reason = raw_response.get("finish_reason") or choices[0].get("finish_reason")
+        token_usage = self.openai_token_usage(completion)
+        usage = getattr(completion, "usage", None)
+        money_usage = {"total": getattr(usage, "cost", 0)} if usage is not None else {}
+        if finish_reason == "length":
+            partial_message = dict(message)
+            partial_message.pop("tool_calls", None)
+            error = (
+                f"OpenRouterAPI({self.model}) exhausted max_tokens={max_tokens}; "
+                "the response was truncated before the model completed its turn. "
+                "Increase the Agent's maximum output length and retry. "
+                f"模型已耗尽 max_tokens={max_tokens}，响应在本轮完成前被截断；"
+                "请增大 Agent 的最大输出长度后重试。"
             )
-            new_details = getattr(delta, "reasoning_details", None) or []
-            if new_details:
-                reasoning_details.extend(
-                    item.to_dict() if hasattr(item, "to_dict") else item
-                    for item in new_details
-                )
-                if not reasoning_delta:
-                    reasoning_delta = "".join(
-                        (item.get("text") or "") if isinstance(item, dict) else ""
-                        for item in reasoning_details[-len(new_details):]
-                    )
-            if reasoning_delta:
-                reasoning_parts.append(reasoning_delta)
-            for tool_delta in getattr(delta, "tool_calls", None) or []:
-                index = int(getattr(tool_delta, "index", 0) or 0)
-                current = raw_tool_calls.setdefault(index, {
-                    "id": None,
-                    "type": "function",
-                    "function": {"name": "", "arguments": ""},
-                })
-                if getattr(tool_delta, "id", None):
-                    current["id"] = tool_delta.id
-                function = getattr(tool_delta, "function", None)
-                if function is not None:
-                    if getattr(function, "name", None):
-                        current["function"]["name"] += function.name
-                    if getattr(function, "arguments", None):
-                        current["function"]["arguments"] += function.arguments
-            snapshot_tool_calls = [raw_tool_calls[key] for key in sorted(raw_tool_calls)]
-            callback({
-                "type": "delta",
-                "sample": sample,
-                "content": "".join(content_parts),
-                "reasoning": "".join(reasoning_parts),
-                "tool_calls": snapshot_tool_calls,
-            })
-        content = "".join(content_parts)
-        message: dict[str, Any] = {"role": "assistant", "content": content}
-        if reasoning := "".join(reasoning_parts):
-            message["reasoning"] = reasoning
-        if reasoning_details:
-            message["reasoning_details"] = reasoning_details
-        if raw_tool_calls:
-            message["tool_calls"] = [raw_tool_calls[key] for key in sorted(raw_tool_calls)]
-        callback({
-            "type": "complete",
-            "sample": sample,
-            "content": content,
-            "reasoning": reasoning,
-            "tool_calls": message.get("tool_calls", []),
-            "finish_reason": finish_reason,
-        })
-        completion = type("StreamCompletion", (), {"usage": usage})()
-        return completion, {
-            "chunks": raw_chunks,
-            "finish_reason": finish_reason,
-        }, message, content
-
-    @staticmethod
-    def _retry_delay(error: Exception, attempt: int) -> float:
-        """Honor OpenRouter's retry hint, falling back to bounded backoff."""
-        headers = getattr(getattr(error, "response", None), "headers", None) or {}
-        retry_after = headers.get("retry-after") or headers.get("Retry-After")
-        if retry_after is None:
-            body = getattr(error, "body", None)
-            if isinstance(body, dict):
-                metadata = body.get("error", body).get("metadata", {})
-                retry_headers = metadata.get("headers", {}) if isinstance(metadata, dict) else {}
-                retry_after = retry_headers.get("Retry-After") or retry_headers.get("retry-after")
-        try:
-            return max(1.0, min(float(retry_after), 300.0))
-        except (TypeError, ValueError):
-            return min(float(2 ** (attempt - 1)), 30.0)
+            return ProviderSampleResult(
+                response=self.format_response(partial_message, [], content),
+                token_usage=token_usage,
+                money_usage=money_usage,
+                raw_response=raw_response,
+                error=error,
+            )
+        if not (tool_calls or content.strip()):
+            raise ValueError(
+                f"OpenRouterAPI({self.model}) returned empty content and no usable tool calls."
+            )
+        return ProviderSampleResult(
+            response=self.format_response(message, tool_calls, content),
+            token_usage=token_usage,
+            money_usage=money_usage,
+            raw_response=raw_response,
+        )

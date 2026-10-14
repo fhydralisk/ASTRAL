@@ -14,11 +14,11 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Iterator, List, Optional
 
-from ..api import BaseAPI, ModelResponseTruncatedError, public_model_api_error
-from ..core import AgentContext, CandidateRecord, ToolCall, ToolCallResult
+from ..api import BaseAPI
+from ..core import APICallSample, AgentContext, CandidateRecord, ToolCall, ToolCallResult
 from ..runtime import PendingMessage, SRInteractionManager
 from ..skills import SkillManager
-from .sr_agent import Message, ModelResponse, SRAgent, Usage
+from .sr_agent import Message, SRAgent, Usage
 from ..parser import BaseParser
 
 _logger = logging.getLogger(f"sr_harness.{__name__}")
@@ -210,7 +210,7 @@ class SRAgentInteractive(SRAgent):
 
     def _bind_tool_cancellation(self) -> None:
         """Share the hard-interrupt event with every active tool instance."""
-        for tool in self.tools or []:
+        for tool in self.tool_box.tools if self.tool_box is not None else []:
             tool.cancel_event = self.interaction_manager.cancellation_signal
 
     def _validate_stop_settings(self) -> None:
@@ -239,9 +239,9 @@ class SRAgentInteractive(SRAgent):
         if self.stop_guard_mode == "metric_threshold" and self.stop_guard_threshold is None:
             raise ValueError(f"{self.stop_guard_mode} requires stop_guard_threshold")
 
-    def initialize_tools(self, context: AgentContext) -> None:
-        """Initialize tools and attach the active hard-interrupt event."""
-        super().initialize_tools(context)
+    def initialize_with_context(self, context: AgentContext) -> None:
+        """Initialize from context and attach the active hard-interrupt event."""
+        super().initialize_with_context(context)
         if hasattr(self, "interaction_manager"):
             self._bind_tool_cancellation()
 
@@ -414,7 +414,7 @@ class SRAgentInteractive(SRAgent):
             self.context.args.llm_model = self.llm_model
             self.context.args.llm_max_tokens = self.llm_max_tokens
             self.context.args.enabled_skills = sorted(self.enabled_skills)
-            self.initialize_tools(self.context)
+            self.initialize_with_context(self.context)
             self._bind_tool_cancellation()
             self.model_router.base_provider = self.llm_provider
             self.model_router.base_model = self.llm_model
@@ -472,7 +472,9 @@ class SRAgentInteractive(SRAgent):
                         ),
                     }], R=R, C=C, L=L)
             else:
-                _logger.info("Tool-free response will continue after stop review: %s", review_reason)
+                _logger.info(
+                    f"Tool-free response will continue after stop review: {review_reason}"
+                )
         self._last_response_was_truncated = False
         return None
 
@@ -518,8 +520,6 @@ class SRAgentInteractive(SRAgent):
             api = BaseAPI.create(
                 provider,
                 model=model,
-                tool_list=None,
-                tool_parser_name="openai",
                 environment=getattr(self.context.args, "api_environment", None),
             )
             self._stop_review_apis[key] = api
@@ -542,12 +542,12 @@ class SRAgentInteractive(SRAgent):
             with self.interaction_manager.cancellable(api.cancel):
                 result = api(messages, n=1)
                 responses = list(result)
-            usage = result.returned.get("usage", {"token": {}, "price": {}})
+            usage = {"token": result.token_usage, "price": result.money_usage}
             for name, value in usage.get("token", {}).items():
                 self.token_counter.add(name, value)
             for name, value in usage.get("price", {}).items():
                 self.money_counter.add(name, value)
-            content = responses[0][0] if responses else ""
+            content = responses[0].content if responses else ""
             decision, reason = self._parse_stop_review(content)
             if self.save_path is not None:
                 with open(Path(self.save_path) / "stop_reviews.jsonl", "a", encoding="utf-8") as stream:
@@ -564,7 +564,7 @@ class SRAgentInteractive(SRAgent):
                     stream.write("\n")
             return decision, reason
         except Exception as exc:
-            _logger.warning("Stop review failed; continuing the search: %s", exc)
+            _logger.warning(f"Stop review failed; continuing the search: {exc}")
             return False, f"stop review failed: {exc}"
 
     @staticmethod
@@ -702,7 +702,7 @@ class SRAgentInteractive(SRAgent):
 
     def build_response_followup_messages(
         self,
-        response_list: list[ModelResponse],
+        response_list: list[APICallSample],
         results_list: list[list[ToolCallResult]],
         *,
         R: int,
@@ -792,7 +792,7 @@ class SRAgentInteractive(SRAgent):
 
     # Streaming model and tool events
 
-    def request_llm(self, prompt: list[Message], R: int, L: int, C: int) -> tuple[list[ModelResponse], Usage]:
+    def request_llm(self, prompt: list[Message], R: int, L: int, C: int) -> tuple[list[APICallSample], Usage]:
         """Request the model while publishing frontend-neutral progress events.
 
         Args:
@@ -813,7 +813,7 @@ class SRAgentInteractive(SRAgent):
         )
         tool_schemas = {
             tool.metadata.name: self.tool_schema(tool.metadata.name)
-            for tool in self.tools
+            for tool in self.tool_box.tools
             if getattr(tool, "metadata", None) is not None
         }
         response_ids = {
@@ -831,11 +831,9 @@ class SRAgentInteractive(SRAgent):
         last_stream_emit: dict[int, float] = {}
         latest_stream_updates: dict[int, dict[str, Any]] = {}
 
-        def stream_callback(update: dict[str, Any]) -> None:
+        def callback(update: dict[str, Any]) -> None:
             K = max(1, min(int(update.get("sample", 1)), self.local_sample_size))
             latest_stream_updates[K] = update
-            if self.interaction_manager.is_interrupting:
-                raise InterruptedError("用户强制中止")
             now = time.monotonic()
             if update.get("type") == "delta" and now - last_stream_emit.get(K, 0.0) < 0.08:
                 return
@@ -859,7 +857,7 @@ class SRAgentInteractive(SRAgent):
                     R=R,
                     L=L,
                     C=C,
-                    stream_callback=stream_callback,
+                    callback=callback,
                 )
         except InterruptedError:
             interrupted = True
@@ -874,44 +872,12 @@ class SRAgentInteractive(SRAgent):
                 }
                 if update.get("reasoning"):
                     message["reasoning"] = update["reasoning"]
-                responses.append((message["content"], [], message))
+                responses.append(APICallSample(
+                    content=message["content"],
+                    message_extra={key: value for key, value in message.items() if key != "content"},
+                ))
             usage = {"token": {}, "price": {}}
-        except ModelResponseTruncatedError as exc:
-            response_error = str(exc)
-            self._last_response_was_truncated = True
-            if self.pause_on_truncated_response:
-                self.interaction_manager.request_pause()
-            responses = []
-            for K in range(1, self.local_sample_size + 1):
-                update = latest_stream_updates.get(K, {})
-                if K == exc.sample:
-                    message = dict(exc.partial_message)
-                    calls = list(exc.tool_calls)
-                else:
-                    message = {
-                        "role": "assistant",
-                        "content": update.get("content", ""),
-                    }
-                    calls = []
-                if update.get("reasoning") and not message.get("reasoning"):
-                    message["reasoning"] = update["reasoning"]
-                responses.append((message.get("content", ""), calls, message))
-            usage = exc.usage
-            for name, value in usage["token"].items():
-                self.token_counter.add(name, value)
-            for name, value in usage["price"].items():
-                self.money_counter.add(name, value)
-            self._response_followup_messages.append({
-                "role": "user",
-                "content": (
-                    "[Previous model response was truncated]\n"
-                    f"{exc} The partial response above has been preserved in the conversation. "
-                    "Continue from the available work in the next iteration; do not "
-                    "assume that the unfinished response completed any intended tool call."
-                ),
-            })
         except Exception as exc:
-            public_error = public_model_api_error(exc)
             for K, response_id in response_ids.items():
                 self.interaction_manager.publish_event("assistant_failed", {
                     **latest_stream_updates.get(K, {}),
@@ -919,17 +885,18 @@ class SRAgentInteractive(SRAgent):
                     "coord": coord | {"K": K},
                     "provider": route.provider,
                     "model": route.model,
-                    **public_error,
+                    "error": str(exc),
                 })
             raise
-        self._last_iteration_had_tool_calls = any(
-            calls for _, calls, _ in responses
-        )
+        self._last_iteration_had_tool_calls = any(response.tool_calls for response in responses)
         cumulative_usage = {
             "token": self.token_counter.named_count,
             "price": self.money_counter.named_count,
         }
-        for K, (content, calls, message) in enumerate(responses, 1):
+        for K, response in enumerate(responses, 1):
+            content = response.content
+            calls = response.tool_calls
+            message = response.message
             self.interaction_manager.publish_event(
                 "assistant_failed" if response_error else "assistant_completed",
                 {
@@ -964,7 +931,7 @@ class SRAgentInteractive(SRAgent):
                     "description": tool.metadata.description,
                     "parameters": tool.metadata.parameters or {},
                 }
-                for tool in self.tools
+                for tool in self.tool_box.tools
                 if tool.metadata.name == name
             ),
             {},
@@ -983,14 +950,17 @@ class SRAgentInteractive(SRAgent):
         finish_indices = []
         for index, action in enumerate(actions):
             if action.name == "finish_search" and any(
-                tool.metadata.name == "finish_search" for tool in self.tools
+                tool.metadata.name == "finish_search" for tool in self.tool_box.tools
             ):
                 finish_indices.append(index)
                 continue
             tool_schema = self.tool_schema(action.name)
             self.interaction_manager.publish_event("tool_started", {"call": action, "tool_schema": tool_schema})
             started_at = time.monotonic()
-            tool = next((item for item in self.tools if item.metadata.name == action.name), None)
+            try:
+                tool = self.tool_box[action.name]
+            except KeyError:
+                tool = None
             if tool is None:
                 result = super().execute_action([action])[0]
             else:
@@ -1006,7 +976,7 @@ class SRAgentInteractive(SRAgent):
         ordinary_results = [result for result in results if result is not None]
         for index in finish_indices:
             action = actions[index]
-            tool = next(item for item in self.tools if item.metadata.name == "finish_search")
+            tool = self.tool_box["finish_search"]
             tool_schema = self.tool_schema(action.name)
             self.interaction_manager.publish_event(
                 "tool_started", {"call": action, "tool_schema": tool_schema},
@@ -1047,7 +1017,7 @@ class SRAgentInteractive(SRAgent):
         return [result for result in results if result is not None]
 
     def execute_tool_calls(
-        self, response_list: list[ModelResponse], R: int, L: int, C: int,
+        self, response_list: list[APICallSample], R: int, L: int, C: int,
     ) -> list[list[ToolCallResult]]:
         """Expose the current refinement round to the finish-search stop check."""
         self._stop_check_L = L

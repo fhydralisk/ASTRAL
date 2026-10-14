@@ -7,6 +7,7 @@ from typing import Any
 from sr_harness.core import ToolCall
 from sr_harness.api import BaseAPI
 from sr_harness.api.lmstudio_api import LMStudioAPI
+from sr_harness.parser import BaseParser
 from sr_harness.tools import BaseTool, ToolMetadata
 
 
@@ -52,7 +53,7 @@ class _FakeSession:
 
 def _consume(result):
     chunks = list(result)
-    return chunks, result.return_value
+    return chunks, result
 
 
 def test_lmstudio_factory_and_native_tool_call(monkeypatch):
@@ -62,25 +63,28 @@ def test_lmstudio_factory_and_native_tool_call(monkeypatch):
     _FakeSession.instances = []
     _FakeSession.body = {
         "model": "qwen_qwen3-4b-instruct-2507",
-        "choices": [{
-            "message": {
-                "role": "assistant",
-                "content": "",
-                "tool_calls": [{
-                    "id": "call_1",
-                    "type": "function",
-                    "function": {"name": "demo_tool", "arguments": '{"x": 4}'},
-                }],
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {"name": "demo_tool", "arguments": '{"x": 4}'},
+                        }
+                    ],
+                }
             }
-        }],
+        ],
         "usage": {"prompt_tokens": 10, "completion_tokens": 6, "total_tokens": 16},
     }
 
     api = BaseAPI.create(
         "lmstudio",
         model="qwen_qwen3-4b-instruct-2507",
-        tool_list=[DemoTool],
-        tool_parser_name="openai",
+        tool_box=BaseParser.create("openai", tool_list=[DemoTool()]),
     )
     chunks, returned = _consume(api("use the tool", temperature=0))
 
@@ -97,10 +101,9 @@ def test_lmstudio_factory_and_native_tool_call(monkeypatch):
         id="call_1",
         raw=_FakeSession.body["choices"][0]["message"]["tool_calls"][0],
     )
-    assert chunks[0][1] == [expected]
-    assert returned["tool_calls"] == [expected]
-    assert returned["usage"]["token"] == {"prompt": 10, "answer": 6}
-    assert returned["usage"]["price"] == {"total": 0.0}
+    assert chunks[0].tool_calls == [expected]
+    assert returned.token_usage == {"prompt": 10, "answer": 6}
+    assert returned.money_usage == {"total": 0.0}
 
 
 def test_lmstudio_plain_chat_and_reasoning_usage(monkeypatch):
@@ -121,9 +124,8 @@ def test_lmstudio_plain_chat_and_reasoning_usage(monkeypatch):
     api = LMStudioAPI()
     chunks, returned = _consume(api("ping", max_tokens=32))
 
-    assert chunks[0][0] == "LMSTUDIO_OK"
-    assert returned["contents"] == ["LMSTUDIO_OK"]
-    assert returned["usage"]["token"] == {"prompt": 16, "answer": 5, "reason": 2}
+    assert chunks[0].content == "LMSTUDIO_OK"
+    assert returned.token_usage == {"prompt": 16, "answer": 5, "reason": 2}
 
 
 def test_lmstudio_rejects_invalid_endpoint():

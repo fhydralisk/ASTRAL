@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 from sr_harness.agents.data_preparation_agent import DataPreparationAgent
 from sr_harness.agents.evaluator_construction_agent import EvaluatorConstructionAgent
 from sr_harness.agents.sr_agent_interactive import SRAgentInteractive
-from sr_harness.core import APICallResult, SearchRunState, ToolCall, load_context_data
+from sr_harness.core import APICallSample, APICallSummary, SearchRunState, ToolCall, load_context_data
 from sr_harness.api import BaseAPI
 from sr_harness.tools import BaseTool
 from sr_harness.web.app import create_app
@@ -29,6 +29,14 @@ from sr_harness.web.session import InteractiveSession
 class CancellableFakeAPI:
     def cancel(self):
         return None
+
+
+def api_sample(message, tool_calls=None):
+    return APICallSample(
+        content=message.get("content"),
+        tool_calls=tool_calls or [],
+        message_extra={key: value for key, value in message.items() if key != "content"},
+    )
 
 
 @pytest.fixture
@@ -58,6 +66,13 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert favicon.status_code == 200
     assert favicon.headers['content-type'].startswith('image/svg+xml')
     assert b'<svg' in favicon.content
+    qwen_logo = client.get('/static/brands/qwen.svg')
+    assert qwen_logo.status_code == 200
+    assert qwen_logo.headers['content-type'].startswith('image/svg+xml')
+    assert b'<svg' in qwen_logo.content
+    siliconflow_logo = client.get('/static/brands/siliconflow.png')
+    assert siliconflow_logo.status_code == 200
+    assert siliconflow_logo.headers['content-type'].startswith('image/png')
     assert 'id="data-tab"' in page.text
     assert 'id="data-preparation"' in page.text
     assert 'id="data-setup"' in page.text
@@ -1522,25 +1537,17 @@ def test_data_agent_model_test_checks_completion_and_tool_call(platform, monkeyp
 
             def generate():
                 if self.requests == 1:
-                    yield {
-                        'content': 'SRHARNESS_OK',
-                        'tool_call': [],
-                        'message': {'role': 'assistant', 'content': 'SRHARNESS_OK'},
-                    }
+                    yield api_sample({'role': 'assistant', 'content': 'SRHARNESS_OK'})
                 else:
                     call = ToolCall(
                         'report_model_test',
                         {'answer': 'SRHARNESS_TOOL_OK'},
                         id='model-test',
                     )
-                    yield {
-                        'content': '',
-                        'tool_call': [call],
-                        'message': {'role': 'assistant', 'content': ''},
-                    }
-                return {'usage': {'token': {}, 'price': {}}, 'contents': [], 'tool_calls': []}
+                    yield api_sample({'role': 'assistant', 'content': ''}, [call])
+                return {'token_usage': {}, 'money_usage': {}}
 
-            return APICallResult(generate())
+            return APICallSummary(generate())
 
     fake = FakeAPI()
     created = {}
@@ -1567,8 +1574,8 @@ def test_data_agent_model_test_checks_completion_and_tool_call(platform, monkeyp
     }
     assert created['provider'] == 'deepseek'
     assert created['model'] == 'deepseek-v4-flash-0731'
-    assert created['tool_parser_name'] == 'openai'
-    assert created['tool_list'][0].metadata.name == 'report_model_test'
+    assert created['tool_box'].native_tool_calls is True
+    assert created['tool_box'].tools[0].metadata.name == 'report_model_test'
 
     fake.requests = 0
     response = client.post('/api/session/test', json={
@@ -1587,7 +1594,7 @@ def test_data_agent_model_test_checks_completion_and_tool_call(platform, monkeyp
     }
     assert created['provider'] == 'openrouter'
     assert created['model'] == 'openai/gpt-4.1-mini'
-    assert created['tool_parser_name'] == 'openai'
+    assert created['tool_box'].native_tool_calls is True
 
 
 def test_evaluator_configuration_test_and_restricted_agent(platform, monkeypatch):
@@ -1844,13 +1851,13 @@ def test_data_agent_validates_prepared_excel_data_for_shared_context(platform, m
                             'name': call.name, 'arguments': '{}',
                         },
                     }]}
-                    yield {'content': message['content'], 'tool_call': [call], 'message': message}
+                    yield api_sample(message, [call])
                 else:
                     message = {'role': 'assistant', 'content': '数据已经准备好。'}
-                    yield {'content': message['content'], 'tool_call': [], 'message': message}
-                return {'usage': {'token': {}, 'price': {}}, 'responses': []}
+                    yield api_sample(message)
+                return {'token_usage': {}, 'money_usage': {}}
 
-            return APICallResult(generate())
+            return APICallSummary(generate())
 
     fake = FakeDataAPI()
     api_options = {}
@@ -1916,17 +1923,13 @@ def test_data_agent_has_no_turn_limit_and_keeps_cumulative_turns(platform, monke
                             'function': {'name': call.name, 'arguments': '{"command":"ls"}'},
                         }],
                     }
-                    yield {
-                        'content': message['content'],
-                        'tool_call': [call],
-                        'message': message,
-                    }
+                    yield api_sample(message, [call])
                 else:
                     message = {'role': 'assistant', 'content': 'Finished.'}
-                    yield {'content': 'Finished.', 'tool_call': [], 'message': message}
-                return {'usage': {'token': {}, 'price': {}}, 'responses': []}
+                    yield api_sample(message)
+                return {'token_usage': {}, 'money_usage': {}}
 
-            return APICallResult(generate())
+            return APICallSummary(generate())
 
     fake = FakeDataAPI()
     monkeypatch.setattr(BaseAPI, 'create', lambda *args, **kwargs: fake)
@@ -1981,9 +1984,9 @@ def test_real_search_loop_with_fake_llm(platform, monkeypatch):
                            'tool_calls': [{'id': 'test', 'type': 'function', 'function': {
                                'name': call.name,
                                'arguments': '{"f":"x1**2 + 2*x1*x2 + 1"}'}}]}
-                yield {'content': message['content'], 'tool_call': [call], 'message': message}
-                return {'usage': {'token': {}, 'price': {}}, 'responses': []}
-            return APICallResult(generate())
+                yield api_sample(message, [call])
+                return {'token_usage': {}, 'money_usage': {}}
+            return APICallSummary(generate())
 
     def create(provider, model, **kwargs):
         models.append((provider, model))
@@ -2007,7 +2010,7 @@ def test_real_search_loop_with_fake_llm(platform, monkeypatch):
     assert len(prompts) == 3
     assert models[-1] == ('openai', 'test-next-model')
     assert session.settings['llm_model'] == 'test-next-model'
-    assert [tool.metadata.name for tool in session.sr_agent.tools] == ['evaluate_formula']
+    assert [tool.metadata.name for tool in session.sr_agent.tool_box.tools] == ['evaluate_formula']
     assert prompts[0][:2] == [
         {'role': 'system', 'content': 'Custom system prompt'},
         {'role': 'user', 'content': 'Custom user prompt'},
@@ -2044,10 +2047,10 @@ def test_advance_to_next_branch_and_restart(platform, monkeypatch):
 
             def generate():
                 message = {'role': 'assistant', 'content': f'round {calls}'}
-                yield {'content': message['content'], 'tool_call': [], 'message': message}
-                return {'usage': {'token': {}, 'price': {}}, 'responses': []}
+                yield api_sample(message)
+                return {'token_usage': {}, 'money_usage': {}}
 
-            return APICallResult(generate())
+            return APICallSummary(generate())
 
     monkeypatch.setattr(BaseAPI, 'create', lambda *args, **kwargs: AdvancingAPI())
     response = client.post('/api/session/start', json={
@@ -2088,10 +2091,10 @@ def test_tool_free_search_response_pauses_without_question_card(platform, monkey
 
             def generate():
                 message = {'role': 'assistant', 'content': f'round {turn}'}
-                yield {'content': message['content'], 'tool_call': [], 'message': message}
-                return {'usage': {'token': {}, 'price': {}}, 'responses': []}
+                yield api_sample(message)
+                return {'token_usage': {}, 'money_usage': {}}
 
-            return APICallResult(generate())
+            return APICallSummary(generate())
 
     class StopReviewerAPI(CancellableFakeAPI):
         def __call__(self, prompt, **kwargs):
@@ -2100,15 +2103,15 @@ def test_tool_free_search_response_pauses_without_question_card(platform, monkey
                     'role': 'assistant',
                     'content': '{"should_stop": true, "reason": "final answer"}',
                 }
-                yield {'content': message['content'], 'tool_call': [], 'message': message}
-                return {'usage': {'token': {}, 'price': {}}, 'responses': []}
-            return APICallResult(generate())
+                yield api_sample(message)
+                return {'token_usage': {}, 'money_usage': {}}
+            return APICallSummary(generate())
 
     monkeypatch.setattr(
         BaseAPI,
         'create',
         lambda *args, **kwargs: (
-            StopReviewerAPI() if kwargs.get('tool_list') is None else YieldingAPI()
+                StopReviewerAPI() if kwargs.get('tool_box') is None else YieldingAPI()
         ),
     )
     response = client.post('/api/session/start', json={'max_refinement_depth': 3})
@@ -2149,7 +2152,8 @@ def test_context_data_search_failure_state(platform, monkeypatch):
     assert list(seen['y']) == ['y']
     assert seen['description'] == 'Fit y'
     assert session.state == 'failed'
-    assert client.get('/api/session').json()['result']['error'] == 'test provider unavailable'
+    result = client.get('/api/session').json()['result']
+    assert result['error'] == 'test provider unavailable'
     assert session.run_state is not None
     assert session.run_state.run_id == session.run_id
     assert session.run_state.node_count == 0
@@ -2167,7 +2171,7 @@ def test_current_tree_never_scans_history(platform):
     )
     assert state.latest_coordinate is None
     state.register_iteration(
-        [('', [], {'role': 'assistant', 'content': ''})],
+        [api_sample({'role': 'assistant', 'content': ''})],
         [[]],
         (),
         [],

@@ -1,106 +1,128 @@
 # Copyright (c) 2024-present, Yumeow. Licensed under the MIT License.
-import os
-import logging
-from openai import OpenAI
-from collections import defaultdict
-from typing import Any, Generator, List, Dict
-from .base_api import BaseAPI
-from ..utils import log_exception
-
-_logger = logging.getLogger(f"sr_harness.{__name__}")
+import httpx
+from openai import DefaultHttpxClient, OpenAI
+from typing import Any
+from .base_api import BaseAPI, ProgressCallback, ProviderSampleResult
+from .utils import RemoteModelCatalog
+from ..core import APICallSample, ToolCall
 
 
 @BaseAPI.register("deepseek")
 class DeepSeekAPI(BaseAPI):
-    """DeepSeek provider adapter."""
-    supported_models = [
-        "deepseek-chat",
-        "deepseek-reasoner",
-        "deepseek-v4-flash",
-        "deepseek-v4-pro",
-    ]
+    """DeepSeek adapter accepting models in its live provider catalog."""
 
-    def __init__(self, model: str = 'deepseek-chat', **kwargs: Any) -> None:
+    def __init__(self, model: str = "deepseek-chat", **kwargs: Any) -> None:
         super().__init__(model=model, **kwargs)
+        self._model_catalog = RemoteModelCatalog(
+            lambda url: httpx.Client(proxy=self.proxy_url(url), trust_env=False)
+        )
 
-    def _request(self, messages: List[Dict[str, str]], n=1, max_tokens=4096, temperature=1) -> Generator[str, None, Dict]:
-        ## Ensure this is a generator
-        yield from []
-        api_key = self.getenv("DEEPSEEK_API_KEY")
+    def format_response(
+        self, message: dict[str, Any], tool_calls: list[ToolCall], content: str | None = None
+    ) -> APICallSample:
+        """Convert one DeepSeek message into the public response contract."""
+        return self._build_response(message, tool_calls, content)
+
+    @property
+    def model_list(self) -> list[str]:
+        """Return the current DeepSeek model catalog."""
+        endpoint = self.get_env("DEEPSEEK_ENDPOINT", "https://api.deepseek.com")
+        return self._model_catalog.get(
+            f"{endpoint.rstrip('/')}/models",
+            description="DeepSeek model catalog",
+            api_key=self.get_env("DEEPSEEK_API_KEY", required=True),
+        )
+
+    def _request_sample(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        sample_index: int,
+        max_tokens=4096,
+        temperature=1,
+        callback: ProgressCallback | None = None,
+    ) -> ProviderSampleResult:
+        endpoint = self.get_env("DEEPSEEK_ENDPOINT", "https://api.deepseek.com")
         client = OpenAI(
-            api_key=api_key,
-            base_url="https://api.deepseek.com",
-            http_client=self.openai_http_client(),
+            api_key=self.get_env("DEEPSEEK_API_KEY", required=True),
+            base_url=endpoint,
+            http_client=DefaultHttpxClient(
+                proxy=self.proxy_url(endpoint),
+                trust_env=False,
+            ),
         )
         payload = {
             "model": self.model,
-            "messages": messages,
-            "stream": False,
+            "messages": [
+                {
+                    key: value
+                    for key, value in message.items()
+                    if not (key == "tool_calls" and value == [])
+                }
+                for message in messages
+            ],
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
-        if not self.tool_list:
+        if self.tool_box is None:
             pass
-        elif self.tool_parser:
-            payload['messages'] = self.add_tool_description(payload['messages'])
-        else:
-            payload["tools"] = self.tool_description_json
-            payload["tool_choice"] = "auto"
-        for idx, message in enumerate(payload["messages"]):
-            if 'tool_calls' in message and message['tool_calls'] == []:
-                payload["messages"][idx] = {**payload["messages"][idx]}
-                payload["messages"][idx].pop('tool_calls')
-
-        details = []
-        for idx in range(1, n + 1):
-            try:
-                response = client.chat.completions.create(**payload)
-            except Exception as e:
-                _logger.error(f"Error requesting {type(self).__name__}({self.model}) since {log_exception(e)}")
-                continue
-            response_dict = response.to_dict()
-
-            token_usage = {}
-            token_usage['prompt'] = (prompt_tokens := response.usage.prompt_tokens)
-            token_usage['answer'] = (answer_tokens := response.usage.completion_tokens)
-            if (other := response.usage.total_tokens - prompt_tokens - answer_tokens) > 0:
-                token_usage['other'] = other
-            price_usage = {}
-            price_usage['prompt'] = 0.28 / 1e6 * token_usage['prompt']
-            price_usage['answer'] = 0.42 / 1e6 * token_usage['answer']
-            if 'other' in token_usage:
-                price_usage['other']  = 0.42 / 1e6 * token_usage['other']
-
-            message = response.choices[0].message.to_dict()
-            content = message.get("content") or ""
-            if not self.tool_list:
-                tool_call = []
-            elif self.tool_parser:
-                tool_call = self.tool_parser.parse_response(content)
+        elif not self.tool_box.native_tool_calls:
+            description = (
+                "Use the following tools when a tool call is needed. "
+                "Return tool calls in the specified format.\n\n"
+                f"{self.tool_box.format_tools()}"
+            )
+            if payload["messages"][0]["role"] in {"system", "developer"}:
+                first = payload["messages"][0]
+                payload["messages"][0] = {
+                    **first,
+                    "content": f"{first['content']}\n\n{description}",
+                }
             else:
-                tool_call = self.normalize_openai_tool_calls(message.get("tool_calls"))
+                payload["messages"].insert(0, {"role": "system", "content": description})
+        else:
+            tools = self.tool_box.format_tools()
+            if not isinstance(tools, list):
+                raise TypeError("Native tool parser must return JSON tool descriptions")
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
 
-            token_usage = {"prompt": prompt_tokens, "answer": answer_tokens}
-            details.append({
-                "content": content,
-                "tool_call": tool_call,
-                "token_usage": token_usage,
-                "price_usage": price_usage,
-                "response": response_dict,
-            })
-            yield {'content': content, 'tool_call': tool_call, 'message': message}
-
-        token_usage = defaultdict(float)
-        for detail in details:
-            for key, value in detail['token_usage'].items():
-                token_usage[key] += value
-        price_usage = defaultdict(float)
-        for detail in details:
-            for key, value in detail['price_usage'].items():
-                price_usage[key] += value
-        return {
-            "usage": {"token": token_usage, "price": price_usage},
-            "contents": [detail['content'] for detail in details],
-            "tool_calls": [detail['tool_call'] for detail in details],
-            "responses": [detail['response'] for detail in details],
+        completion, raw_response, message, content = self.openai_chat_completion(
+            client,
+            payload,
+            sample=sample_index,
+            callback=callback,
+        )
+        tool_calls = self.parse_tool_calls(message, content)
+        token_usage = self.openai_token_usage(completion, other_key="other")
+        money_usage = {
+            "prompt": 0.28 / 1e6 * token_usage.get("prompt", 0),
+            "answer": 0.42 / 1e6 * token_usage.get("answer", 0),
         }
+        if "other" in token_usage:
+            money_usage["other"] = 0.42 / 1e6 * token_usage["other"]
+        choices = raw_response.get("choices") or [{}]
+        finish_reason = raw_response.get("finish_reason") or choices[0].get("finish_reason")
+        if finish_reason == "length":
+            partial_message = dict(message)
+            partial_message.pop("tool_calls", None)
+            return ProviderSampleResult(
+                response=self.format_response(partial_message, [], content),
+                token_usage=token_usage,
+                money_usage=money_usage,
+                raw_response=raw_response,
+                error=(
+                    f"DeepSeekAPI({self.model}) exhausted max_tokens={max_tokens}; "
+                    "increase the Agent's maximum output length and retry."
+                ),
+            )
+        if not (tool_calls or content.strip()):
+            raise ValueError(
+                f"DeepSeekAPI({self.model}) returned empty content and no usable tool calls."
+            )
+        return ProviderSampleResult(
+            response=self.format_response(message, tool_calls, content),
+            token_usage=token_usage,
+            money_usage=money_usage,
+            raw_response=raw_response,
+        )

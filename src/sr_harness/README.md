@@ -33,12 +33,13 @@ SRAgent 只在安全迭代边界刷新划分并把变量变化写入原有对话
 
 SRAgent 在运行时组织以下核心组件：
 
-`tools: List[BaseTool]`：可用的工具实例列表。每个工具接收调用参数，返回一个 `ToolCallResult`。
+`tool_box: BaseParser`：同时持有可执行工具实例，并负责工具描述与工具调用解析。
+- `tool_box.tools` 是 `List[BaseTool]`；每个工具接收调用参数，返回一个 `ToolCallResult`。
 - 工具的详细开发指南见 [`tools/README.md`](tools/README.md)。
 - 工具的调用流程如下：
   1. 初始化 SRAgent 时，工具被实例化并拿到运行时上下文（数据、目标变量等）。
   2. LLM 产生工具调用（名称 + 参数）
-  3. Agent 根据名称在 `tools` 中查找对应工具实例
+  3. Agent 通过 `tool_box[name]` 查找对应工具实例
   4. 调用 `tool(**params)`，返回 `ToolCallResult`（包含 `ok`、`result`、`result_str`、`meta_data`）
 
 `api: BaseAPI`：LLM API 实例，负责与 LLM 服务交互。
@@ -47,9 +48,12 @@ SRAgent 在运行时组织以下核心组件：
   llm_result = self.api(messages, n=local_sample_size)
   ```
 - `messages` 是对话消息列表，格式为 `[{'role': 'system', 'content': ...}, {'role': 'user', 'content': ...}, ...]`。
-- `llm_result` 是一个 `APICallResult` 对象，可迭代获取 LLM 的响应：
+- `llm_result` 是一次完整调用的 `APICallSummary`，迭代时产生零到 `n` 个 `APICallSample`：
   ```python
-  for content, tool_calls, message in llm_result:
+  for sample in llm_result:
+      content = sample.content
+      tool_calls = sample.tool_calls
+      message = sample.message
       # content: LLM 响应中的文字内容
       # tool_calls: 从响应中解析出的工具调用列表 (List[ToolCall])
       #   - 文本解析模式 (text/json): 从 content 中解析
@@ -58,7 +62,10 @@ SRAgent 在运行时组织以下核心组件：
   ```
 - 迭代完成后，`llm_result` 中保留用量统计：
   ```python
-  llm_result.usage   # {'token': {...}, 'price': {...}}
+  llm_result.token_usage
+  llm_result.money_usage
+  llm_result.ok
+  llm_result.error
   ```
 
 ## SRAgent 单次迭代流程
@@ -85,7 +92,7 @@ src/sr_harness/
 ├── api/                         # BaseAPI 与各 Provider API
 │   ├── base_api.py
 │   └── *_api.py                 # OpenAI、DeepSeek、Gemini 等实现
-├── core/                        # APICallResult、ToolCall 和搜索状态等核心结构
+├── core/                        # APICallSample、APICallSummary、ToolCall 和搜索状态等核心结构
 │   ├── api.py
 │   ├── context.py               # AgentContext 共享研究上下文
 │   ├── search.py

@@ -84,17 +84,16 @@ class SubagentTool(BaseTool):
         api = BaseAPI.create(
             provider,
             model=model,
-            tool_list=None,
         )
         result = api(messages, n=1, max_tokens=getattr(self.context.args, "llm_max_tokens", 4096))
         content = ""
-        for content, _, _ in result:
-            pass
+        for response in result:
+            content = response.content or ""
         return {
             "mode": mode,
             "objective": objective,
             "content": content,
-            "usage": result.usage,
+            "usage": {"token": result.token_usage, "price": result.money_usage},
         }
 
     def _messages(

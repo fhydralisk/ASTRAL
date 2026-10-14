@@ -21,7 +21,7 @@ from dotenv import dotenv_values, set_key, unset_key
 from ..agents.data_preparation_agent import DataPreparationAgent
 from ..agents.evaluator_construction_agent import EvaluatorConstructionAgent
 from ..agents.sr_agent_interactive import SRAgentInteractive
-from ..api import BaseAPI, public_model_api_error
+from ..api import BaseAPI
 from ..core import AgentContext, SearchRunState, json_value, load_context_data
 from ..evaluator import GraphEvaluator, load_custom_evaluator
 from ..evaluator.load_custom_evaluator import (
@@ -32,6 +32,7 @@ from ..evaluator.load_custom_evaluator import (
     evaluator_filename,
     evaluator_source,
 )
+from ..parser import BaseParser
 from ..runtime import InteractionManager, ModelRouter, SRInteractionManager
 from ..runtime.network import proxy_environment
 from ..skills import SkillManager
@@ -41,26 +42,55 @@ from .demo_data import build_demo
 
 
 _logger = logging.getLogger(__name__)
-
 RUNTIME_SETTING_NAMES = (
-    "llm_provider", "llm_model", "strong_llm_provider", "strong_llm_model",
-    "auto_routing", "tool_parser", "llm_max_tokens", "tools", "skills",
-    "local_sample_size", "max_refinement_depth", "global_width",
-    "max_restart_loop", "restart_top_k", "max_workers", "validation_fraction",
-    "split_by", "split_ood_variable", "split_random_state", "ranking_metric", "larger_is_better",
-    "force_initial_diagnostics", "pause_on_truncated_response",
-    "tool_free_stop_review_rounds", "stop_guard_mode", "stop_guard_metric",
-    "stop_guard_threshold", "stop_guard_split", "stop_guard_larger_is_better",
+    "llm_provider",
+    "llm_model",
+    "strong_llm_provider",
+    "strong_llm_model",
+    "auto_routing",
+    "tool_parser",
+    "llm_max_tokens",
+    "tools",
+    "skills",
+    "local_sample_size",
+    "max_refinement_depth",
+    "global_width",
+    "max_restart_loop",
+    "restart_top_k",
+    "max_workers",
+    "validation_fraction",
+    "split_by",
+    "split_ood_variable",
+    "split_random_state",
+    "ranking_metric",
+    "larger_is_better",
+    "force_initial_diagnostics",
+    "pause_on_truncated_response",
+    "tool_free_stop_review_rounds",
+    "stop_guard_mode",
+    "stop_guard_metric",
+    "stop_guard_threshold",
+    "stop_guard_split",
+    "stop_guard_larger_is_better",
 )
 
 DATA_AGENT_SETTING_NAMES = (
-    "llm_provider", "llm_model", "tool_parser", "llm_max_tokens",
-    "tools", "skills", "proxy",
+    "llm_provider",
+    "llm_model",
+    "tool_parser",
+    "llm_max_tokens",
+    "tools",
+    "skills",
+    "proxy",
 )
 
 EVALUATOR_CONTEXT_SETTING_NAMES = (
-    "validation_fraction", "split_random_state", "split_by",
-    "split_ood_variable", "ranking_metric", "larger_is_better",
+    "validation_fraction",
+    "split_random_state",
+    "split_by",
+    "split_ood_variable",
+    "ranking_metric",
+    "larger_is_better",
 )
 
 
@@ -72,14 +102,23 @@ class SessionStartError(RuntimeError):
         self.run_id = run_id
         self.started = started
 
+
 HIDDEN_CAPABILITY_TOOLS = frozenset({"code_executor"})
 EVALUATOR_DEFAULT_TOOLS = (
-    "read_source", "workspace_shell", "workspace_code_executor",
-    "validate_evaluator", "read_skill",
+    "read_source",
+    "workspace_shell",
+    "workspace_code_executor",
+    "validate_evaluator",
+    "read_skill",
 )
-MESSAGE_ACCEPTING_INTERACTION_STATES = frozenset({
-    "running", "pausing", "interrupting", "paused",
-})
+MESSAGE_ACCEPTING_INTERACTION_STATES = frozenset(
+    {
+        "running",
+        "pausing",
+        "interrupting",
+        "paused",
+    }
+)
 
 PROVIDER_API_KEY_VARIABLES = {
     "openrouter": "OPENROUTER_API_KEY",
@@ -200,7 +239,8 @@ class InteractiveSession:
             "llm_max_tokens": self.settings["llm_max_tokens"],
             "tools": list(DataPreparationAgent.DEFAULT_TOOLS),
             "skills": [
-                name for name in self._capability_skill_manager.load_skills()
+                name
+                for name in self._capability_skill_manager.load_skills()
                 if name not in DataPreparationAgent.DEFAULT_EXCLUDED_SKILLS
             ],
             "proxy": configured_proxy,
@@ -209,18 +249,21 @@ class InteractiveSession:
             key: self.data_agent_settings[key]
             for key in ("llm_provider", "llm_model", "tool_parser", "llm_max_tokens", "proxy")
         }
-        self.evaluator_agent_settings.update({
-            # This model reliably reaches native tool calls when constructing an
-            # evaluator; the general SR agent keeps the user's configured model.
-            "llm_provider": "openrouter",
-            "llm_model": "qwen/qwen3.5-flash-02-23",
-            "tools": list(EVALUATOR_DEFAULT_TOOLS),
-            "skills": [
-                name for name in self._capability_skill_manager.load_skills()
-                if name != "discover-symbolic-laws"
-            ],
-            "llm_max_tokens": max(8192, self.data_agent_settings["llm_max_tokens"]),
-        })
+        self.evaluator_agent_settings.update(
+            {
+                # This model reliably reaches native tool calls when constructing an
+                # evaluator; the general SR agent keeps the user's configured model.
+                "llm_provider": "openrouter",
+                "llm_model": "qwen/qwen3.5-flash-02-23",
+                "tools": list(EVALUATOR_DEFAULT_TOOLS),
+                "skills": [
+                    name
+                    for name in self._capability_skill_manager.load_skills()
+                    if name != "discover-symbolic-laws"
+                ],
+                "llm_max_tokens": max(8192, self.data_agent_settings["llm_max_tokens"]),
+            }
+        )
         self.pending_settings = None
         self.initial_prompt = initial_prompt
         self.prompt_overrides = {}
@@ -259,7 +302,9 @@ class InteractiveSession:
             topk = (
                 []
                 if self.run_state is None
-                else json_value([record.display_dict() for record in self.run_state.ranked_candidates()])
+                else json_value(
+                    [record.display_dict() for record in self.run_state.ranked_candidates()]
+                )
             )
             return {
                 "state": self.state,
@@ -292,42 +337,61 @@ class InteractiveSession:
                 if self.data_agent is not None
                 else self._restored_data_agent_buffer
             )
-            return json_value({
-                "version": 1,
-                "run_id": self.run_id,
-                "state": self.state,
-                "settings": self.settings,
-                "pending_settings": self.pending_settings,
-                "data_agent_settings": self.data_agent_settings,
-                "evaluator_agent_settings": self.evaluator_agent_settings,
-                "initial_prompt": self.initial_prompt,
-                "prompt_overrides": self.prompt_overrides,
-                "workspace_lock_rules": self.workspace_manager.lock_rules,
-                "variable_descriptions": self.variable_descriptions,
-                "result": self.result,
-                "data_state": self.data_state,
-                "data_result": self.data_result,
-                "data_agent_buffer": data_agent_buffer,
-                "evaluator_agent_state": self.evaluator_agent_state,
-                "evaluator_agent_result": self.evaluator_agent_result,
-                "context_target": self.context.target,
-                "evaluator": self._evaluator_metadata(),
-                "run_state": self.run_state.export_state() if self.run_state is not None else None,
-                "interactions": {
-                    "search": self.sr_interaction_manager.export_state(),
-                    "data": self.data_interaction_manager.export_state(),
-                    "evaluator": self.evaluator_interaction_manager.export_state(),
-                },
-            })
+            return json_value(
+                {
+                    "version": 1,
+                    "run_id": self.run_id,
+                    "state": self.state,
+                    "settings": self.settings,
+                    "pending_settings": self.pending_settings,
+                    "data_agent_settings": self.data_agent_settings,
+                    "evaluator_agent_settings": self.evaluator_agent_settings,
+                    "initial_prompt": self.initial_prompt,
+                    "prompt_overrides": self.prompt_overrides,
+                    "workspace_lock_rules": self.workspace_manager.lock_rules,
+                    "variable_descriptions": self.variable_descriptions,
+                    "result": self.result,
+                    "data_state": self.data_state,
+                    "data_result": self.data_result,
+                    "data_agent_buffer": data_agent_buffer,
+                    "evaluator_agent_state": self.evaluator_agent_state,
+                    "evaluator_agent_result": self.evaluator_agent_result,
+                    "context_target": self.context.target,
+                    "evaluator": self._evaluator_metadata(),
+                    "run_state": self.run_state.export_state()
+                    if self.run_state is not None
+                    else None,
+                    "interactions": {
+                        "search": self.sr_interaction_manager.export_state(),
+                        "data": self.data_interaction_manager.export_state(),
+                        "evaluator": self.evaluator_interaction_manager.export_state(),
+                    },
+                }
+            )
 
     def restore_persistent_state(self, snapshot: dict[str, Any]) -> None:
         """Restore a durable snapshot and terminate operations lost on restart."""
         expected_fields = {
-            "version", "run_id", "state", "settings", "pending_settings",
-            "data_agent_settings", "evaluator_agent_settings", "initial_prompt",
-            "prompt_overrides", "workspace_lock_rules", "variable_descriptions", "result", "data_state",
-            "data_result", "data_agent_buffer", "evaluator_agent_state",
-            "evaluator_agent_result", "context_target", "evaluator", "run_state",
+            "version",
+            "run_id",
+            "state",
+            "settings",
+            "pending_settings",
+            "data_agent_settings",
+            "evaluator_agent_settings",
+            "initial_prompt",
+            "prompt_overrides",
+            "workspace_lock_rules",
+            "variable_descriptions",
+            "result",
+            "data_state",
+            "data_result",
+            "data_agent_buffer",
+            "evaluator_agent_state",
+            "evaluator_agent_result",
+            "context_target",
+            "evaluator",
+            "run_state",
             "interactions",
         }
         if set(snapshot) != expected_fields:
@@ -339,11 +403,18 @@ class InteractiveSession:
             restored_settings = dict(snapshot["settings"])
             default_settings = self.settings.copy()
             legacy_stop_fields = {
-                "tool_free_stop_review_rounds", "stop_guard_mode", "stop_guard_metric",
-                "stop_guard_threshold", "stop_guard_split", "stop_guard_larger_is_better",
+                "tool_free_stop_review_rounds",
+                "stop_guard_mode",
+                "stop_guard_metric",
+                "stop_guard_threshold",
+                "stop_guard_split",
+                "stop_guard_larger_is_better",
             }
             missing_settings = set(default_settings) - set(restored_settings)
-            if set(restored_settings) - set(default_settings) or not missing_settings <= legacy_stop_fields:
+            if (
+                set(restored_settings) - set(default_settings)
+                or not missing_settings <= legacy_stop_fields
+            ):
                 raise ValueError("Persisted settings do not match the current session schema")
             for name in missing_settings:
                 restored_settings[name] = default_settings[name]
@@ -355,7 +426,9 @@ class InteractiveSession:
             self.data_agent_settings = restored_data_settings
             restored_evaluator_settings = dict(snapshot["evaluator_agent_settings"])
             if set(restored_evaluator_settings) != set(self.evaluator_agent_settings):
-                raise ValueError("Persisted evaluator-agent settings do not match the current schema")
+                raise ValueError(
+                    "Persisted evaluator-agent settings do not match the current schema"
+                )
             self.evaluator_agent_settings = restored_evaluator_settings
             self.initial_prompt = str(snapshot["initial_prompt"])
             self.prompt_overrides = dict(snapshot["prompt_overrides"])
@@ -385,11 +458,13 @@ class InteractiveSession:
                     raise ValueError("Persisted context target is missing from context.data")
                 self.context.target = target
                 if self.variable_descriptions:
-                    self.context.variable_descriptions.update({
-                        name: description
-                        for name, description in self.variable_descriptions.items()
-                        if name in self.context.data
-                    })
+                    self.context.variable_descriptions.update(
+                        {
+                            name: description
+                            for name, description in self.variable_descriptions.items()
+                            if name in self.context.data
+                        }
+                    )
 
             evaluator = snapshot["evaluator"]
             if not isinstance(evaluator, dict):
@@ -425,7 +500,13 @@ class InteractiveSession:
             )
             saved_state = str(snapshot["state"])
             if saved_state not in {
-                "idle", "starting", "running", "completed", "early_stopped", "interrupted", "failed",
+                "idle",
+                "starting",
+                "running",
+                "completed",
+                "early_stopped",
+                "interrupted",
+                "failed",
             }:
                 raise ValueError(f"Unknown persisted session state: {saved_state!r}")
             if search_interrupted or saved_state in {"starting", "running"}:
@@ -440,7 +521,12 @@ class InteractiveSession:
                 self.state = saved_state
             saved_data_state = str(snapshot["data_state"])
             if saved_data_state not in {
-                "idle", "running", "stopping", "stopped", "completed", "failed",
+                "idle",
+                "running",
+                "stopping",
+                "stopped",
+                "completed",
+                "failed",
             }:
                 raise ValueError(f"Unknown persisted data-agent state: {saved_data_state!r}")
             self.data_state = (
@@ -450,9 +536,16 @@ class InteractiveSession:
             )
             saved_evaluator_state = str(snapshot["evaluator_agent_state"])
             if saved_evaluator_state not in {
-                "idle", "running", "stopping", "stopped", "completed", "failed",
+                "idle",
+                "running",
+                "stopping",
+                "stopped",
+                "completed",
+                "failed",
             }:
-                raise ValueError(f"Unknown persisted evaluator-agent state: {saved_evaluator_state!r}")
+                raise ValueError(
+                    f"Unknown persisted evaluator-agent state: {saved_evaluator_state!r}"
+                )
             self.evaluator_agent_state = (
                 "stopped"
                 if evaluator_interrupted or saved_evaluator_state in {"running", "stopping"}
@@ -469,9 +562,7 @@ class InteractiveSession:
         if revision == self._manifest_description_revision and not strict:
             return
         try:
-            with self.workspace_manager.safe_open(
-                manifest_path, "r", encoding="utf-8"
-            ) as stream:
+            with self.workspace_manager.safe_open(manifest_path, "r", encoding="utf-8") as stream:
                 manifest = json.load(stream)
             descriptions = {}
             for section in ("variables", "axes"):
@@ -479,21 +570,15 @@ class InteractiveSession:
                     description = spec["description"]
                     if not isinstance(description, str):
                         if strict:
-                            raise ValueError(
-                                f"{section}.{name}.description must be a string"
-                            )
+                            raise ValueError(f"{section}.{name}.description must be a string")
                         return
                     description = description.strip()
                     if strict and not description:
-                        raise ValueError(
-                            f"{section}.{name}.description must not be empty"
-                        )
+                        raise ValueError(f"{section}.{name}.description must not be empty")
                     descriptions[name] = description
         except (KeyError, TypeError, json.JSONDecodeError, OSError) as exc:
             if strict:
-                raise ValueError(
-                    f"Invalid context.data manifest descriptions: {exc}"
-                ) from exc
+                raise ValueError(f"Invalid context.data manifest descriptions: {exc}") from exc
             return
         changed = False
         for name in self.context.data:
@@ -542,17 +627,19 @@ class InteractiveSession:
                         source = stream.read()
                 except OSError:
                     source = ""
-                catalog.append({
-                    "id": f"custom:{file.name}",
-                    "label": file.stem,
-                    "label_en": file.stem,
-                    "source": source,
-                    "abstract": False,
-                    "custom": True,
-                    "file": str(file),
-                    "invalid": True,
-                    "error": str(exc),
-                })
+                catalog.append(
+                    {
+                        "id": f"custom:{file.name}",
+                        "label": file.stem,
+                        "label_en": file.stem,
+                        "source": source,
+                        "abstract": False,
+                        "custom": True,
+                        "file": str(file),
+                        "invalid": True,
+                        "error": str(exc),
+                    }
+                )
                 continue
             class_name = type(evaluator).__name__
             catalog.append(
@@ -637,7 +724,7 @@ class InteractiveSession:
         if builtin_source is not None and source == builtin_source:
             evaluator = create_builtin_evaluator(evaluator_id)
             source = builtin_source
-            custom_name = custom_file = None
+            custom_name = None
         elif (
             selected_item is not None
             and selected_item.get("custom")
@@ -648,11 +735,11 @@ class InteractiveSession:
                 workspace=self.workspace_manager,
             )
             custom_name = type(evaluator).__name__
-            custom_file = selected_item["file"]
         else:
             try:
                 declared_names = {
-                    node.name for node in ast.parse(source, mode="exec").body
+                    node.name
+                    for node in ast.parse(source, mode="exec").body
                     if isinstance(node, ast.ClassDef)
                 }
             except SyntaxError:
@@ -677,7 +764,9 @@ class InteractiveSession:
             save_dir = self.evaluator_workspace
             save_dir_relative = str(save_dir.relative_to(self.workspace))
             self.workspace_manager.create_directory(
-                save_dir_relative, parents=True, exist_ok=True,
+                save_dir_relative,
+                parents=True,
+                exist_ok=True,
             )
             destination = save_dir / filename
             descriptor, temporary_name = tempfile.mkstemp(
@@ -698,7 +787,6 @@ class InteractiveSession:
                 workspace=self.workspace_manager,
             )
             evaluator_id = f"custom:{destination.name}"
-            custom_file = str(destination)
         with self.lock:
             self.context.evaluator = evaluator
             self.context.invalidate_splits()
@@ -852,9 +940,14 @@ class InteractiveSession:
             if interaction_state not in {"running", "pausing"}:
                 raise ValueError("EvaluatorConstructionAgent is not running")
             force = interaction_state == "pausing"
-            self.evaluator_interaction_manager.command("force_pause" if force else "pause")
+            control = self.evaluator_interaction_manager.command(
+                "force_pause" if force else "pause"
+            )
             self.evaluator_agent_state = "stopping"
-        return self.snapshot()
+        snapshot = self.snapshot()
+        if control.get("cancellation_error"):
+            snapshot["cancellation_error"] = control["cancellation_error"]
+        return snapshot
 
     def _run_evaluator_assistance(self, payload) -> None:
         try:
@@ -868,7 +961,7 @@ class InteractiveSession:
             state = "stopped"
         except Exception as exc:
             _logger.exception("Evaluator construction Agent failed")
-            result = {"status": "failed", **public_model_api_error(exc)}
+            result = {"status": "failed", "error": str(exc)}
             state = "failed"
         with self.lock:
             self.evaluator_agent_result = result
@@ -1077,9 +1170,7 @@ class InteractiveSession:
             settings.get("stop_guard_mode") == "metric_threshold"
             and settings.get("stop_guard_threshold") is None
         ):
-            raise ValueError(
-                f"{settings['stop_guard_mode']} requires stop_guard_threshold"
-            )
+            raise ValueError(f"{settings['stop_guard_mode']} requires stop_guard_threshold")
         if not settings.get("force_initial_diagnostics"):
             return
         tools = settings.get("tools")
@@ -1122,9 +1213,7 @@ class InteractiveSession:
                 )
             manifest_path = self.workspace / "context.data" / "manifest.json"
             if not self.context.data or not manifest_path.is_file():
-                raise ValueError(
-                    "Create and load a valid context.data dataset before starting"
-                )
+                raise ValueError("Create and load a valid context.data dataset before starting")
             options = self.validate_settings(payload, initial=True)
             self.validate_capabilities(options)
             updated_settings = {**self.settings, **options}
@@ -1179,12 +1268,11 @@ class InteractiveSession:
                     "failure_stage": failure_stage,
                 }
                 self.state = "failed" if started else "idle"
+                conversation = self.conversation_id or self.workspace.name
+                thread_alive = bool(thread and thread.is_alive())
                 _logger.exception(
-                    "Failed to start conversation=%s run=%s thread_alive=%s stage=%s",
-                    self.conversation_id or self.workspace.name,
-                    self.run_id,
-                    bool(thread and thread.is_alive()),
-                    failure_stage,
+                    f"Failed to start conversation={conversation} run={self.run_id} "
+                    f"thread_alive={thread_alive} stage={failure_stage}"
                 )
                 raise SessionStartError(
                     str(exc),
@@ -1237,7 +1325,7 @@ class InteractiveSession:
                 self.data_agent.llm_max_tokens = settings["llm_max_tokens"]
                 self.data_agent.skills = settings["skills"]
                 self.data_agent.tool_cls_list = BaseTool.load_tool_classes(settings["tools"])
-                self.data_agent.initialize_tools(self.context)
+                self.data_agent.initialize_with_context(self.context)
             self.data_interaction_manager.command("message", instruction)
             self.data_state = "running"
             self.data_result = None
@@ -1261,8 +1349,11 @@ class InteractiveSession:
                 raise ValueError("The data-preparation agent is not running")
             force = interaction_state == "pausing"
             self.data_state = "stopping"
-            self.data_interaction_manager.command("force_pause" if force else "pause")
-        return self.snapshot()
+            control = self.data_interaction_manager.command("force_pause" if force else "pause")
+        snapshot = self.snapshot()
+        if control.get("cancellation_error"):
+            snapshot["cancellation_error"] = control["cancellation_error"]
+        return snapshot
 
     def _prepare_data(self, instruction: str) -> None:
         data_directory = self.workspace / "context.data"
@@ -1277,18 +1368,19 @@ class InteractiveSession:
             ):
                 current_path = Path(current)
                 directory_names[:] = [
-                    name for name in directory_names
-                    if not (current_path / name).is_symlink()
+                    name for name in directory_names if not (current_path / name).is_symlink()
                 ]
                 for name in file_names:
                     path = current_path / name
                     metadata = path.lstat()
                     if stat.S_ISREG(metadata.st_mode):
-                        revision.append((
-                            str(path.relative_to(resolved_directory)),
-                            metadata.st_size,
-                            metadata.st_mtime_ns,
-                        ))
+                        revision.append(
+                            (
+                                str(path.relative_to(resolved_directory)),
+                                metadata.st_size,
+                                metadata.st_mtime_ns,
+                            )
+                        )
             return tuple(sorted(revision))
 
         previous_revision = directory_revision()
@@ -1317,7 +1409,7 @@ class InteractiveSession:
             self.data_interaction_manager.publish_event("execution_failed", result)
         except Exception as exc:
             _logger.exception("Data preparation Agent failed")
-            public_error = public_model_api_error(exc)
+            public_error = {"error": str(exc)}
             result = {**public_error, "context": self.context.schema()}
             state = "failed"
             self.data_interaction_manager.publish_event("execution_failed", public_error)
@@ -1509,7 +1601,7 @@ class InteractiveSession:
             _logger.exception("Symbolic-regression Agent failed")
             result = getattr(exc, "partial_result", {}) | {
                 "status": "failed",
-                **public_model_api_error(exc),
+                "error": str(exc),
             }
         with self.lock:
             self.result = json_value(result)
@@ -1622,11 +1714,15 @@ class InteractiveSession:
         if "split_by" in result and result["split_by"] not in {"random", "ood"}:
             raise ValueError("Unsupported validation split strategy")
         if "stop_guard_mode" in result and result["stop_guard_mode"] not in {
-            "none", "best_in_topk", "metric_threshold", "budget_exhausted",
+            "none",
+            "best_in_topk",
+            "metric_threshold",
+            "budget_exhausted",
         }:
             raise ValueError("Unsupported stop guard mode")
         if "stop_guard_split" in result and result["stop_guard_split"] not in {
-            "train", "validation",
+            "train",
+            "validation",
         }:
             raise ValueError("Unsupported stop guard split")
         return result
@@ -1741,11 +1837,11 @@ class InteractiveSession:
             egress_proxy=self.egress_proxy,
         )
         with self.model_test_lock:
+            tool_box = BaseParser.create(settings["tool_parser"], tool_list=[probe_tool])
             api = BaseAPI.create(
                 settings["llm_provider"],
                 model=settings["llm_model"],
-                tool_list=[probe_tool],
-                tool_parser_name=settings["tool_parser"],
+                tool_box=tool_box,
                 environment=environment,
             )
             plain_rows = list(
@@ -1763,8 +1859,8 @@ class InteractiveSession:
                     max_tokens=min(settings["llm_max_tokens"], 128),
                 )
             )
-        plain_response = plain_rows[0][0] if plain_rows else ""
-        calls = [call for _, row_calls, _ in tool_rows for call in (row_calls or [])]
+        plain_response = plain_rows[0].content if plain_rows else ""
+        calls = [call for row in tool_rows for call in row.tool_calls]
         expected_call = next(
             (
                 call

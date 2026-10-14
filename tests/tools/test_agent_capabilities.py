@@ -9,7 +9,8 @@ import pytest
 from sr_harness.runtime import InteractionManager, SRInteractionManager
 from sr_harness.web.app import create_app
 from sr_harness.runtime import ModelRouter
-from sr_harness.core import AgentContext, SearchRunState, ToolCall
+from sr_harness.core import APICallSample, AgentContext, SearchRunState, ToolCall
+from sr_harness.parser import BaseParser
 from sr_harness import SRAgent
 from sr_harness.tools.evaluate_formula import EvaluateTool
 from sr_harness.utils import ParallelTimer
@@ -76,7 +77,7 @@ def test_new_candidate_is_not_automatically_audited_with_eic():
     agent = object.__new__(SRAgent)
     agent.ranking_metric = "mse"
     agent.larger_is_better = False
-    agent.tools = [EICTool(context=context)]
+    agent.tool_box = BaseParser.create("openai", tool_list=[EICTool(context=context)])
     agent.tools_counter = ParallelTimer(unit="call")
     agent.save_path = None
     agent.run_state = SearchRunState(
@@ -85,7 +86,13 @@ def test_new_candidate_is_not_automatically_audited_with_eic():
         larger_is_better=False,
     )
     topk = agent.collect_candidates(
-        [("", [ToolCall(name="evaluate_formula", params={})], {})],
+        [
+            APICallSample(
+                content="",
+                tool_calls=[ToolCall(name="evaluate_formula", params={})],
+                message_extra={"role": "assistant"},
+            )
+        ],
         [[candidate]],
         R=1,
         L=1,
@@ -151,10 +158,6 @@ def test_web_fetch_accepts_mixed_proxy_dns_but_not_mixed_direct_dns(monkeypatch)
         "sr_harness.tools.web_research.socket.getaddrinfo",
         lambda *args, **kwargs: addresses,
     )
-    monkeypatch.setattr(
-        "sr_harness.tools.web_research.requests.utils.get_environ_proxies",
-        lambda url: {},
-    )
     with pytest.raises(ValueError, match="public network"):
         WebFetchTool().execute("https://example.test/page")
 
@@ -171,14 +174,17 @@ def test_web_fetch_accepts_mixed_proxy_dns_but_not_mixed_direct_dns(monkeypatch)
             yield b"<html><body>Public page</body></html>"
 
     monkeypatch.setattr(
-        "sr_harness.tools.web_research.requests.utils.get_environ_proxies",
-        lambda url: {"https": "http://127.0.0.1:6789"},
-    )
-    monkeypatch.setattr(
         "sr_harness.tools.web_research.requests.get",
         lambda *args, **kwargs: Response(),
     )
-    result = WebFetchTool().execute("https://example.test/page")
+    proxied_tool = WebFetchTool(
+        context=AgentContext(
+            args=argparse.Namespace(
+                api_environment={"HTTPS_PROXY": "http://127.0.0.1:6789"}
+            )
+        )
+    )
+    result = proxied_tool.execute("https://example.test/page")
     assert result["text"] == "Public page"
 
 
@@ -355,6 +361,44 @@ def test_interaction_manager_reports_only_true_buffer_eviction():
     assert batch["truncated"]
     assert batch["discarded_through"] == 2
     assert batch["events"][0]["seq"] == 3
+
+
+def test_interaction_manager_reports_unsupported_force_cancel_and_keeps_safe_pause():
+    manager = InteractionManager()
+    manager.start_agent_execution()
+    manager.command("pause")
+
+    with manager.cancellable(lambda: "This operation cannot be force-interrupted."):
+        result = manager.command("force_pause")
+
+    assert manager.state == "pausing"
+    assert result["cancellation_error"] == "This operation cannot be force-interrupted."
+    command = [
+        event
+        for event in manager.get_recent_events()["events"]
+        if event["kind"] == "command_received"
+    ][-1]
+    assert command["payload"] == {
+        "action": "force_pause",
+        "error": "This operation cannot be force-interrupted.",
+    }
+
+
+def test_late_unsupported_cancellable_recovers_pending_interrupt_to_safe_pause():
+    manager = InteractionManager()
+    manager.start_agent_execution()
+    manager.command("pause")
+    manager.command("force_pause")
+
+    with manager.cancellable(lambda: "Late operation cannot be force-interrupted."):
+        assert manager.state == "pausing"
+
+    command = [
+        event
+        for event in manager.get_recent_events()["events"]
+        if event["kind"] == "command_received" and event["payload"].get("error")
+    ][-1]
+    assert command["payload"]["error"] == "Late operation cannot be force-interrupted."
 
 
 def test_interaction_manager_rejects_snapshot_schema_drift():

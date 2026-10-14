@@ -1,19 +1,14 @@
 # Copyright (c) 2026-present, Yumeow. Licensed under the MIT License.
 from __future__ import annotations
-import re
 import time
-import json
 import math
 import logging
-import warnings
 import numpy as np
 import sr_harness_engine as engine
 from .tag2ansi import tag2ansi
 from fractions import Fraction
-from dataclasses import dataclass
-from typing import Any, Mapping, Sequence
 from itertools import combinations, product
-from typing import Any, Dict, Tuple, Sequence
+from typing import Any, Dict, List, Tuple
 
 __all__ = [ "get_symbolic_acc" ]
 _logger = logging.getLogger(f"sr_harness.{__name__}")
@@ -71,18 +66,17 @@ def llm_judge_equivalence(
             # Reasoning models may consume most of a 1k budget before emitting
             # the required JSON, yielding an otherwise successful empty answer.
             response = api(messages, n=1, max_tokens=4096, temperature=0.0)
-            yielded_usage = None
-            for content, _, yielded_usage in response:
-                pass
-            merge_usage(getattr(response, "usage", yielded_usage))
+            for sample in response:
+                content = sample.content or ""
+            merge_usage({"token": response.token_usage, "price": response.money_usage})
             usage_merged = True
             _logger.debug(f"Response: {content!r}")
             parsed = parse_json_with_template(content, {'reason': str, 'equivalent': bool})
             parsed['usage'] = total_usage
             return parsed
         except Exception as e:
-            if response is not None and not usage_merged and getattr(response, 'returned', None):
-                merge_usage(response.usage)
+            if response is not None and not usage_merged and response.ok is not None:
+                merge_usage({"token": response.token_usage, "price": response.money_usage})
             _logger.trace(f"Failed to parse LLM response: [{type(e).__name__}]{str(e)}. Response was: {content}")
             time.sleep(retry_timeout)
     else:

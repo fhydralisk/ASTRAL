@@ -1,8 +1,11 @@
 """TextParser 单元测试。"""
 
-import pytest
 from sr_harness.parser import TextParser
 from sr_harness.tools import BaseTool
+
+
+def all_tool_instances():
+    return [tool_class() for tool_class in BaseTool.load_tool_classes()]
 
 
 class TestTextParserFormatTools:
@@ -10,14 +13,14 @@ class TestTextParserFormatTools:
 
     def test_format_tools_returns_string(self):
         """测试 format_tools 返回字符串。"""
-        parser = TextParser(tool_list=None)
+        parser = TextParser(tool_list=all_tool_instances())
         result = parser.format_tools()
         assert isinstance(result, str)
         assert len(result) > 0
 
     def test_format_tools_contains_expected_sections(self):
         """测试 format_tools 包含预期的章节。"""
-        parser = TextParser(tool_list=None)
+        parser = TextParser(tool_list=all_tool_instances())
         result = parser.format_tools()
 
         assert "## Available Tools:" in result
@@ -29,7 +32,7 @@ class TestTextParserFormatTools:
 
     def test_format_tools_contains_all_tools(self):
         """测试 format_tools 包含所有注册的工具。"""
-        parser = TextParser(tool_list=None)
+        parser = TextParser(tool_list=all_tool_instances())
         result = parser.format_tools()
 
         # 检查所有工具名称出现在输出中
@@ -45,7 +48,7 @@ class TestTextParserFormatTools:
 
     def test_format_tools_signature_includes_type_hints(self):
         """测试签名包含类型注解。"""
-        parser = TextParser(tool_list=None)
+        parser = TextParser(tool_list=all_tool_instances())
         result = parser.format_tools()
 
         # 检查类型注解格式
@@ -54,7 +57,7 @@ class TestTextParserFormatTools:
 
     def test_format_tools_description_is_english(self):
         """测试描述是英文的。"""
-        parser = TextParser(tool_list=None)
+        parser = TextParser(tool_list=all_tool_instances())
         result = parser.format_tools()
 
         # 简单的英文检查：不包含常见中文字符
@@ -64,7 +67,7 @@ class TestTextParserFormatTools:
 
     def test_format_tools_docstring_not_placeholder(self):
         """测试 docstring 不是占位符。"""
-        parser = TextParser(tool_list=None)
+        parser = TextParser(tool_list=all_tool_instances())
         result = parser.format_tools()
 
         # 检查 docstring 不是 `...`
@@ -290,11 +293,11 @@ class TestTextParserIntegration:
         parser = TextParser(tool_list=None)
 
         # 获取格式化的工具描述
-        formatted = parser.format_tools()
+        parser.format_tools()
 
         # 模拟一个基于格式化输出的响应
         # 注意：不使用 "tool_name" 这个示例名称，避免和 format 中的示例混淆
-        sim_response = f"""
+        sim_response = """
 Based on the available tools described above:
 
 I will use the statistics tool:
