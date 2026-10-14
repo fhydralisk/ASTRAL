@@ -21,7 +21,7 @@ from dotenv import dotenv_values, set_key, unset_key
 from ..agents.data_preparation_agent import DataPreparationAgent
 from ..agents.evaluator_construction_agent import EvaluatorConstructionAgent
 from ..agents.sr_agent_interactive import SRAgentInteractive
-from ..api import BaseAPI
+from ..api import BaseAPI, public_model_api_error
 from ..core import AgentContext, SearchRunState, json_value, load_context_data
 from ..evaluator import GraphEvaluator, load_custom_evaluator
 from ..evaluator.load_custom_evaluator import (
@@ -867,7 +867,8 @@ class InteractiveSession:
             result = {"status": "stopped", "message": str(exc)}
             state = "stopped"
         except Exception as exc:
-            result = {"status": "failed", "error": str(exc)}
+            _logger.exception("Evaluator construction Agent failed")
+            result = {"status": "failed", **public_model_api_error(exc)}
             state = "failed"
         with self.lock:
             self.evaluator_agent_result = result
@@ -1315,9 +1316,11 @@ class InteractiveSession:
             state = "stopped"
             self.data_interaction_manager.publish_event("execution_failed", result)
         except Exception as exc:
-            result = {"error": str(exc), "context": self.context.schema()}
+            _logger.exception("Data preparation Agent failed")
+            public_error = public_model_api_error(exc)
+            result = {**public_error, "context": self.context.schema()}
             state = "failed"
-            self.data_interaction_manager.publish_event("execution_failed", {"error": str(exc)})
+            self.data_interaction_manager.publish_event("execution_failed", public_error)
         with self.lock:
             self.data_result = json_value(result)
             self.data_state = state
@@ -1503,7 +1506,11 @@ class InteractiveSession:
         except KeyboardInterrupt as exc:
             result = getattr(exc, "partial_result", {}) | {"status": "interrupted"}
         except Exception as exc:
-            result = getattr(exc, "partial_result", {}) | {"status": "failed", "error": str(exc)}
+            _logger.exception("Symbolic-regression Agent failed")
+            result = getattr(exc, "partial_result", {}) | {
+                "status": "failed",
+                **public_model_api_error(exc),
+            }
         with self.lock:
             self.result = json_value(result)
             self.state = result.get("status", "completed")

@@ -1,5 +1,5 @@
 # Copyright (c) 2024-present, Yumeow. Licensed under the MIT License.
-from .base_api import BaseAPI, ModelResponseTruncatedError, ToolList, ToolParserName
+from .base_api import BaseAPI, ModelResponseTruncatedError, ToolList, ToolParserName, public_model_api_error
 from ..core import APICallResult
 from .manual_api import ManualAPI
 from .openai_api import OpenAIAPI
@@ -19,6 +19,7 @@ __all__ = [
     "ModelResponseTruncatedError",
     "OpenAIAPI",
     "OpenRouterAPI",
+    "public_model_api_error",
     "SiliconFlowAPI",
     "ToolList",
     "ToolParserName",

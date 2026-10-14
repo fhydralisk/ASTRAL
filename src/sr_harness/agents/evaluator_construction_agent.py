@@ -8,7 +8,7 @@ import time
 import uuid
 from typing import Any
 
-from ..api import BaseAPI
+from ..api import BaseAPI, public_model_api_error
 from ..core import AgentContext, json_value
 from ..parser import BaseParser
 from ..runtime import InteractionManager
@@ -257,7 +257,7 @@ class EvaluatorConstructionAgent(Agent):
                 self._publish("assistant_failed", {
                     **latest_stream_update,
                     **event_context,
-                    "error": str(exc),
+                    **public_model_api_error(exc),
                 })
                 raise
             if not rows:

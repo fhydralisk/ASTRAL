@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Iterator, List, Optional
 
-from ..api import BaseAPI, ModelResponseTruncatedError
+from ..api import BaseAPI, ModelResponseTruncatedError, public_model_api_error
 from ..core import AgentContext, CandidateRecord, ToolCall, ToolCallResult
 from ..runtime import PendingMessage, SRInteractionManager
 from ..skills import SkillManager
@@ -911,6 +911,7 @@ class SRAgentInteractive(SRAgent):
                 ),
             })
         except Exception as exc:
+            public_error = public_model_api_error(exc)
             for K, response_id in response_ids.items():
                 self.interaction_manager.publish_event("assistant_failed", {
                     **latest_stream_updates.get(K, {}),
@@ -918,7 +919,7 @@ class SRAgentInteractive(SRAgent):
                     "coord": coord | {"K": K},
                     "provider": route.provider,
                     "model": route.model,
-                    "error": str(exc),
+                    **public_error,
                 })
             raise
         self._last_iteration_had_tool_calls = any(

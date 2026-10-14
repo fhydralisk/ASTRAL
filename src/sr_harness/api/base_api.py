@@ -22,6 +22,59 @@ ToolParserName = Literal["text", "json", "xml", "openai"]
 ToolList = list[BaseTool | type[BaseTool]]
 StreamCallback = Callable[[dict[str, Any]], None]
 
+MODEL_API_ERROR_MESSAGES = {
+    "insufficient_balance": (
+        "Model API balance or quota is insufficient. Check the provider account "
+        "balance and spending limit."
+    ),
+    "network_unreachable": (
+        "Model API is unreachable. Check the network, proxy, and provider availability."
+    ),
+    "unknown": (
+        "Model API request failed for an unknown reason. Check the server logs for details."
+    ),
+}
+
+
+def public_model_api_error(exc: BaseException) -> dict[str, str]:
+    """Classify an API failure without exposing upstream response details."""
+    chain = []
+    current: BaseException | None = exc
+    while current is not None and current not in chain:
+        chain.append(current)
+        current = current.__cause__ or current.__context__
+    text = " ".join(str(item).lower() for item in chain)
+    names = " ".join(type(item).__name__.lower() for item in chain)
+    statuses = {
+        status
+        for item in chain
+        for status in (
+            getattr(item, "status_code", None),
+            getattr(getattr(item, "response", None), "status_code", None),
+        )
+        if isinstance(status, int)
+    }
+    balance_markers = (
+        "insufficient_quota", "insufficient quota", "insufficient credit",
+        "credits exhausted", "balance", "payment required", "spending limit",
+        "quota exceeded",
+    )
+    network_markers = (
+        "connection error", "connection refused", "connect timeout", "read timeout",
+        "network is unreachable", "name resolution", "dns", "proxy error",
+        "temporary failure in name resolution",
+    )
+    if 402 in statuses or any(marker in text for marker in balance_markers):
+        kind = "insufficient_balance"
+    elif (
+        any(marker in text for marker in network_markers)
+        or any(marker in names for marker in ("connectionerror", "connecterror", "timeout", "proxyerror"))
+    ):
+        kind = "network_unreachable"
+    else:
+        kind = "unknown"
+    return {"error_kind": kind, "error": MODEL_API_ERROR_MESSAGES[kind]}
+
 
 class ModelResponseTruncatedError(RuntimeError):
     """Report a length-limited response while preserving its partial message.

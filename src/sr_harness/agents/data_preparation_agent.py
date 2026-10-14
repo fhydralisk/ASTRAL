@@ -7,6 +7,7 @@ import uuid
 from copy import deepcopy
 from typing import Any
 
+from ..api import public_model_api_error
 from ..core import AgentContext
 from ..runtime import InteractionManager
 from ..parser import BaseParser
@@ -261,7 +262,7 @@ class DataPreparationAgent(Agent):
                     "turn": turn,
                     "provider": self.llm_provider,
                     "model": self.llm_model,
-                    "error": str(exc),
+                    **public_model_api_error(exc),
                 })
                 raise
             usage = call_result.returned.get("usage", {"token": {}, "price": {}})
