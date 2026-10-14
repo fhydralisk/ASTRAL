@@ -5,7 +5,9 @@ import hashlib
 import json
 import os
 import stat
+import threading
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -18,6 +20,18 @@ import sr_harness.web.conversations as conversation_module
 from sr_harness.web.app import create_app
 from sr_harness.web.conversations import ConversationRegistry
 from sr_harness.web.session import InteractiveSession
+
+CONVERSATION_HEADER = "X-SR-Harness-Conversation"
+
+
+def _use_conversation(client, conversation_id):
+    client.headers[CONVERSATION_HEADER] = conversation_id
+
+
+def _list_conversations(client):
+    payload = client.get("/api/conversations").json()
+    _use_conversation(client, payload["selected"])
+    return payload
 
 
 def _tree_signature(root):
@@ -39,13 +53,14 @@ def test_conversations_are_persisted_and_can_be_renamed(tmp_path):
     registry = ConversationRegistry(tmp_path)
     app = create_app(tmp_path, session=registry.session_proxy, conversation_registry=registry)
     with TestClient(app) as client:
-        initial = client.get("/api/conversations").json()
+        initial = _list_conversations(client)
         assert len(initial["conversations"]) == 1
         first_id = initial["conversations"][0]["id"]
         client.patch(
             f"/api/conversations/{first_id}", json={"name": "First"},
         )
         created = client.post("/api/conversations", json={"name": "Experiment"}).json()
+        _use_conversation(client, created["id"])
         renamed = client.patch(
             f"/api/conversations/{created['id']}", json={"name": "Oscillator"},
         ).json()
@@ -85,6 +100,7 @@ def test_conversation_can_be_exported_and_archived_without_deleting_state(tmp_pa
     with TestClient(app) as client:
         created = client.post("/api/conversations", json={"name": "Export me"}).json()
         conversation_id = created["id"]
+        _use_conversation(client, conversation_id)
         uploaded = client.put("/api/workspace/upload?path=notes.txt", content=b"retained")
         assert uploaded.status_code == 200
         assert client.put("/api/session/provider-credential", json={
@@ -204,7 +220,7 @@ def test_read_only_browsing_stays_transient_but_is_logged(tmp_path):
     registry = ConversationRegistry(tmp_path, isolate_users=True)
     app = create_app(tmp_path, session=registry.session_proxy, conversation_registry=registry)
     with TestClient(app) as client:
-        listed = client.get("/api/conversations").json()
+        listed = _list_conversations(client)
         transient_id = listed["selected"]
         assert client.get("/api/session").status_code == 200
         assert client.get("/api/workspace").status_code == 200
@@ -227,12 +243,27 @@ def test_read_only_browsing_stays_transient_but_is_logged(tmp_path):
     registry.close()
 
 
+def test_document_and_static_requests_do_not_create_conversations(tmp_path):
+    registry = ConversationRegistry(tmp_path, isolate_users=True)
+    app = create_app(tmp_path, session=registry.session_proxy, conversation_registry=registry)
+    with TestClient(app) as client:
+        assert client.get("/").status_code == 200
+        assert client.get("/viewer").status_code == 200
+        assert client.get("/api/version").status_code == 200
+        assert client.get("/static/favicon.svg").status_code == 200
+
+    assert not registry._transient_records
+    assert not registry._sessions
+    assert not (tmp_path / "conversation-visits.jsonl").exists()
+    registry.close()
+
+
 def test_new_shared_mode_visitor_does_not_attach_to_an_existing_conversation(tmp_path):
     registry = ConversationRegistry(tmp_path)
     existing = registry.create("owner", "Existing")
     app = create_app(tmp_path, session=registry.session_proxy, conversation_registry=registry)
     with TestClient(app) as client:
-        listed = client.get("/api/conversations").json()
+        listed = _list_conversations(client)
         assert listed["selected"] != existing["id"]
         assert {item["id"] for item in listed["conversations"]} == {
             existing["id"],
@@ -250,12 +281,12 @@ def test_abandoned_transient_session_is_reclaimed_after_idle_timeout(
     registry = ConversationRegistry(tmp_path, isolate_users=True)
     app = create_app(tmp_path, session=registry.session_proxy, conversation_registry=registry)
     with TestClient(app) as first:
-        abandoned_id = first.get("/api/conversations").json()["selected"]
+        abandoned_id = _list_conversations(first)["selected"]
         abandoned_root = Path(registry._transient_roots[abandoned_id].name)
 
     clock[0] += conversation_module.TRANSIENT_IDLE_SECONDS + 1
     with TestClient(app) as second:
-        assert second.get("/api/conversations").status_code == 200
+        assert _list_conversations(second)["selected"]
 
     assert abandoned_id not in registry._transient_records
     assert abandoned_id not in registry._sessions
@@ -269,7 +300,7 @@ def test_three_hour_idle_page_keeps_its_transient_session(tmp_path, monkeypatch)
     registry = ConversationRegistry(tmp_path, isolate_users=True)
     app = create_app(tmp_path, session=registry.session_proxy, conversation_registry=registry)
     with TestClient(app) as client:
-        conversation_id = client.get("/api/conversations").json()["selected"]
+        conversation_id = _list_conversations(client)["selected"]
         clock[0] += 3 * 60 * 60
         assert client.get("/api/conversations").json()["selected"] == conversation_id
         assert conversation_id in registry._transient_records
@@ -290,7 +321,7 @@ def test_first_agent_request_after_transient_cache_eviction_needs_no_refresh(
     registry = ConversationRegistry(tmp_path, isolate_users=True)
     app = create_app(tmp_path, session=registry.session_proxy, conversation_registry=registry)
     with TestClient(app) as client:
-        expired_id = client.get("/api/conversations").json()["selected"]
+        expired_id = _list_conversations(client)["selected"]
         clock[0] += conversation_module.TRANSIENT_IDLE_SECONDS + 1
         response = client.post("/api/data/agent", json={"message": "start after sleep"})
         assert response.status_code == 200
@@ -307,7 +338,7 @@ def test_successful_workspace_change_materializes_transient_conversation(tmp_pat
     registry = ConversationRegistry(tmp_path, isolate_users=True)
     app = create_app(tmp_path, session=registry.session_proxy, conversation_registry=registry)
     with TestClient(app) as client:
-        transient_id = client.get("/api/conversations").json()["selected"]
+        transient_id = _list_conversations(client)["selected"]
         failed = client.post("/api/workspace/directory", json={})
         assert failed.status_code == 400
         assert not (tmp_path / "conversations.json").exists()
@@ -343,13 +374,14 @@ def test_rename_and_agent_use_each_materialize_a_transient_conversation(
         lambda self, message: {"message": message},
     )
     with TestClient(app) as client:
-        renamed_id = client.get("/api/conversations").json()["selected"]
+        renamed_id = _list_conversations(client)["selected"]
         assert client.patch(
             f"/api/conversations/{renamed_id}",
             json={"name": "Kept by name"},
         ).status_code == 200
 
         agent_id = client.post("/api/conversations", json={}).json()["id"]
+        _use_conversation(client, agent_id)
         response = client.post("/api/data/agent", json={"message": "inspect data"})
         assert response.status_code == 200
         assert response.json() == {"message": "inspect data"}
@@ -376,8 +408,8 @@ def test_isolate_users_routes_workspace_requests_to_distinct_sessions(tmp_path):
     registry = ConversationRegistry(tmp_path, isolate_users=True)
     app = create_app(tmp_path, session=registry.session_proxy, conversation_registry=registry)
     with TestClient(app) as first, TestClient(app) as second:
-        first_conversation = first.get("/api/conversations").json()
-        second_conversation = second.get("/api/conversations").json()
+        first_conversation = _list_conversations(first)
+        second_conversation = _list_conversations(second)
         assert first_conversation["selected"] != second_conversation["selected"]
 
         first_upload = first.put("/api/workspace/upload?path=first.txt", content=b"first")
@@ -439,6 +471,7 @@ def test_read_only_registry_serves_existing_conversations_without_changing_stora
                 json={},
             )
             assert selected.status_code == 200
+            _use_conversation(client, second_record["id"])
             assert client.get("/api/session").json()["initial_prompt"] == "second prompt"
 
             heatmap = client.post("/api/data/context/heatmap", json={})
@@ -472,6 +505,94 @@ def test_read_only_registry_serves_existing_conversations_without_changing_stora
                 path.chmod(0o755)
             elif not path.is_symlink():
                 path.chmod(0o644)
+
+
+def test_conversation_selection_is_request_scoped_and_never_set_as_a_cookie(tmp_path):
+    registry = ConversationRegistry(tmp_path, persist_sessions=True, persistence_interval=60)
+    first = registry.default_session
+    first.initial_prompt = "first"
+    second_record = registry.create("browser", "Second")
+    second = registry._session_for(second_record)
+    second.initial_prompt = "second"
+    app = create_app(tmp_path, session=registry.session_proxy, conversation_registry=registry)
+
+    with TestClient(app) as client:
+        first_id = registry._records[0]["id"]
+        _use_conversation(client, first_id)
+        response = client.post(
+            f"/api/conversations/{second_record['id']}/select",
+            json={},
+        )
+        assert response.json() == {"selected": second_record["id"]}
+        assert not any(
+            value.startswith("sr_harness_conversation=")
+            for value in response.headers.get_list("set-cookie")
+        )
+
+        assert client.get(
+            "/api/session",
+            headers={CONVERSATION_HEADER: first_id},
+        ).json()["initial_prompt"] == "first"
+        assert client.get(
+            "/api/session",
+            headers={CONVERSATION_HEADER: second_record["id"]},
+        ).json()["initial_prompt"] == "second"
+
+    registry.close()
+
+
+def test_two_tabs_can_select_different_conversations_with_one_browser_cookie(tmp_path):
+    registry = ConversationRegistry(tmp_path, isolate_users=True)
+    app = create_app(tmp_path, session=registry.session_proxy, conversation_registry=registry)
+
+    with TestClient(app) as client:
+        first_id = _list_conversations(client)["selected"]
+        assert client.patch(
+            f"/api/conversations/{first_id}",
+            json={"name": "First tab"},
+        ).status_code == 200
+        registry._sessions[first_id].initial_prompt = "first tab"
+        second_id = client.post("/api/conversations", json={"name": "Second tab"}).json()["id"]
+        registry._sessions[second_id].initial_prompt = "second tab"
+
+        for _ in range(3):
+            first = client.get("/api/session", headers={CONVERSATION_HEADER: first_id})
+            second = client.get("/api/session", headers={CONVERSATION_HEADER: second_id})
+            assert first.json()["initial_prompt"] == "first tab"
+            assert second.json()["initial_prompt"] == "second tab"
+
+    registry.close()
+
+
+def test_different_conversations_restore_without_a_global_registry_lock(tmp_path, monkeypatch):
+    writable = ConversationRegistry(tmp_path, persist_sessions=True, persistence_interval=60)
+    writable.default_session.initial_prompt = "first"
+    first_record = writable._records[0]
+    second_record = writable.create("browser", "Second")
+    writable._session_for(second_record).initial_prompt = "second"
+    writable.persist()
+    writable.close()
+
+    registry = ConversationRegistry(tmp_path, read_only=True)
+    barrier = threading.Barrier(2)
+    original_restore = InteractiveSession.restore_persistent_state
+
+    def synchronized_restore(session, snapshot):
+        barrier.wait(timeout=5)
+        return original_restore(session, snapshot)
+
+    monkeypatch.setattr(InteractiveSession, "restore_persistent_state", synchronized_restore)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(registry.select, "browser", record["id"])
+            for record in (first_record, second_record)
+        ]
+        assert [future.result(timeout=10)["id"] for future in futures] == [
+            first_record["id"],
+            second_record["id"],
+        ]
+
+    registry.close()
 
 
 def test_read_only_registry_requires_existing_storage(tmp_path):

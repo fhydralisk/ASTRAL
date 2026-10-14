@@ -15,9 +15,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fastapi import Body, HTTPException, Request, Response
+from fastapi import Body, HTTPException, Request
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 
 from .session import InteractiveSession
 
@@ -25,10 +26,11 @@ if TYPE_CHECKING:
     from ..runtime.workspace import Workspace
 
 
-CONVERSATION_COOKIE = "sr_harness_conversation"
 CLIENT_COOKIE = "sr_harness_client"
+CONVERSATION_HEADER = "X-SR-Harness-Conversation"
+CONVERSATION_QUERY = "conversation"
 # This is a cache lifetime, not a browser-visible conversation lifetime. An
-# evicted transient is reconstructed with the same ID from the browser cookie.
+# evicted transient is reconstructed with the same ID from the next request.
 TRANSIENT_IDLE_SECONDS = 60 * 60
 
 
@@ -108,6 +110,7 @@ class ConversationRegistry:
         self._persistence_thread: threading.Thread | None = None
         self._persistence_error: Exception | None = None
         self._sessions: dict[str, InteractiveSession] = {}
+        self._session_locks: dict[str, threading.Lock] = {}
         self._transient_records: dict[str, dict[str, Any]] = {}
         self._transient_clients: dict[str, str] = {}
         self._transient_roots: dict[str, tempfile.TemporaryDirectory] = {}
@@ -134,7 +137,7 @@ class ConversationRegistry:
                 if self.read_only:
                     raise RuntimeError("Read-only conversation registry has no active conversation")
                 record = self._create_record(owner_id=None)
-            return self._session_for(record)
+        return self._session_for(record)
 
     def _load_records(self) -> list[dict[str, Any]]:
         if not self.manifest_path.exists():
@@ -425,11 +428,20 @@ class ConversationRegistry:
 
     def _session_for(self, record: dict[str, Any]) -> InteractiveSession:
         conversation_id = record["id"]
-        session = self._sessions.get(conversation_id)
-        if session is None:
-            workspace = self._record_path(record, "workspace")
-            session_dir = self._session_dir(record)
-            run_dir = self._record_path(record, "run_dir")
+        with self.lock:
+            session = self._sessions.get(conversation_id)
+            if session is not None:
+                return session
+            session_lock = self._session_locks.setdefault(conversation_id, threading.Lock())
+        with session_lock:
+            with self.lock:
+                session = self._sessions.get(conversation_id)
+                if session is not None:
+                    return session
+                workspace = self._record_path(record, "workspace")
+                session_dir = self._session_dir(record)
+                run_dir = self._record_path(record, "run_dir")
+                snapshot_path = session_dir / "interactive-session.json"
             if self.read_only:
                 missing = [path for path in (workspace, session_dir, run_dir) if not path.is_dir()]
                 if missing:
@@ -449,7 +461,6 @@ class ConversationRegistry:
                 read_only=self.read_only,
             )
             session.conversation_id = conversation_id
-            snapshot_path = self._session_snapshot_path(record)
             if (self.persist_sessions or self.read_only) and snapshot_path.is_file():
                 try:
                     snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
@@ -458,8 +469,9 @@ class ConversationRegistry:
                     raise ValueError(
                         f"Unable to restore conversation {conversation_id}: {exc}"
                     ) from exc
-            self._sessions[conversation_id] = session
-        return session
+            with self.lock:
+                self._sessions[conversation_id] = session
+            return session
 
     def _session_snapshot_path(self, record: dict[str, Any]) -> Path:
         return self._session_dir(record) / "interactive-session.json"
@@ -540,7 +552,7 @@ class ConversationRegistry:
                     client_id=client_id,
                     reason=materialize_reason,
                 )
-            return record, self._session_for(record)
+        return record, self._session_for(record)
 
     def list(self, client_id: str, selected_id: str | None = None) -> dict[str, Any]:
         with self.lock:
@@ -609,20 +621,20 @@ class ConversationRegistry:
         with self.lock:
             transient = self._transient_records.get(conversation_id)
             if transient is not None and self._transient_visible(transient, client_id):
-                self._session_for(transient)
-                return transient
-            record = next(
-                (
-                    item
-                    for item in self._records
-                    if item["id"] == conversation_id and self._visible(item, client_id)
-                ),
-                None,
-            )
-            if record is None:
-                raise KeyError(conversation_id)
-            self._session_for(record)
-            return record
+                record = transient
+            else:
+                record = next(
+                    (
+                        item
+                        for item in self._records
+                        if item["id"] == conversation_id and self._visible(item, client_id)
+                    ),
+                    None,
+                )
+                if record is None:
+                    raise KeyError(conversation_id)
+        self._session_for(record)
+        return record
 
     def rename(self, client_id: str, conversation_id: str, name: str) -> dict[str, Any]:
         if self.read_only:
@@ -720,9 +732,9 @@ class ConversationRegistry:
 
     def export(self, client_id: str, conversation_id: str) -> tuple[Path, str]:
         """Create a temporary ZIP containing a conversation and its retained state."""
+        record = self.select(client_id, conversation_id)
+        session = self._session_for(record)
         with self.lock:
-            record = self.select(client_id, conversation_id)
-            session = self._session_for(record)
             metadata = {key: record[key] for key in ("id", "name", "created_at", "updated_at")}
             snapshot = session.export_persistent_state()
             workspace = self._record_path(record, "workspace")
@@ -802,9 +814,21 @@ def mount_conversations(app, registry: ConversationRegistry) -> None:
     @app.middleware("http")
     async def bind_conversation(request: Request, call_next):
         client_id = request.cookies.get(CLIENT_COOKIE) or uuid.uuid4().hex
-        selected_id = request.cookies.get(CONVERSATION_COOKIE)
+        path = request.url.path
+        if path in {"/", "/viewer", "/api/version"} or path.startswith("/static/"):
+            request.state.client_id = client_id
+            response = await call_next(request)
+            response.set_cookie(
+                CLIENT_COOKIE, client_id, httponly=True, samesite="lax", max_age=31536000
+            )
+            return response
+        selected_id = (
+            request.headers.get(CONVERSATION_HEADER)
+            or request.query_params.get(CONVERSATION_QUERY)
+        )
         before_reason, after_reason = persistence_timing(request)
-        record, session = registry.resolve(
+        record, session = await run_in_threadpool(
+            registry.resolve,
             client_id,
             selected_id,
             materialize_reason=before_reason,
@@ -823,14 +847,6 @@ def mount_conversations(app, registry: ConversationRegistry) -> None:
         response.set_cookie(
             CLIENT_COOKIE, client_id, httponly=True, samesite="lax", max_age=31536000
         )
-        selection_was_set = any(
-            header.startswith(f"{CONVERSATION_COOKIE}=")
-            for header in response.headers.getlist("set-cookie")
-        )
-        if selected_id != record["id"] and not selection_was_set:
-            response.set_cookie(
-                CONVERSATION_COOKIE, record["id"], httponly=True, samesite="lax", max_age=31536000
-            )
         return response
 
     @app.get("/api/conversations")
@@ -838,24 +854,18 @@ def mount_conversations(app, registry: ConversationRegistry) -> None:
         return registry.list(request.state.client_id, request.state.conversation_id)
 
     @app.post("/api/conversations")
-    def create_conversation(request: Request, response: Response, payload: dict = Body(default={})):
+    def create_conversation(request: Request, payload: dict = Body(default={})):
         record = registry.create(
             request.state.client_id, str(payload.get("name", "")).strip() or None
-        )
-        response.set_cookie(
-            CONVERSATION_COOKIE, record["id"], httponly=True, samesite="lax", max_age=31536000
         )
         return {key: record[key] for key in ("id", "name", "created_at", "updated_at")}
 
     @app.post("/api/conversations/{conversation_id}/select")
-    def select_conversation(conversation_id: str, request: Request, response: Response):
+    def select_conversation(conversation_id: str, request: Request):
         try:
             record = registry.select(request.state.client_id, conversation_id)
         except KeyError as exc:
             raise HTTPException(404, "Conversation not found") from exc
-        response.set_cookie(
-            CONVERSATION_COOKIE, record["id"], httponly=True, samesite="lax", max_age=31536000
-        )
         return {"selected": record["id"]}
 
     @app.patch("/api/conversations/{conversation_id}")
@@ -871,7 +881,7 @@ def mount_conversations(app, registry: ConversationRegistry) -> None:
         return {key: record[key] for key in ("id", "name", "created_at", "updated_at")}
 
     @app.delete("/api/conversations/{conversation_id}")
-    def archive_conversation(conversation_id: str, request: Request, response: Response):
+    def archive_conversation(conversation_id: str, request: Request):
         try:
             record, selected = registry.archive(
                 request.state.client_id,
@@ -880,13 +890,6 @@ def mount_conversations(app, registry: ConversationRegistry) -> None:
             )
         except KeyError as exc:
             raise HTTPException(404, "Conversation not found") from exc
-        response.set_cookie(
-            CONVERSATION_COOKIE,
-            selected["id"],
-            httponly=True,
-            samesite="lax",
-            max_age=31536000,
-        )
         return {"archived": record["id"], "selected": selected["id"]}
 
     @app.get("/api/conversations/{conversation_id}/export")

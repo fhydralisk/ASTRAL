@@ -1419,7 +1419,7 @@
     }
 
     function startStream() {
-      state.source = new EventSource(`/api/runs/${encodeURIComponent(state.runId)}/stream?after_seq=${state.lastSeq}`);
+      state.source = new EventSource(withViewerConversation(`/api/runs/${encodeURIComponent(state.runId)}/stream?after_seq=${state.lastSeq}`));
       state.source.onmessage = (event) => {
         const data = JSON.parse(event.data);
         ingestRecords(data.records || []);
@@ -2639,11 +2639,26 @@
       return typeof value === "object" ? "object" : typeof value;
     }
 
+    const viewerConversationId = new URLSearchParams(location.search).get("conversation") || "";
+
+    function withViewerConversation(url) {
+      if (!viewerConversationId) return url;
+      const value = new URL(url, location.origin);
+      value.searchParams.set("conversation", viewerConversationId);
+      return value.pathname + value.search + value.hash;
+    }
+
+    function viewerHeaders(headers = {}) {
+      return viewerConversationId
+        ? {...headers, "X-SR-Harness-Conversation": viewerConversationId}
+        : headers;
+    }
+
     async function fetchJson(url) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 12000);
       try {
-        const response = await fetch(url, {signal: controller.signal});
+        const response = await fetch(url, {signal: controller.signal, headers: viewerHeaders()});
         if (!response.ok) {
           const error = new Error(await response.text()); error.status = response.status; throw error;
         }
@@ -2905,7 +2920,7 @@
 
     async function sendControl(action, message = "") {
       const response = await fetch("/api/control/command", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: viewerHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ action, message })
       });
       if (!response.ok) throw new Error((await response.json()).detail || "Control command failed");
@@ -2917,14 +2932,14 @@
 
     async function pollControl() {
       try {
-        const response = await fetch(`/api/control/events?after_seq=${controlSeq}`);
+        const response = await fetch(`/api/control/events?after_seq=${controlSeq}`, {headers: viewerHeaders()});
         const payload = await response.json();
         for (const event of payload.events || []) {
           controlSeq = Math.max(controlSeq, event.seq || 0);
           if (event.kind === "question") {
             const answer = window.prompt(event.payload.message || "Agent requests guidance", "");
             if (answer !== null) await fetch(`/api/control/reply/${event.id}`, {
-              method: "POST", headers: { "Content-Type": "application/json" },
+              method: "POST", headers: viewerHeaders({ "Content-Type": "application/json" }),
               body: JSON.stringify({ message: answer })
             });
           }
