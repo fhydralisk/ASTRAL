@@ -83,6 +83,8 @@ sr_harness = [
     "**/*.yaml",
     "web/static/*.html",
     "web/static/*.svg",
+    "web/static/brands/*.svg",
+    "web/static/brands/*.png",
 ]
 sr_harness_engine = ["README.zh.md"]
 
