@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from itertools import islice
 import threading
 import time
 import uuid
@@ -328,11 +329,12 @@ class InteractionManager:
         with self._condition:
             return self._publish_event_locked(kind, payload)
 
-    def get_recent_events(self, after_sequence: int = 0) -> dict[str, Any]:
+    def get_recent_events(self, after_sequence: int = 0, *, limit: int | None = None) -> dict[str, Any]:
         """Return retained events newer than a consumer-owned sequence cursor.
 
         Args:
             after_sequence: Last sequence already consumed by the caller.
+            limit: Maximum events per batch; omitted for an unlimited internal snapshot.
 
         Returns:
             Event batch and cursor-reset or truncation metadata.
@@ -343,7 +345,10 @@ class InteractionManager:
             effective_sequence = 0 if cursor_reset else after_sequence
             return {
                 "events": [
-                    dict(event) for event in self._events if event["seq"] > effective_sequence
+                    dict(event) for event in islice(
+                        (item for item in self._events if item["seq"] > effective_sequence),
+                        limit,
+                    )
                 ],
                 "truncated": effective_sequence < self._discarded_through,
                 "discarded_through": self._discarded_through,

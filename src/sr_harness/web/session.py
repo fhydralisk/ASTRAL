@@ -329,6 +329,34 @@ class InteractiveSession:
                 **self.sr_interaction_manager.status(),
             }
 
+    def idle_persistence_revision(self):
+        """Skip repeated writes only when no agent thread can mutate the session.
+
+        Active or paused agent threads keep the existing persistence behavior.
+        HTTP mutations also advance a generation even if they raise an error.
+        """
+        with self.lock:
+            if any(thread is not None and thread.is_alive() for thread in (
+                self.thread, self.data_thread, self.evaluator_agent_thread,
+            )):
+                return None
+            metadata = [
+                getattr(self, "_persistence_generation", 0), self.run_id,
+                self.state, self.data_state, self.evaluator_agent_state,
+                self.settings, self.pending_settings, self.data_agent_settings,
+                self.evaluator_agent_settings, self.initial_prompt, self.prompt_overrides,
+                self.variable_descriptions, self.workspace_manager.lock_rules,
+                self.context.target, getattr(self.context.args, "data_revision", 0),
+                id(self.result), id(self.data_result), id(self.evaluator_agent_result),
+                id(self.run_state), self.run_state.node_count if self.run_state else 0,
+                len(self.data_agent.buffer) if self.data_agent is not None else len(self._restored_data_agent_buffer or []),
+                *[manager.status()["last_event_seq"] for manager in (
+                    self.sr_interaction_manager, self.data_interaction_manager,
+                    self.evaluator_interaction_manager,
+                )],
+            ]
+            return json.dumps(json_value(metadata), sort_keys=True, ensure_ascii=False)
+
     def export_persistent_state(self) -> dict[str, Any]:
         """Return a JSON-safe snapshot that can be restored in a new process."""
         with self.lock:

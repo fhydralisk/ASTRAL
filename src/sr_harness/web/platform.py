@@ -14,9 +14,11 @@ import pandas as pd
 from fastapi import Body, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 
 from ..core import json_value, update_context_data_descriptions
 from .session import InteractiveSession, SessionStartError
+from .responses import worker_json_response, worker_event_response
 
 MAX_UPLOAD = 256 * 1024 * 1024
 
@@ -65,7 +67,7 @@ def mount_platform(app, session: InteractiveSession):
 
     @app.get("/api/session")
     def status():
-        return session.snapshot()
+        return worker_json_response(session.snapshot())
 
     @app.get("/api/session/capabilities")
     def capabilities(agent: str = "search"):
@@ -114,7 +116,7 @@ def mount_platform(app, session: InteractiveSession):
 
     @app.get("/api/data/agent/events")
     def data_agent_events(after_seq: int = 0):
-        return session.data_interaction_manager.get_recent_events(max(0, after_seq))
+        return worker_event_response(session.data_interaction_manager, max(0, after_seq))
 
     @app.post("/api/data/agent/stop")
     def stop_data_preparation():
@@ -171,7 +173,7 @@ def mount_platform(app, session: InteractiveSession):
 
     @app.get("/api/evaluator/agent/events")
     def evaluator_agent_events(after_seq: int = 0):
-        return session.evaluator_interaction_manager.get_recent_events(max(0, after_seq))
+        return worker_event_response(session.evaluator_interaction_manager, max(0, after_seq))
 
     @app.post("/api/evaluator/agent/stop")
     def stop_evaluator_assistance():
@@ -998,7 +1000,7 @@ def mount_platform(app, session: InteractiveSession):
         # different filesystems.
         temp = None
         size = 0
-        try:
+        def stage():
             with session.lock:
                 destination = resolve(path, access="create")
                 if destination.exists():
@@ -1014,13 +1016,9 @@ def mount_platform(app, session: InteractiveSession):
                     prefix=".sr-harness-upload-",
                     dir=session.workspace,
                 )
-                temp = Path(temp_name)
-            with os.fdopen(fd, "wb") as output:
-                async for chunk in request.stream():
-                    size += len(chunk)
-                    if size > MAX_UPLOAD:
-                        raise HTTPException(413, "Maximum file size is 256 MiB")
-                    output.write(chunk)
+            return fd, temp_name, destination
+
+        def finish(temp, destination, size):
             with session.lock:
                 current_destination = resolve(path, access="create")
                 if current_destination != destination:
@@ -1037,10 +1035,23 @@ def mount_platform(app, session: InteractiveSession):
                 },
             )
             return {"path": path, "size": size}
+        try:
+            fd, temp_name, destination = await app.state.work_pool.run(stage)
+            temp = Path(temp_name)
+            output = os.fdopen(fd, "wb")
+            try:
+                async for chunk in request.stream():
+                    size += len(chunk)
+                    if size > MAX_UPLOAD:
+                        raise HTTPException(413, "Maximum file size is 256 MiB")
+                    await app.state.work_pool.run(output.write, chunk)
+            finally:
+                await run_in_threadpool(output.close)
+            return await app.state.work_pool.run(finish, temp, destination, size)
         except HTTPException:
             raise
         except OSError as exc:
             raise HTTPException(400, f"Unable to upload file: {exc}") from exc
         finally:
             if temp is not None:
-                temp.unlink(missing_ok=True)
+                await run_in_threadpool(temp.unlink, missing_ok=True)

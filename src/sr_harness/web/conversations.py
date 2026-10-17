@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import tempfile
@@ -16,11 +17,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fastapi import Body, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
 from .session import InteractiveSession
+from .isolation import request_work_keys, request_session_lease, request_mutating
 
 if TYPE_CHECKING:
     from ..runtime.workspace import Workspace
@@ -107,9 +109,11 @@ class ConversationRegistry:
         self.persist_sessions = bool(persist_sessions) and not self.read_only
         self.persistence_interval = max(1.0, float(persistence_interval))
         self.lock = threading.RLock()
+        self._active_lock = threading.Lock()
         self._persistence_stop = threading.Event()
         self._persistence_thread: threading.Thread | None = None
-        self._persistence_error: Exception | None = None
+        self._persistence_errors: dict[str, Exception] = {}
+        self._saved_idle_revisions: dict[str, str] = {}
         self._sessions: dict[str, InteractiveSession] = {}
         self._session_locks: dict[str, threading.Lock] = {}
         self._transient_records: dict[str, dict[str, Any]] = {}
@@ -118,6 +122,9 @@ class ConversationRegistry:
         self._transient_last_seen: dict[str, float] = {}
         self._active_requests: dict[str, int] = {}
         self._retired_transient_roots: dict[str, tempfile.TemporaryDirectory] = {}
+        self._read_only_refresh_at = 0.0
+        self.read_only_refresh_interval = 30.0
+        self._snapshot_signatures: dict[str, tuple[int, int, int] | None] = {}
         self._records = self._load_records()
         if not self._records and self.read_only:
             raise ValueError("Read-only conversation registry contains no conversations")
@@ -132,6 +139,7 @@ class ConversationRegistry:
 
     @property
     def default_session(self) -> InteractiveSession:
+        self._refresh_read_only()
         with self.lock:
             record = next((item for item in self._records if not item["archived"]), None)
             if record is None:
@@ -175,6 +183,43 @@ class ConversationRegistry:
             if not isinstance(record["archived"], bool):
                 raise ValueError("Conversation archived must be a boolean")
         return records
+
+    @staticmethod
+    def _snapshot_signature(path: Path) -> tuple[int, int, int] | None:
+        try:
+            stat = path.stat()
+            return stat.st_ino, stat.st_mtime_ns, stat.st_size
+        except FileNotFoundError:
+            return None
+
+    def _refresh_read_only(self) -> None:
+        """Refresh metadata and invalidate changed snapshots at most every 30 seconds.
+
+        Existing requests retain their session object; subsequent requests lazily
+        restore the new snapshot in a worker thread. No source files are written.
+        """
+        if not self.read_only:
+            return
+        with self.lock:
+            now = time.monotonic()
+            if now < self._read_only_refresh_at:
+                return
+            self._read_only_refresh_at = now + self.read_only_refresh_interval
+            try:
+                records = self._load_records()
+                signatures = {
+                    record["id"]: self._snapshot_signature(self._session_snapshot_path(record))
+                    for record in records if record["id"] in self._sessions
+                }
+            except (OSError, ValueError):
+                # Keep the last usable view during a transient source read failure.
+                return
+            self._records = records
+            for conversation_id in list(self._sessions):
+                if (conversation_id not in signatures or
+                        signatures[conversation_id] != self._snapshot_signatures.get(conversation_id)):
+                    self._sessions.pop(conversation_id, None)
+                    self._snapshot_signatures.pop(conversation_id, None)
 
     def _write_records(self, records: list[dict[str, Any]] | None = None) -> None:
         if self.read_only:
@@ -323,10 +368,11 @@ class ConversationRegistry:
     ) -> None:
         if temporary is None:
             return
-        if self._active_requests.get(conversation_id, 0):
-            self._retired_transient_roots[conversation_id] = temporary
-        else:
-            temporary.cleanup()
+        with self._active_lock:
+            if self._active_requests.get(conversation_id, 0):
+                self._retired_transient_roots[conversation_id] = temporary
+                return
+        temporary.cleanup()
 
     def _drop_transient(self, conversation_id: str) -> None:
         session = self._sessions.pop(conversation_id, None)
@@ -349,21 +395,21 @@ class ConversationRegistry:
             self._drop_transient(conversation_id)
 
     def acquire(self, conversation_id: str) -> None:
-        with self.lock:
+        with self._active_lock:
             self._active_requests[conversation_id] = (
                 self._active_requests.get(conversation_id, 0) + 1
             )
 
     def release(self, conversation_id: str) -> None:
-        with self.lock:
+        with self._active_lock:
             remaining = self._active_requests.get(conversation_id, 0) - 1
             if remaining > 0:
                 self._active_requests[conversation_id] = remaining
                 return
             self._active_requests.pop(conversation_id, None)
             temporary = self._retired_transient_roots.pop(conversation_id, None)
-            if temporary is not None:
-                temporary.cleanup()
+        if temporary is not None:
+            temporary.cleanup()
 
     def _materialize(
         self,
@@ -462,6 +508,7 @@ class ConversationRegistry:
                 read_only=self.read_only,
             )
             session.conversation_id = conversation_id
+            signature = self._snapshot_signature(snapshot_path) if self.read_only else None
             if (self.persist_sessions or self.read_only) and snapshot_path.is_file():
                 try:
                     snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
@@ -472,6 +519,8 @@ class ConversationRegistry:
                     ) from exc
             with self.lock:
                 self._sessions[conversation_id] = session
+                if self.read_only:
+                    self._snapshot_signatures[conversation_id] = signature
             return session
 
     def _session_snapshot_path(self, record: dict[str, Any]) -> Path:
@@ -487,23 +536,40 @@ class ConversationRegistry:
                 for record in self._records
                 if record["id"] in self._sessions
             ]
+        errors = {}
         for record, session in pairs:
-            snapshot_path = self._session_snapshot_path(record)
-            snapshot_path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = snapshot_path.with_suffix(".json.tmp")
-            temporary.write_text(
-                json.dumps(session.export_persistent_state(), ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
-            )
-            temporary.replace(snapshot_path)
-        self._persistence_error = None
+            try:
+                revision = session.idle_persistence_revision()
+                snapshot_path = self._session_snapshot_path(record)
+                if (revision is not None and self._saved_idle_revisions.get(record["id"]) == revision
+                        and snapshot_path.is_file()):
+                    continue
+                snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+                temporary = snapshot_path.with_suffix(".json.tmp")
+                temporary.write_text(
+                    json.dumps(session.export_persistent_state(), ensure_ascii=False, separators=(",", ":")) + "\n",
+                    encoding="utf-8",
+                )
+                temporary.replace(snapshot_path)
+                if revision is not None:
+                    self._saved_idle_revisions[record["id"]] = revision
+                else:
+                    self._saved_idle_revisions.pop(record["id"], None)
+            except Exception as exc:
+                errors[record["id"]] = exc
+                logging.getLogger(__name__).warning("Unable to persist conversation %s: %s", record["id"], type(exc).__name__)
+        with self.lock:
+            self._persistence_errors = errors
+        if errors:
+            raise RuntimeError(f"Unable to persist {len(errors)} conversation(s)") from next(iter(errors.values()))
 
     def _persistence_loop(self) -> None:
         while not self._persistence_stop.wait(self.persistence_interval):
             try:
                 self.persist()
-            except Exception as exc:
-                self._persistence_error = exc
+            except Exception:
+                # Per-conversation errors are recorded; unrelated sessions remain usable.
+                logging.getLogger(__name__).warning("Some conversation snapshots could not be saved")
 
     def _visible(self, record: dict[str, Any], client_id: str) -> bool:
         return not record["archived"] and (
@@ -513,19 +579,16 @@ class ConversationRegistry:
     def _owned(self, record: dict[str, Any], client_id: str) -> bool:
         return not self.isolate_users or record["owner_id"] == client_id
 
-    def _raise_persistence_error(self) -> None:
-        if self._persistence_error is not None:
-            raise RuntimeError("InteractiveSession persistence failed") from self._persistence_error
-
     def resolve(
         self,
         client_id: str,
         selected_id: str | None,
         *,
         materialize_reason: str | None = None,
-    ) -> tuple[dict[str, Any], InteractiveSession]:
+        load_session: bool = True,
+    ) -> tuple[dict[str, Any], InteractiveSession | None]:
+        self._refresh_read_only()
         with self.lock:
-            self._raise_persistence_error()
             self._sweep_transients()
             visible = [record for record in self._records if self._visible(record, client_id)]
             transient = self._transient_records.get(selected_id or "")
@@ -553,9 +616,10 @@ class ConversationRegistry:
                     client_id=client_id,
                     reason=materialize_reason,
                 )
-        return record, self._session_for(record)
+        return record, self._session_for(record) if load_session else None
 
     def list(self, client_id: str, selected_id: str | None = None) -> dict[str, Any]:
+        self._refresh_read_only()
         with self.lock:
             records = [record for record in self._records if self._visible(record, client_id)]
             records.extend(
@@ -566,6 +630,7 @@ class ConversationRegistry:
             return {
                 "isolate_users": self.isolate_users,
                 "read_only": self.read_only,
+                "persistence_warning": selected_id in self._persistence_errors,
                 "selected": selected_id,
                 "conversations": [
                     {key: record[key] for key in ("id", "name", "created_at", "updated_at")}
@@ -619,6 +684,7 @@ class ConversationRegistry:
             return record
 
     def select(self, client_id: str, conversation_id: str) -> dict[str, Any]:
+        self._refresh_read_only()
         with self.lock:
             transient = self._transient_records.get(conversation_id)
             if transient is not None and self._transient_visible(transient, client_id):
@@ -816,39 +882,47 @@ def mount_conversations(app, registry: ConversationRegistry) -> None:
     async def bind_conversation(request: Request, call_next):
         client_id = request.cookies.get(CLIENT_COOKIE) or uuid.uuid4().hex
         path = request.url.path
-        if path in {"/", "/viewer", "/api/version"} or path.startswith("/static/"):
-            request.state.client_id = client_id
-            response = await call_next(request)
-            response.set_cookie(
-                CLIENT_COOKIE, client_id, httponly=True, samesite="lax", max_age=31536000
-            )
-            return response
-        selected_id = (
-            request.headers.get(CONVERSATION_HEADER)
-            or request.query_params.get(CONVERSATION_QUERY)
-        )
-        before_reason, after_reason = persistence_timing(request)
-        record, session = await run_in_threadpool(
-            registry.resolve,
-            client_id,
-            selected_id,
-            materialize_reason=before_reason,
-        )
+        public = path in {"/", "/viewer", "/api/version", "/health"} or path.startswith("/static/")
+        selected_id = request.headers.get(CONVERSATION_HEADER) or request.query_params.get(CONVERSATION_QUERY)
+        keys = ("client:" + client_id,) + (("conversation:" + selected_id,) if selected_id else ())
+        work_token = request_work_keys.set(keys)
+        mutation_token = request_mutating.set(request.method not in {"GET", "HEAD", "OPTIONS"})
         request.state.client_id = client_id
-        request.state.conversation_id = record["id"]
-        registry.acquire(record["id"])
-        token = registry.session_proxy.bind(session)
         try:
-            response = await call_next(request)
-            if after_reason is not None and response.status_code < 400:
-                registry.materialize(client_id, record["id"], after_reason)
+            if public:
+                response = await call_next(request)
+            else:
+                before_reason, after_reason = persistence_timing(request)
+                # Listing/creating/selecting chats must not restore a broken current snapshot.
+                metadata_only = path == "/api/conversations" or (
+                    path.startswith("/api/conversations/") and path.endswith("/select")
+                )
+                record, session = await app.state.work_pool.run(
+                    registry.resolve, client_id, selected_id,
+                    materialize_reason=before_reason, load_session=not metadata_only,
+                )
+                request_work_keys.set(("client:" + client_id, "conversation:" + record["id"]))
+                request.state.conversation_id = record["id"]
+                registry.acquire(record["id"])
+                token = registry.session_proxy.bind(session)
+                lease_token = request_session_lease.set((registry, record["id"]))
+                try:
+                    response = await call_next(request)
+                    if after_reason is not None and response.status_code < 400:
+                        await app.state.work_pool.run(registry.materialize, client_id, record["id"], after_reason)
+                finally:
+                    if session is not None and request.method not in {"GET", "HEAD", "OPTIONS"}:
+                        session._persistence_generation = getattr(session, "_persistence_generation", 0) + 1
+                    registry.session_proxy.reset(token)
+                    request_session_lease.reset(lease_token)
+                    await run_in_threadpool(registry.release, record["id"])
+            response.set_cookie(CLIENT_COOKIE, client_id, httponly=True, samesite="lax", max_age=31536000)
+            return response
+        except HTTPException as exc:
+            return JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers)
         finally:
-            registry.session_proxy.reset(token)
-            registry.release(record["id"])
-        response.set_cookie(
-            CLIENT_COOKIE, client_id, httponly=True, samesite="lax", max_age=31536000
-        )
-        return response
+            request_work_keys.reset(work_token)
+            request_mutating.reset(mutation_token)
 
     @app.get("/api/conversations")
     def conversations(request: Request):

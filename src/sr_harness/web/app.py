@@ -4,6 +4,7 @@ import asyncio
 import json
 import math
 import re
+from contextlib import asynccontextmanager
 from importlib.metadata import version as package_version
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,8 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..runtime import SRInteractionManager
+from .responses import worker_json_response, worker_event_response
+from .isolation import RequestWorkPool, RequestBodyLimit, install_route_isolation
 
 WEB_DIR = Path(__file__).resolve().parent
 STATIC_DIR = WEB_DIR / "static"
@@ -38,7 +41,19 @@ def create_app(
         FastAPI: The operation result.
     """
     version = package_version("sr-harness")
-    app = FastAPI(title="SRHarness Search Viewer", version=version)
+    work_pool = RequestWorkPool()
+
+    @asynccontextmanager
+    async def lifespan(app):
+        work_pool.start()
+        try:
+            yield
+        finally:
+            work_pool.close()
+
+    app = FastAPI(title="SRHarness Search Viewer", version=version, lifespan=lifespan)
+    app.state.work_pool = work_pool
+    install_route_isolation(app, work_pool)
     app.state.log_dir = Path(log_dir).resolve()
     app.state.session = session
     app.state.conversation_registry = conversation_registry
@@ -68,15 +83,19 @@ def create_app(
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     @app.get("/")
-    def index():
+    async def index():
         return FileResponse(STATIC_DIR / ("platform.html" if session is not None else "index.html"))
 
     @app.get("/viewer")
-    def viewer():
+    async def viewer():
         return FileResponse(STATIC_DIR / "index.html")
 
+    @app.get("/health", include_in_schema=False)
+    async def health():
+        return {"status": "ok"}
+
     @app.get("/api/version")
-    def application_version():
+    async def application_version():
         return {"version": version}
 
     if session is not None:
@@ -105,7 +124,7 @@ def create_app(
     @app.get("/api/control/events")
     def control_events(after_seq: int = Query(0, ge=0)):
         manager = session.sr_interaction_manager if session is not None else app.state.interaction_manager
-        return manager.get_recent_events(after_seq)
+        return worker_event_response(manager, after_seq)
 
     @app.post("/api/control/command")
     def control_command(payload: dict = Body(...)):
@@ -131,7 +150,7 @@ def create_app(
                 continue
             record = _with_core_derivatives(record, records_by_id)
             records.append(record if include_detail else _strip_detail(record))
-        return {"records": records}
+        return worker_json_response({"records": records})
 
     @app.get("/api/runs/{run_id}/records/{node_id}")
     def get_record(run_id: str, node_id: str):
@@ -142,39 +161,44 @@ def create_app(
         }
         for record in all_records:
             if record.get("node_id") == node_id:
-                return _with_core_derivatives(record, records_by_id)
+                return worker_json_response(_with_core_derivatives(record, records_by_id))
         raise HTTPException(status_code=404, detail=f"Node not found: {node_id}")
 
     @app.get("/api/runs/{run_id}/stream")
     async def stream_records(run_id: str, request: Request, after_seq: int = Query(0, ge=0)):
         state = _resolve_run_state(session, run_id)
 
+        def encode_batch(next_seq):
+            batch = []
+            all_records = _number_records(state.records(include_detail=True))
+            records_by_id = {record["node_id"]: record for record in all_records if record.get("node_id")}
+            for record in all_records:
+                seq = int(record.get("seq", 0))
+                if seq > next_seq:
+                    batch.append(_strip_detail(_with_core_derivatives(record, records_by_id)))
+                    next_seq = max(next_seq, seq)
+                    if len(batch) >= 32:
+                        break
+            payload = worker_json_response(_sanitize_json_value({"records": batch})).body.decode('utf-8') if batch else None
+            return next_seq, payload
+
         async def event_source():
             next_seq = after_seq
             while not await request.is_disconnected():
-                batch = []
-                all_records = _number_records(state.records(include_detail=True))
-                records_by_id = {
-                    record["node_id"]: record
-                    for record in all_records
-                    if record.get("node_id")
-                }
-                for record in all_records:
-                    seq = int(record.get("seq", 0))
-                    if seq > next_seq:
-                        batch.append(_strip_detail(_with_core_derivatives(record, records_by_id)))
-                        next_seq = max(next_seq, seq)
-                if batch:
-                    payload = json.dumps(
-                        _sanitize_json_value({"records": batch}),
-                        ensure_ascii=False,
-                        allow_nan=False,
-                    )
+                try:
+                    next_seq, payload = await work_pool.run(encode_batch, next_seq)
+                except HTTPException as exc:
+                    yield "event: error\ndata: " + json.dumps({"detail": exc.detail}) + "\n\n"
+                    return
+                if payload is not None:
                     yield f"data: {payload}\n\n"
+                else:
+                    yield ": keepalive\n\n"
                 await asyncio.sleep(1.0)
 
         return StreamingResponse(event_source(), media_type="text/event-stream")
 
+    app.add_middleware(RequestBodyLimit)
     return app
 
 

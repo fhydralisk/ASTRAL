@@ -27,6 +27,8 @@ def json_value(value: Any) -> Any:
     Returns:
         Any: The operation result.
     """
+    if value is None or type(value) in (str, int, bool):
+        return value
     if is_dataclass(value) and not isinstance(value, type):
         return json_value(asdict(value))
     if isinstance(value, np.ndarray):
