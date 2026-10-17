@@ -295,6 +295,9 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert 'id="documentation-link"' in page.text
     assert 'href="https://yuzhthu.github.io/SRHarness/"' in page.text
     assert "documentation:'Open documentation'" in page.text
+    assert 'id="github-link"' in page.text
+    assert 'href="https://github.com/yuzhTHU/SRHarness"' in page.text
+    assert "githubRepository:'Open GitHub repository'" in page.text
     assert "function compactEventContent(e)" in page.text
     assert "eventContent(card,meta,metaTime,compactEventContent(e))" in page.text
     assert "function sessionSettingsEditable(value=session){return ['idle','starting','running'].includes(value?.state)}" in page.text
