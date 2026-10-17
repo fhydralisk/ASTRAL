@@ -51,7 +51,7 @@ WORKDIR /data
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD python -c "import socket; connection = socket.create_connection(('127.0.0.1', 8000), timeout=3); connection.close()"
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).close()"
 
 ENTRYPOINT ["sr-harness"]
 CMD ["run", "--save-path", "/data", "--workspace-dir", "/data", "--isolate-users", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,6 +1,6 @@
 services:
   sr-harness:
-    image: sr-harness:port30000
+    image: ${SRH_IMAGE:-yumeoww/sr-harness:1.0.6}
     build:
       context: ../..
       dockerfile: Dockerfile
@@ -60,7 +60,7 @@ services:
         - CMD
         - python
         - -c
-        - "import socket; connection = socket.create_connection(('127.0.0.1', 30000), timeout=5); connection.close()"
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:30000/health', timeout=5).close()"
       interval: 15s
       timeout: 6s
       retries: 5
