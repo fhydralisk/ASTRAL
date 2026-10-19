@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "sr-harness"
+name = "astro-discovery"
 version = "1.0.6"
-description = "SRHarness: a harness for agentic symbolic regression"
+description = "AstroDiscovery: a human–AI interactive astronomy discovery platform"
 readme = "README.md"
 requires-python = ">=3.12"
 classifiers = [
@@ -44,7 +44,7 @@ dependencies = [
 ]
 
 [project.scripts]
-sr-harness = "sr_harness.cli:entrypoint"
+astro-discovery = "sr_harness.cli:entrypoint"
 
 [project.optional-dependencies]
 nn = [
@@ -68,7 +68,7 @@ dev = [
     "ruff>=0.8",
 ]
 all = [
-    "sr-harness[nn,tools,dev]",
+    "astro-discovery[nn,tools,dev]",
 ]
 
 [tool.setuptools.packages.find]

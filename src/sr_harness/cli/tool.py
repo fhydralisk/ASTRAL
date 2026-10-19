@@ -1,5 +1,5 @@
 # Copyright (c) 2026-present, Yumeow. Licensed under the MIT License.
-"""Command-line gateway for SRHarness tools."""
+"""Command-line gateway for AstroDiscovery tools."""
 from __future__ import annotations
 
 import json
@@ -118,12 +118,12 @@ def setup_parser(parser: argparse.ArgumentParser | None = None) -> argparse.Argu
     """
     if parser is None:
         parser = argparse.ArgumentParser(
-            prog="sr-harness tool",
-            description="Run SRHarness tools from the command line.",
+            prog="astro-discovery tool",
+            description="Run AstroDiscovery tools from the command line.",
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         )
     else:
-        parser.description = "Run SRHarness tools from the command line."
+        parser.description = "Run AstroDiscovery tools from the command line."
         parser.formatter_class = argparse.ArgumentDefaultsHelpFormatter
     subparsers = parser.add_subparsers(dest="tool_command", required=True)
 

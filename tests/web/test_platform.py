@@ -54,8 +54,8 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert not (session.workspace / "skills").exists()
     page = client.get('/')
     assert page.status_code == 200
-    assert client.get('/api/version').json() == {'version': package_version('sr-harness')}
-    assert '<div class="brand"><div class="logo">SR<span>Harness</span></div><span id="app-version" class="app-version"></span></div>' in page.text
+    assert client.get('/api/version').json() == {'version': package_version('astro-discovery')}
+    assert '<div class="brand"><div class="logo"><img src="/static/favicon.svg" alt="" width="30" height="30">Astro<span>Discovery</span></div><span id="app-version" class="app-version"></span></div>' in page.text
     assert ".app-version{color:var(--muted);font:600 9px/1" in page.text
     assert "$('app-version').textContent='v'+result.version" in page.text
     assert 'class="badge"' not in page.text
@@ -181,7 +181,7 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert '.evaluator-arg-copy b{display:block;color:var(--ink);font:600 10px/1.4' in page.text
     assert '.evaluator-arg-copy small{display:block;margin-top:2px;color:var(--muted)' in page.text
     assert '#evaluator-args-toggle{height:30px;padding:4px 8px;border:0;border-radius:7px;background:transparent' in page.text
-    assert '#evaluator-args-toggle[aria-expanded="true"]{border:0;background:#eaf3f0;color:var(--accent)}' in page.text
+    assert '#evaluator-args-toggle[aria-expanded="true"]{border:0;background:#e8ecf5;color:var(--accent)}' in page.text
     assert "api('/api/evaluator/agent/settings',evaluatorAgentSettingsPayload(),'PUT')" in page.text
     assert "api('/api/evaluator/agent/test',evaluatorAgentSettingsPayload())" in page.text
     assert "if(e.kind==='evaluator_user'){appendEvaluatorAgentEvent('user',p,e.timestamp);return}" in page.text
@@ -224,35 +224,35 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert '@container data-tools (min-width:360px){#data-tool-options{grid-template-columns:repeat(2,minmax(0,1fr))}}' in page.text
     assert '.data-agent-settings .settings-form label:has(#data-proxy),.data-agent-settings .settings-form .api-key-setting{grid-column:auto}' in page.text
     assert '.data-agent-compose-toolbar{padding-right:7px;padding-bottom:7px}' in page.text
-    assert 'button.composer-settings-button:is(#initial-prompt-toggle,#data-agent-settings-toggle,#settings-toggle){border:0;border-radius:7px;background:transparent;color:#647571;font-size:13px}' in page.text
-    assert 'button.composer-settings-button:is(#initial-prompt-toggle,#data-agent-settings-toggle,#settings-toggle)[aria-expanded="true"]{border:0;border-radius:7px;background:#eaf3f0;color:var(--accent)}' in page.text
-    assert ':root[data-theme="dark"] button.composer-settings-button:is(#initial-prompt-toggle,#data-agent-settings-toggle,#settings-toggle){border:0;border-radius:7px;background:transparent;color:#aebbb8}' in page.text
-    assert ':root[data-theme="dark"] button.composer-settings-button:is(#initial-prompt-toggle,#data-agent-settings-toggle,#settings-toggle):hover{background:#22302d;color:#d2dfdc}' in page.text
-    assert ':root[data-theme="dark"] button.composer-settings-button:is(#initial-prompt-toggle,#data-agent-settings-toggle,#settings-toggle)[aria-expanded="true"]{border:0;background:#29413c;color:#74c7bb}' in page.text
-    assert ':root[data-theme="dark"] #initial-prompt-toggle[aria-expanded="true"]{background:#29413c!important;color:#74c7bb}' in page.text
-    assert '.composer>#initial-prompt-panel{border-color:#9fc5be;border-radius:17px;background:#f3f9f7}' in page.text
-    assert ':root[data-theme="dark"] .composer>#initial-prompt-panel{border-color:#4d8d83;background:#172522}' in page.text
-    assert '.initial-prompt-body #system-prompt{border:1px solid #d8e5e2;border-radius:4px;background:#fff;box-shadow:0 1px 2px #263b3808;color:var(--ink)}' in page.text
-    assert '.initial-prompt-body #system-prompt:focus{border-color:#a8c8c2;background:#fff;color:var(--ink)}' in page.text
-    assert ':root[data-theme="dark"] .initial-prompt-body #system-prompt{border-color:#3d514d;background:#202b29;color:var(--ink)}' in page.text
+    assert 'button.composer-settings-button:is(#initial-prompt-toggle,#data-agent-settings-toggle,#settings-toggle){border:0;border-radius:7px;background:transparent;color:#606879;font-size:13px}' in page.text
+    assert 'button.composer-settings-button:is(#initial-prompt-toggle,#data-agent-settings-toggle,#settings-toggle)[aria-expanded="true"]{border:0;border-radius:7px;background:#e8ecf5;color:var(--accent)}' in page.text
+    assert ':root[data-theme="dark"] button.composer-settings-button:is(#initial-prompt-toggle,#data-agent-settings-toggle,#settings-toggle){border:0;border-radius:7px;background:transparent;color:#abb1be}' in page.text
+    assert ':root[data-theme="dark"] button.composer-settings-button:is(#initial-prompt-toggle,#data-agent-settings-toggle,#settings-toggle):hover{background:#1e2533;color:#cfd5e2}' in page.text
+    assert ':root[data-theme="dark"] button.composer-settings-button:is(#initial-prompt-toggle,#data-agent-settings-toggle,#settings-toggle)[aria-expanded="true"]{border:0;background:#232f47;color:#a6c6ff}' in page.text
+    assert ':root[data-theme="dark"] #initial-prompt-toggle[aria-expanded="true"]{background:#232f47!important;color:#a6c6ff}' in page.text
+    assert '.composer>#initial-prompt-panel{border-color:#96a8ce;border-radius:17px;background:#f1f4fa}' in page.text
+    assert ':root[data-theme="dark"] .composer>#initial-prompt-panel{border-color:#3d5d9d;background:#131a29}' in page.text
+    assert '.initial-prompt-body #system-prompt{border:1px solid #d5dbe8;border-radius:4px;background:#fff;box-shadow:0 1px 2px #212b4008;color:var(--ink)}' in page.text
+    assert '.initial-prompt-body #system-prompt:focus{border-color:#a0b0d0;background:#fff;color:var(--ink)}' in page.text
+    assert ':root[data-theme="dark"] .initial-prompt-body #system-prompt{border-color:#384256;background:#1d232e;color:var(--ink)}' in page.text
     assert '.initial-prompt-panel>.settings-heading{display:none}' in page.text
     assert '.initial-prompt-body{padding:12px}' in page.text
     assert ':root[data-theme="dark"] .data-agent-send{background:var(--accent);color:#fff}' in page.text
-    assert ':root[data-theme="dark"] .data-agent-send:hover{background:#14665f}' in page.text
+    assert ':root[data-theme="dark"] .data-agent-send:hover{background:#102d59}' in page.text
     assert ':root[data-theme="dark"] .data-agent-send.stop{background:var(--danger)}' in page.text
-    assert ':root[data-theme="dark"] .data-agent-send:disabled{background:#aebbb8}' in page.text
-    assert '.data-agent-settings{margin-top:2px;border-color:#9fc5be;border-radius:17px;background:#f3f9f7;box-shadow:none}' in page.text
+    assert ':root[data-theme="dark"] .data-agent-send:disabled{background:#abb1be}' in page.text
+    assert '.data-agent-settings{margin-top:2px;border-color:#96a8ce;border-radius:17px;background:#f1f4fa;box-shadow:none}' in page.text
     assert '.data-agent-settings .settings-scroll{padding-bottom:5px}' in page.text
     assert '.data-agent-settings .settings-actions{padding-top:5px;border-top:0;border-radius:0 0 17px 17px}' in page.text
-    assert '.data-agent-settings .settings-form label,.data-agent-settings .api-key-setting>span:first-child b,#data-settings-hint{color:#4f625e}' in page.text
-    assert '.data-agent-settings .settings-form input,.data-agent-settings .settings-form select{border-color:#d8e5e2;background:#fff;box-shadow:0 1px 2px #263b3808}' in page.text
-    assert '.data-agent-settings .api-key-control button{border-color:#d8e5e2;background:#fff}' in page.text
+    assert '.data-agent-settings .settings-form label,.data-agent-settings .api-key-setting>span:first-child b,#data-settings-hint{color:#4a5467}' in page.text
+    assert '.data-agent-settings .settings-form input,.data-agent-settings .settings-form select{border-color:#d5dbe8;background:#fff;box-shadow:0 1px 2px #212b4008}' in page.text
+    assert '.data-agent-settings .api-key-control button{border-color:#d5dbe8;background:#fff}' in page.text
     assert '.data-agent-settings .api-key-control{position:relative;display:block}' in page.text
     assert '.data-agent-settings .settings-form .api-key-control input{width:100%;padding-right:36px;border-radius:4px}' in page.text
     assert '.data-agent-settings .api-key-control #data-api-key-visibility{position:absolute;top:50%;right:4px' in page.text
     assert "function renderDataApiKeyVisibility()" in page.text
     assert "button.setAttribute('aria-pressed',String(visible))" in page.text
-    assert ':root[data-theme="dark"] .data-agent-settings .settings-form label,:root[data-theme="dark"] .data-agent-settings .api-key-setting>span:first-child b,:root[data-theme="dark"] #data-settings-hint{color:#b8c6c3}' in page.text
+    assert ':root[data-theme="dark"] .data-agent-settings .settings-form label,:root[data-theme="dark"] .data-agent-settings .api-key-setting>span:first-child b,:root[data-theme="dark"] #data-settings-hint{color:#b4bbca}' in page.text
     assert '#data-model-test,#data-settings-cancel,#data-settings-apply{flex:0 0 auto;height:34px;border-radius:17px;white-space:nowrap}' in page.text
     assert "$('data-model-test').before($('data-settings-hint'))" in page.text
     assert "$('data-agent-state').classList.add('composer-status-center');$('data-agent-send').before($('data-agent-state'),composerKeyboardHint('data-agent-keyboard-hint'))" in page.text
@@ -263,14 +263,14 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert "apiKeyGet:'获取 {{env}} ↗'" in page.text
     assert "link.textContent=_('apiKeyGet',{env:envVar})" in page.text
     assert "$('data-api-key-label').replaceChildren('API Key (',link,')')" in page.text
-    assert '.composer>#settings-panel{margin-top:2px;border-color:#9fc5be;border-radius:17px;background:#f3f9f7;box-shadow:none}' in page.text
+    assert '.composer>#settings-panel{margin-top:2px;border-color:#96a8ce;border-radius:17px;background:#f1f4fa;box-shadow:none}' in page.text
     assert '#settings-panel>.settings-heading,#api-key-env{display:none}' in page.text
     assert '#settings-panel .settings-scroll{container-type:inline-size;padding-bottom:5px}' in page.text
     assert '#settings-panel .settings-actions{padding-top:5px;border-top:0;border-radius:0 0 17px 17px}' in page.text
     assert '#settings-panel .settings-form,#settings-panel .settings-form.compact{grid-template-columns:1fr}' in page.text
     assert '@container (min-width:590px){#settings-panel .settings-form,#settings-panel .settings-form.compact{grid-template-columns:repeat(2,minmax(0,1fr))}}' in page.text
     assert '#settings-panel .settings-form label>span:first-child,#settings-panel .api-key-setting>span:first-child b{white-space:nowrap}' in page.text
-    assert '#settings-panel .settings-form input,#settings-panel .settings-form select{border-color:#d8e5e2;background:#fff;box-shadow:0 1px 2px #263b3808}' in page.text
+    assert '#settings-panel .settings-form input,#settings-panel .settings-form select{border-color:#d5dbe8;background:#fff;box-shadow:0 1px 2px #212b4008}' in page.text
     assert '#settings-panel .api-key-control #api-key-visibility{position:absolute;top:50%;right:4px' in page.text
     assert '#settings-cancel,#apply{flex:0 0 auto;height:34px;border-radius:17px;white-space:nowrap}' in page.text
     assert '#model-test{flex:0 0 auto;height:34px;border-radius:17px;white-space:nowrap}' in page.text
@@ -296,7 +296,7 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert 'href="https://yuzhthu.github.io/SRHarness/"' in page.text
     assert "documentation:'Open documentation'" in page.text
     assert 'id="github-link"' in page.text
-    assert 'href="https://github.com/yuzhTHU/SRHarness"' in page.text
+    assert 'href="https://github.com/yuzhTHU/AstroDiscovery"' in page.text
     assert "githubRepository:'Open GitHub repository'" in page.text
     assert "function compactEventContent(e)" in page.text
     assert "eventContent(card,meta,metaTime,compactEventContent(e))" in page.text
@@ -354,7 +354,7 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert '#run-variable-preview .variable-description-preview{overflow:visible;text-overflow:clip;white-space:normal;overflow-wrap:anywhere;line-height:1.5}' in page.text
     assert '.center:has(>#composer:not(.data-mode)){background:#fbfcfd}' in page.text
     assert '.center:has(>#composer:not(.data-mode))>.bar{background:#fff}' in page.text
-    assert ':root[data-theme="dark"] .center:has(>#composer:not(.data-mode)){background:#111817}' in page.text
+    assert ':root[data-theme="dark"] .center:has(>#composer:not(.data-mode)){background:#0c1529}' in page.text
     assert '#data-ingest,.data-agent-compose,#variable-role-table,#problem-description,#composer{box-shadow:var(--interactive-shadow)}' in page.text
     assert '.data-agent-compose:focus-within,#composer:focus-within{box-shadow:var(--interactive-shadow)}' in page.text
     assert ".data-agent-heading>div:first-child::before{content:'2'}" in page.text
@@ -362,7 +362,7 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert '#variable-config-card .variable-card-heading h3::before{content:\'1\'}' in page.text
     assert '#task-problem-title::before{content:\'2\'}' in page.text
     assert '.data-agent-feed{border:0;border-radius:0;background:#fff;box-shadow:0 -24px 32px -16px #fff,0 24px 32px -16px #fff}' in page.text
-    assert '#data-ingest{height:50px;padding:7px 7px 7px 14px;border:1px solid #dce4e2;border-radius:25px;background:var(--interactive-surface)' in page.text
+    assert '#data-ingest{height:50px;padding:7px 7px 7px 14px;border:1px solid #dadee6;border-radius:25px;background:var(--interactive-surface)' in page.text
     assert '#data-ingest .data-ingest-prompt{min-width:0;flex:1;color:var(--muted);font-size:12px' in page.text
     assert '#data-ingest #data-upload{flex:0 0 auto;height:34px;margin-left:auto;padding:0 14px;border:0;border-radius:17px;background:var(--accent);color:#fff}' in page.text
     assert "dataDropCopy:'拖入文件以上传'" in page.text
@@ -371,7 +371,7 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert "Object.assign(MESSAGE_CATALOGS.zh," not in page.text
     assert "uploadDataHelpPrefix:'上传数据文件，也可以从',uploadDataHelpSuffix:'快速开始'" in page.text
     assert "dataAgentHelp:'用自然语言指导 Agent 整理、清洗、补充或检查数据，结果将被保存在 context.data/ 目录以供使用'" in page.text
-    assert "dataAgentPlaceholder:'例如：将我上传的文件整理成 SR-Harness 可接受的格式'" in page.text
+    assert "dataAgentPlaceholder:'例如：将我上传的文件整理成 AstroDiscovery 可接受的格式'" in page.text
     assert "dataNextHint:'数据准备完成后，进入下一步',dataNextAction:'任务配置'" in page.text
     assert "taskNextHint:'任务配置完成后，进入下一步',taskNextAction:'符号回归'" in page.text
     assert "help.textContent=_('dataAgentHelp');link.textContent=_('dataAgentSafety')" in page.text

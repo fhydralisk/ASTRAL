@@ -40,7 +40,7 @@ def create_app(
     Returns:
         FastAPI: The operation result.
     """
-    version = package_version("sr-harness")
+    version = package_version("astro-discovery")
     work_pool = RequestWorkPool()
 
     @asynccontextmanager
@@ -51,7 +51,7 @@ def create_app(
         finally:
             work_pool.close()
 
-    app = FastAPI(title="SRHarness Search Viewer", version=version, lifespan=lifespan)
+    app = FastAPI(title="AstroDiscovery Search Viewer", version=version, lifespan=lifespan)
     app.state.work_pool = work_pool
     install_route_isolation(app, work_pool)
     app.state.log_dir = Path(log_dir).resolve()
@@ -74,7 +74,7 @@ def create_app(
             if not (selection or pure_computation):
                 return JSONResponse(
                     status_code=403,
-                    content={"detail": "SRHarness is running in read-only mode"},
+                    content={"detail": "AstroDiscovery is running in read-only mode"},
                 )
         return await call_next(request)
     if conversation_registry is not None:

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SRHarness Search Viewer</title>
+  <title>AstroDiscovery Search Viewer</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <script>
     window.MathJax = {
@@ -26,25 +26,25 @@
       --line: #d8dee8;
       --edge: #7f8b9d;
       --root: #263238;
-      --accent: #157a6e;
+      --accent: #173b73;
     }
     :root[data-theme="dark"] {
       color-scheme: dark;
-      --bg: #101615;
-      --panel: #18201f;
-      --ink: #dce7e5;
-      --muted: #8f9d9a;
-      --line: #2b3836;
-      --edge: #71827f;
-      --root: #879894;
-      --accent: #64b9ad;
+      --bg: #0b1224;
+      --panel: #111c33;
+      --ink: #d9dfea;
+      --muted: #8b92a1;
+      --line: #282e3b;
+      --edge: #6d7586;
+      --root: #838b9c;
+      --accent: #8bb4ff;
     }
     :root[data-theme="dark"] .control-bar,
     :root[data-theme="dark"] select,
     :root[data-theme="dark"] button,
     :root[data-theme="dark"] input,
-    :root[data-theme="dark"] .range-input { background:#1b2523;color:var(--ink) }
-    :root[data-theme="dark"] #graph-wrap {background:linear-gradient(#26322f 1px,transparent 1px),linear-gradient(90deg,#26322f 1px,transparent 1px);background-size:32px 32px}
+    :root[data-theme="dark"] .range-input { background:#181d28;color:var(--ink) }
+    :root[data-theme="dark"] #graph-wrap {background:linear-gradient(#232935 1px,transparent 1px),linear-gradient(90deg,#232935 1px,transparent 1px);background-size:32px 32px}
     * { box-sizing: border-box; }
     body {
       margin: 0;
@@ -101,7 +101,7 @@
     .range-pair::after {
       left: var(--low);
       right: calc(100% - var(--high));
-      background: linear-gradient(90deg, #8b0000 0%, #f5c500 50%, #006837 100%);
+      background: linear-gradient(90deg, #8b0000 0%, #f5c500 50%, #1a2b4e 100%);
     }
     .range-pair input[type="range"] {
       position: absolute;
@@ -152,10 +152,10 @@
       background: #8b0000;
     }
     .range-pair input[type="range"]:last-child::-webkit-slider-thumb {
-      background: #006837;
+      background: #1a2b4e;
     }
     .range-pair input[type="range"]:last-child::-moz-range-thumb {
-      background: #006837;
+      background: #1a2b4e;
     }
     .range-input {
       width: 58px;
@@ -246,9 +246,9 @@
       font-size: 13px;
     }
     .run-tab.active {
-      border-color: #9ccbc4;
-      background: #dfeeea;
-      color: #0f5f56;
+      border-color: #90a8d7;
+      background: #dbe3f2;
+      color: #1c2e52;
       font-weight: 650;
     }
     .run-tab-panel.hidden {
@@ -335,8 +335,8 @@
       background: #eef2f7;
     }
     .tree-row.active {
-      background: #dfeeea;
-      color: #0f5f56;
+      background: #dbe3f2;
+      color: #1c2e52;
       font-weight: 650;
     }
     .tree-children {
@@ -559,8 +559,8 @@
       transform: rotate(180deg);
     }
     .run-resizer-tab.active {
-      color: #0f5f56;
-      background: #dfeeea;
+      color: #1c2e52;
+      background: #dbe3f2;
     }
     .side-section {
       padding: 16px;
@@ -716,8 +716,8 @@
       overflow: hidden;
     }
     .chat-bubble.agent .chat-bubble-box {
-      border-color: #b7d6d1;
-      background: #eef8f6;
+      border-color: #afbfde;
+      background: #edf1f9;
     }
     .chat-bubble.user .chat-bubble-box {
       border-color: #d7deea;
@@ -848,7 +848,7 @@
       color: #7c3aed;
     }
     .json-string {
-      color: #0f766e;
+      color: #213764;
     }
     .json-number {
       color: #b45309;
@@ -924,7 +924,7 @@
 </head>
 <body>
   <header>
-    <h1>SRHarness Search Viewer</h1>
+    <h1>AstroDiscovery Search Viewer</h1>
     <button id="refresh">Refresh</button>
     <button id="home">Home</button>
     <span id="status" class="muted"></span>
@@ -2357,7 +2357,7 @@
     }
 
     function toolColor(name) {
-      const palette = ["#157a6e", "#6f5bd6", "#b54f9b", "#c75a2b", "#3f7fba", "#7b6d2d", "#2f855a", "#a33f4a", "#4a6f28", "#8b5e34"];
+      const palette = ["#173b73", "#6f5bd6", "#b54f9b", "#c75a2b", "#3f7fba", "#7b6d2d", "#2f855a", "#a33f4a", "#4a6f28", "#8b5e34"];
       let hash = 0;
       const text = String(name || "");
       for (let i = 0; i < text.length; i++) hash = (hash * 31 + text.charCodeAt(i)) >>> 0;

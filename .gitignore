@@ -166,3 +166,6 @@ _deps/
 /logs/
 /baseline/
 /playground/
+
+# Persistent local AstroDiscovery conversations
+/workspaces/
