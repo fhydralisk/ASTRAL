@@ -81,3 +81,10 @@ def test_context_array_snapshot_is_reused_until_data_revision_changes():
     assert second is first
     assert third is not first
     assert third.root != first.root
+
+
+def test_worker_can_import_standard_library_from_base_interpreter():
+    runner = SandboxRunner()
+    result = runner.run("from xml.sax.saxutils import escape\nprint(escape('<star>'))")
+    assert result.exit_code == 0
+    assert result.stdout.strip() == "&lt;star&gt;"

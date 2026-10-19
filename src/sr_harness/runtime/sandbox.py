@@ -9,6 +9,7 @@ import signal
 import stat
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import threading
 import time
@@ -270,7 +271,9 @@ class _SandboxProcessRunner:
         """Build a worker command whose first action installs the sandbox policy."""
         runtime = Path(sys.prefix).resolve()
         source = self._runtime_source_root().resolve()
-        readable = [input_directory, array_directory, runtime, source]
+        # Virtual environments can share a standard library outside sys.prefix.
+        stdlib = Path(sysconfig.get_path("stdlib")).resolve()
+        readable = [input_directory, array_directory, runtime, source, stdlib]
         executable = [runtime]
         for system_path in (Path("/usr"), Path("/bin"), Path("/lib"), Path("/lib64")):
             if system_path.exists():
