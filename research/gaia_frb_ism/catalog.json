@@ -1,0 +1,373 @@
+[
+  {
+    "topic": "Gaia",
+    "name": "Xiang_Nature2022",
+    "title": "A time-resolved picture of our Milky Way’s early formation history",
+    "doi": "10.1038/s41586-022-04496-5",
+    "publisher_url": "https://www.nature.com/articles/s41586-022-04496-5",
+    "paper_path": "playground/paper/Gaia/Xiang_Nature2022.pdf",
+    "paper_download_url": "https://www.nature.com/articles/s41586-022-04496-5.pdf",
+    "paper_version": "publisher PDF",
+    "subject_zh": "年龄—金属丰度及轨道作用量",
+    "variables": "age [Gyr]; [Fe/H] [dex]; [alpha/Fe] [dex]; orbital actions",
+    "relation_type": "条件分布/线性拟合",
+    "relation_zh": "mean_age([Fe/H]) = age0 + a*[Fe/H]，厚盘窄年龄—金属丰度序列；不是全银河统一函数。",
+    "data_status_zh": "Supplementary Table 1，247104 行、26 列。文件注释中 247014 与 247104 不一致，以实际行数为准。",
+    "caveat_zh": "年龄为等龄线模型推断量；按族群、年龄区间划分，处理选择函数与年龄误差。",
+    "data_directory": "data/Gaia/Xiang_Nature2022",
+    "source_pages": [
+      "https://www.nature.com/articles/s41586-022-04496-5"
+    ],
+    "data_availability_note": "Supplementary Table 1，247104 行、26 列。文件注释中 247014 与 247104 不一致，以实际行数为准。",
+    "data_source_links": [
+      "https://www.cosmos.esa.int/web/gaia/earlydr3",
+      "http://dr7.lamost.org",
+      "https://keeper.mpdl.mpg.de/d/019ec71212934847bfed/",
+      "http://www.astro.yale.edu/demarque/yyiso.html"
+    ]
+  },
+  {
+    "topic": "Gaia",
+    "name": "Lian_NatureAstronomy2023",
+    "title": "The integrated metallicity profile of the Milky Way",
+    "doi": "10.1038/s41550-023-01977-z",
+    "publisher_url": "https://www.nature.com/articles/s41550-023-01977-z",
+    "paper_path": "playground/paper/Gaia/Lian_NatureAstronomy2023.pdf",
+    "paper_download_url": "https://www.nature.com/articles/s41550-023-01977-z.pdf",
+    "paper_version": "publisher PDF",
+    "subject_zh": "银河系径向金属丰度梯度",
+    "variables": "R [kpc]; light-weighted [Fe/H] [dex]; age",
+    "relation_type": "经验分段线性关系",
+    "relation_zh": "内外盘梯度约 +0.031 和 -0.052 dex/kpc，断点约 6.9 kpc。",
+    "data_status_zh": "作者 GitHub 源数据完整 ZIP，已展开；含 MW_Z_prof.txt、APOGEE 表、MaNGA/TNG 比较数据。",
+    "caveat_zh": "使用 Gaia 距离与 APOGEE 丰度；区分光度加权、质量加权及单年龄族群。",
+    "data_directory": "data/Gaia/Lian_NatureAstronomy2023",
+    "source_pages": [
+      "https://www.nature.com/articles/s41550-023-01977-z"
+    ],
+    "data_availability_note": "作者 GitHub 源数据完整 ZIP，已展开；含 MW_Z_prof.txt、APOGEE 表、MaNGA/TNG 比较数据。",
+    "data_source_links": [
+      "https://github.com/lianjianhui/Source-data-for-MW-gradient-paper.git"
+    ]
+  },
+  {
+    "topic": "Gaia",
+    "name": "Li_Nature2023",
+    "title": "Stellar initial mass function varies with metallicity and time",
+    "doi": "10.1038/s41586-022-05488-1",
+    "publisher_url": "https://www.nature.com/articles/s41586-022-05488-1",
+    "paper_path": "playground/paper/Gaia/Li_Nature2023.pdf",
+    "paper_download_url": "https://arxiv.org/pdf/2301.07029",
+    "paper_version": "public author manuscript / arXiv (may differ from version of record)",
+    "subject_zh": "初始质量函数斜率随丰度/时代变化",
+    "variables": "M [Msun]; [M/H] [dex]; IMF slope alpha; vertical action",
+    "relation_type": "幂律分布参数关系",
+    "relation_zh": "dN/dM ∝ M^(-alpha)，alpha 随金属丰度及恒星族群时代变化；0.3–0.7 Msun 范围。",
+    "data_status_zh": "NADC 原始发布 CSV：94596 行；与最终约93000颗分析样本不同，需复用论文筛选。",
+    "caveat_zh": "Gaia 视差/自行与 LAMOST 联用；不能把单星质量直接当作 IMF 斜率标签，须分箱及选择函数/双星修正。",
+    "data_directory": "data/Gaia/Li_Nature2023",
+    "source_pages": [
+      "https://www.nature.com/articles/s41586-022-05488-1"
+    ],
+    "data_availability_note": "NADC 原始发布 CSV：94596 行；与最终约93000颗分析样本不同，需复用论文筛选。",
+    "data_source_links": [
+      "https://doi.org/10.12149/101070",
+      "http://paperdata.china-vo.org/jordan/jdli22_imf.csv"
+    ]
+  },
+  {
+    "topic": "Gaia",
+    "name": "Chen_NatureAstronomy2023",
+    "title": "The use of double-mode RR Lyrae stars as robust distance and metallicity indicators",
+    "doi": "10.1038/s41550-023-02011-y",
+    "publisher_url": "https://www.nature.com/articles/s41550-023-02011-y",
+    "paper_path": "playground/paper/Gaia/Chen_NatureAstronomy2023.pdf",
+    "paper_download_url": "https://www.nature.com/articles/s41550-023-02011-y.pdf",
+    "paper_version": "publisher PDF",
+    "subject_zh": "双模 RR Lyrae 周期—周期比—金属丰度",
+    "variables": "P1O, PF [day]; [Fe/H] [dex]; Wesenheit magnitude [mag]; parallax [mas]",
+    "relation_type": "经验多变量对数线性关系",
+    "relation_zh": "SDSS: [Fe/H] = -173*log10((P1O/PF)/0.745) - 6.62*log10(P1O/0.37) - 1.76；见 Eq.1 的不确定度。",
+    "data_status_zh": "Supplementary Data 1：303 行；Data 2：126 行。两个原始 TXT 已保存。",
+    "caveat_zh": "优先回归样本。SDSS/LAMOST 标定分开；Gaia DR3 选源与视差用于距离标定。",
+    "data_directory": "data/Gaia/Chen_NatureAstronomy2023",
+    "source_pages": [
+      "https://www.nature.com/articles/s41550-023-02011-y"
+    ],
+    "data_availability_note": "Supplementary Data 1：303 行；Data 2：126 行。两个原始 TXT 已保存。",
+    "data_source_links": []
+  },
+  {
+    "topic": "Gaia",
+    "name": "Marigo_NatureAstronomy2020",
+    "title": "Carbon star formation as seen through the non-monotonic initial–final mass relation",
+    "doi": "10.1038/s41550-020-1132-1",
+    "publisher_url": "https://www.nature.com/articles/s41550-020-1132-1",
+    "paper_path": "playground/paper/Gaia/Marigo_NatureAstronomy2020.pdf",
+    "paper_download_url": "https://arxiv.org/pdf/2007.04163",
+    "paper_version": "public author manuscript / arXiv (may differ from version of record)",
+    "subject_zh": "白矮星初始—最终质量关系的非单调结构",
+    "variables": "initial mass [Msun]; final WD mass [Msun]; cluster age",
+    "relation_type": "经验非单调关系",
+    "relation_zh": "初始质量约1.65–2.10 Msun出现 kink；不能强行拟合单调统一直线。",
+    "data_status_zh": "公开补充 PDF 内有质量、星团和测光参数表；未找到作者单独机器可读观测表，声明需合理请求。",
+    "caveat_zh": "Gaia DR2 星团成员与测光参与参数推断；模型结果与观测估计需区分。",
+    "data_directory": "data/Gaia/Marigo_NatureAstronomy2020",
+    "source_pages": [
+      "https://www.nature.com/articles/s41550-020-1132-1"
+    ],
+    "data_availability_note": "公开补充 PDF 内有质量、星团和测光参数表；未找到作者单独机器可读观测表，声明需合理请求。",
+    "data_source_links": [
+      "http://www.astro.umontreal.ca/~bergeron/CoolingModels",
+      "http://starkey.astro.unipd.it/pulsation_models.html"
+    ]
+  },
+  {
+    "topic": "FRB",
+    "name": "Shannon_Nature2018",
+    "title": "The dispersion–brightness relation for fast radio bursts from a wide-field survey",
+    "doi": "10.1038/s41586-018-0588-y",
+    "publisher_url": "https://www.nature.com/articles/s41586-018-0588-y",
+    "paper_path": "playground/paper/FRB/Shannon_Nature2018.pdf",
+    "paper_download_url": "https://www.icrar.org/wp-content/uploads/2018/10/ASKAP_20FRB_r2_withfigures.pdf",
+    "paper_version": "public author manuscript / arXiv (may differ from version of record)",
+    "subject_zh": "FRB 色散量—亮度关系",
+    "variables": "DM_extragalactic [pc cm^-3]; fluence [Jy ms]; width [ms]",
+    "relation_type": "经验统计关系",
+    "relation_zh": "明亮 ASKAP 样本与较暗样本的色散分布关联；不是无散度的 DM(F) 标准烛光定律。",
+    "data_status_zh": "公开接受稿与补充 Tables 1–19；CSIRO 原始切片与定位后验数据入口已记录。",
+    "caveat_zh": "包含20个 ASKAP 新事件；处理阈值、波束增益、不同巡天选择效应。",
+    "data_directory": "data/FRB/Shannon_Nature2018",
+    "source_pages": [
+      "https://www.nature.com/articles/s41586-018-0588-y"
+    ],
+    "data_availability_note": "公开接受稿与补充 Tables 1–19；CSIRO 原始切片与定位后验数据入口已记录。",
+    "data_source_links": [
+      "http://sigproc.sourceforge.net",
+      "https://doi.org/10.25919/5b6ae6b515850"
+    ]
+  },
+  {
+    "topic": "FRB",
+    "name": "Macquart_Nature2020",
+    "title": "A census of baryons in the Universe from localized fast radio bursts",
+    "doi": "10.1038/s41586-020-2300-2",
+    "publisher_url": "https://www.nature.com/articles/s41586-020-2300-2",
+    "paper_path": "playground/paper/FRB/Macquart_Nature2020.pdf",
+    "paper_download_url": "https://arxiv.org/pdf/2005.13161",
+    "paper_version": "public author manuscript / arXiv (may differ from version of record)",
+    "subject_zh": "星系际色散量—红移（Macquart relation）",
+    "variables": "DM [pc cm^-3]; redshift z; Omega_b; host/MW DM",
+    "relation_type": "物理模型与观测标定",
+    "relation_zh": "<DM_IGM(z)> ∝ Omega_b * integral_0^z [(1+z) f_e(z)/E(z)] dz；先扣除银河与宿主贡献。",
+    "data_status_zh": "原论文 Table 1 文本、3个公开定位 FITS、档案说明；另保存作者仓库7个事件 JSON 的固定版本快照。",
+    "caveat_zh": "仓库快照为2026年现状，数值已更新，不能冒充2020原表；原始完整归档约5.34 GB未全量下载。",
+    "data_directory": "data/FRB/Macquart_Nature2020",
+    "source_pages": [
+      "https://www.nature.com/articles/s41586-020-2300-2"
+    ],
+    "data_availability_note": "原论文 Table 1 文本、3个公开定位 FITS、档案说明；另保存作者仓库7个事件 JSON 的固定版本快照。",
+    "data_source_links": [
+      "https://data-portal.hpc.swin.edu.au/dataset/observations-of-four-localised-fast-radio-bursts-and-their-host-galaxies"
+    ]
+  },
+  {
+    "topic": "FRB",
+    "name": "Bruni_Nature2024",
+    "title": "A nebular origin for the persistent radio emission of fast radio bursts",
+    "doi": "10.1038/s41586-024-07782-6",
+    "publisher_url": "https://www.nature.com/articles/s41586-024-07782-6",
+    "paper_path": "playground/paper/FRB/Bruni_Nature2024.pdf",
+    "paper_download_url": "https://arxiv.org/pdf/2312.15296",
+    "paper_version": "public author manuscript / arXiv (may differ from version of record)",
+    "subject_zh": "持续射电源光度—FRB 旋转量关系",
+    "variables": "L_nu [erg s^-1 Hz^-1]; RM [rad m^-2]; radius [pc]",
+    "relation_type": "理论预期关系的观测检验",
+    "relation_zh": "L_nu 与 |RM| 的比例关系还依赖星云半径和电子分布；新的弱持续源扩展检验范围。",
+    "data_status_zh": "Extended Data Table 2 文本（含检测与上限）及公开补充PDF；VLA/NOEMA/GTC原始档案入口见数据说明。",
+    "caveat_zh": "仅少数持续源检测，不能把未检出上限当实测值；不同频率需一致处理。",
+    "data_directory": "data/FRB/Bruni_Nature2024",
+    "source_pages": [
+      "https://www.nature.com/articles/s41586-024-07782-6"
+    ],
+    "data_availability_note": "Extended Data Table 2 文本（含检测与上限）及公开补充PDF；VLA/NOEMA/GTC原始档案入口见数据说明。",
+    "data_source_links": [
+      "https://data.nrao.edu/",
+      "https://iram-institute.org/science-portal/data-archive/",
+      "https://gtc.sdc.cab.inta-csic.es/gtc/"
+    ]
+  },
+  {
+    "topic": "FRB",
+    "name": "Li_Nature2021",
+    "title": "A bimodal burst energy distribution of a repeating fast radio burst source",
+    "doi": "10.1038/s41586-021-03878-5",
+    "publisher_url": "https://www.nature.com/articles/s41586-021-03878-5",
+    "paper_path": "playground/paper/FRB/Li_Nature2021.pdf",
+    "paper_download_url": "https://arxiv.org/pdf/2107.08205",
+    "paper_version": "public author manuscript / arXiv (may differ from version of record)",
+    "subject_zh": "重复 FRB 的能量分布（扩展阅读）",
+    "variables": "burst energy [erg]; fluence [Jy ms]; width [ms]; bandwidth [GHz]; time [MJD]",
+    "relation_type": "概率分布拟合，非变量间确定关系",
+    "relation_zh": "爆发能量分布使用 log-normal 与 generalized Cauchy 组合描述。",
+    "data_status_zh": "出版社 Supplementary Table 1：1652次爆发。扩展名.csv，但实际是空白分隔且带误差括号。",
+    "caveat_zh": "与严格的多变量关系发现有区别，列为分布建模补充。能量由流量等推导，避免标签泄漏；附勘误入口。",
+    "data_directory": "data/FRB/Li_Nature2021",
+    "source_pages": [
+      "https://www.nature.com/articles/s41586-021-03878-5"
+    ],
+    "data_availability_note": "出版社 Supplementary Table 1：1652次爆发。扩展名.csv，但实际是空白分隔且带误差括号。",
+    "data_source_links": [
+      "http://fast.bao.ac.cn",
+      "https://doi.org/10.11922/sciencedb.01092",
+      "https://www.scidb.cn/en/detail?dataSetId=f172ff40142c4100855724b80a085deb"
+    ],
+    "correction_urls": [
+      "https://www.nature.com/articles/s41586-021-04178-8"
+    ]
+  },
+  {
+    "topic": "ISM",
+    "name": "Kruijssen_Nature2019",
+    "title": "Fast and inefficient star formation due to short-lived molecular clouds and rapid feedback",
+    "doi": "10.1038/s41586-019-1194-3",
+    "publisher_url": "https://www.nature.com/articles/s41586-019-1194-3",
+    "paper_path": "playground/paper/ISM/Kruijssen_Nature2019.pdf",
+    "paper_download_url": "https://arxiv.org/pdf/1905.08801",
+    "paper_version": "public author manuscript / arXiv (may differ from version of record)",
+    "subject_zh": "分子气体—恒星形成的空间尺度关系",
+    "variables": "aperture [pc]; CO/Halpha flux ratio; t_CO,t_fb [Myr]; efficiency",
+    "relation_type": "尺度依赖物理模型拟合",
+    "relation_zh": "CO/Halpha 通量比随孔径尺度呈双分支，模型约束云寿命及反馈时间；不是直接单变量幂律。",
+    "data_status_zh": "论文 Table 1 原文提取；ALMA项目2013.1.00351.S、2015.1.00258.S与ESO 065.N-0076公开入口已记录。",
+    "caveat_zh": "作者处理后图像/拟合输入需合理请求；未将公共望远镜原始档案全量镜像。",
+    "data_directory": "data/ISM/Kruijssen_Nature2019",
+    "source_pages": [
+      "https://www.nature.com/articles/s41586-019-1194-3"
+    ],
+    "data_availability_note": "论文 Table 1 原文提取；ALMA项目2013.1.00351.S、2015.1.00258.S与ESO 065.N-0076公开入口已记录。",
+    "data_source_links": [
+      "https://almascience.eso.org/alma-data/archive",
+      "http://archive.eso.org/"
+    ]
+  },
+  {
+    "topic": "ISM",
+    "name": "Li_NatureAstronomy2017",
+    "title": "The link between magnetic field orientations and star formation rates",
+    "doi": "10.1038/s41550-017-0158",
+    "publisher_url": "https://www.nature.com/articles/s41550-017-0158",
+    "paper_path": "playground/paper/ISM/Li_NatureAstronomy2017.pdf",
+    "paper_download_url": "https://arxiv.org/pdf/1706.08452",
+    "paper_version": "public author manuscript / arXiv (may differ from version of record)",
+    "subject_zh": "磁场—云长轴夹角与单位质量恒星形成率",
+    "variables": "orientation difference [degree]; SFR/M [percent/Myr]",
+    "relation_type": "统计相关性（扩展阅读）",
+    "relation_zh": "近垂直磁场方向的云具有较低 SFR/M；非已确定的连续通用解析式。",
+    "data_status_zh": "Table 1及基于Planck的Supplementary Table 1，分别保留全文表格文本和补充PDF。",
+    "caveat_zh": "光学/Planck、不同SFR调查不可直接混合；论文有勘误，保留入口，稿件与更正版本需核对。",
+    "data_directory": "data/ISM/Li_NatureAstronomy2017",
+    "source_pages": [
+      "https://www.nature.com/articles/s41550-017-0158"
+    ],
+    "data_availability_note": "Table 1及基于Planck的Supplementary Table 1，分别保留全文表格文本和补充PDF。",
+    "data_source_links": [],
+    "correction_urls": [
+      "https://www.nature.com/articles/s41550-017-0199"
+    ]
+  },
+  {
+    "topic": "ISM",
+    "name": "Tabatabaei_NatureAstronomy2018",
+    "title": "Discovery of massive star formation quenching by non-thermal effects in the centre of NGC 1097",
+    "doi": "10.1038/s41550-017-0298-7",
+    "publisher_url": "https://www.nature.com/articles/s41550-017-0298-7",
+    "paper_path": "playground/paper/ISM/Tabatabaei_NatureAstronomy2018.pdf",
+    "paper_download_url": "https://arxiv.org/pdf/1710.05695",
+    "paper_version": "public author manuscript / arXiv (may differ from version of record)",
+    "subject_zh": "磁场强度与恒星形成效率/耗尽时间",
+    "variables": "B [microG]; SFR_ff; tau_dep; gas density; velocity dispersion [km/s]",
+    "relation_type": "经验相关性",
+    "relation_zh": "NGC1097窄谱线分子云群的 SFR_ff 与B反相关，文中Spearman约-0.93；tau_dep与B正相关。",
+    "data_status_zh": "公开作者稿Table 1数值表及其单位、误差已提取；未发现单独机器可读作者数据包。",
+    "caveat_zh": "仅单个星系中心云群；B来自同步辐射/能量均分估计，共享输入可能引入相关性。",
+    "data_directory": "data/ISM/Tabatabaei_NatureAstronomy2018",
+    "source_pages": [
+      "https://www.nature.com/articles/s41550-017-0298-7"
+    ],
+    "data_availability_note": "公开作者稿Table 1数值表及其单位、误差已提取；未发现单独机器可读作者数据包。",
+    "data_source_links": []
+  },
+  {
+    "topic": "ISM",
+    "name": "Chiang_NatureAstronomy2026",
+    "title": "Cosmic CO and [C II] backgrounds and the fuelling of star formation over 12 Gyr",
+    "doi": "10.1038/s41550-026-02798-6",
+    "publisher_url": "https://www.nature.com/articles/s41550-026-02798-6",
+    "paper_path": "playground/paper/ISM/Chiang_NatureAstronomy2026.pdf",
+    "paper_download_url": "https://www.nature.com/articles/s41550-026-02798-6.pdf",
+    "paper_version": "publisher PDF",
+    "subject_zh": "宇宙分子气体演化与恒星形成律",
+    "variables": "z; Omega_H2; CO/CII luminosity density; SFR density; t_dep",
+    "relation_type": "经验演化函数与幂律",
+    "relation_zh": "Omega_H2(z)≈1.9e-4*(1+z)^2.3/[1+((1+z)/2.8)^6.5]；宇宙平均KS型关系指数约1.5。",
+    "data_status_zh": "两个Zenodo数据发布全部文件已下载（6个原始文件），含ECSV数值表、协方差及ZIP；版本元数据保留。",
+    "caveat_zh": "这是星系总体/宇宙平均ISM，非单云数据；CO-H2转换因子与MCMC后验相关性重要。Code Ocean完整链未下载。",
+    "data_directory": "data/ISM/Chiang_NatureAstronomy2026",
+    "source_pages": [
+      "https://www.nature.com/articles/s41550-026-02798-6"
+    ],
+    "data_availability_note": "两个Zenodo数据发布全部文件已下载（6个原始文件），含ECSV数值表、协方差及ZIP；版本元数据保留。",
+    "data_source_links": [
+      "https://zenodo.org/records/16486649",
+      "https://zenodo.org/records/15495143",
+      "https://doi.org/10.24433/CO.1044049.v1"
+    ]
+  },
+  {
+    "topic": "FRB",
+    "name": "Feng_Science2022",
+    "title": "Frequency-dependent polarization of repeating fast radio bursts—implications for their origin",
+    "doi": "10.1126/science.abl7759",
+    "publisher_url": "https://www.science.org/doi/10.1126/science.abl7759",
+    "paper_path": "playground/paper/FRB/Feng_Science2022.pdf",
+    "paper_download_url": "https://arxiv.org/pdf/2202.09601",
+    "paper_version": "public author manuscript / arXiv (may differ from version of record)",
+    "subject_zh": "频率相关退偏振及磁离子环境参数关系",
+    "variables": "lambda [m]; linear polarization fraction; sigma_RM, RM [rad m^-2]; tau_sc [ms]",
+    "relation_type": "已有物理函数拟合+参数相关性",
+    "relation_zh": "p/p0 = exp(-2*sigma_RM^2*lambda^4)；再研究 sigma_RM 与 |RM|、散射时标的关系。",
+    "data_status_zh": "公开稿包含 Tables S1–S3；S2转录成7行CSV并保留误差和散射上限；ScienceDB V5元数据已存。",
+    "caveat_zh": "退偏振公式并非本文首创；ScienceDB的37个 Stokes动态谱文件约3.73 GB，未全量下载。",
+    "data_directory": "data/FRB/Feng_Science2022",
+    "source_pages": [
+      "https://www.science.org/doi/10.1126/science.abl7759"
+    ],
+    "data_availability_note": "公开稿包含 Tables S1–S3；S2转录成7行CSV并保留误差和散射上限；ScienceDB V5元数据已存。",
+    "data_source_links": [
+      "https://doi.org/10.11922/sciencedb.o00069.00006"
+    ]
+  },
+  {
+    "topic": "ISM",
+    "name": "Kainulainen_Science2014",
+    "title": "Unfolding the laws of star formation: The density distribution of molecular clouds",
+    "doi": "10.1126/science.1248724",
+    "publisher_url": "https://www.science.org/doi/10.1126/science.1248724",
+    "paper_path": "playground/paper/ISM/Kainulainen_Science2014.pdf",
+    "paper_download_url": "https://arxiv.org/pdf/1404.2722",
+    "paper_version": "public author manuscript / arXiv (may differ from version of record)",
+    "subject_zh": "分子云体密度分布与恒星形成",
+    "variables": "s=ln(rho/rho0); sigma_s; dense-gas mass [Msun]; N_YSO; SFE",
+    "relation_type": "密度概率分布拟合与恒星形成关联",
+    "relation_zh": "从消光图重建体密度PDF，比较其宽度与恒星形成活动，并约束密度阈值/阈值以上效率。",
+    "data_status_zh": "公开稿含完整补充材料；Table S1转录为17行CSV（16朵云及1个合并统计行），保留单位。",
+    "caveat_zh": "合并统计行不能作为独立训练样本；体密度由投影图反演，受几何假设及消光图分辨率限制。",
+    "data_directory": "data/ISM/Kainulainen_Science2014",
+    "source_pages": [
+      "https://www.science.org/doi/10.1126/science.1248724"
+    ],
+    "data_availability_note": "公开稿含完整补充材料；Table S1转录为17行CSV（16朵云及1个合并统计行），保留单位。",
+    "data_source_links": []
+  }
+]
