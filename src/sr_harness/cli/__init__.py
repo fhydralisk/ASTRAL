@@ -1,4 +1,4 @@
-"""Unified command-line entry point for AstroDiscovery."""
+"""Unified command-line entry point for ASTRAL."""
 from __future__ import annotations
 import argparse
 import importlib
@@ -7,10 +7,10 @@ __all__ = ["entrypoint"]
 
 
 COMMANDS = {
-    "run": ("run", "Launch the AstroDiscovery interactive workbench."),
-    "synthetic": ("synthetic", "Run AstroDiscovery on a synthetic symbolic-regression problem."),
-    "benchmark": ("benchmark", "Evaluate AstroDiscovery and baseline algorithms on LLM-SRBench."),
-    "tool": ("tool", "Inspect or invoke an AstroDiscovery tool."),
+    "run": ("run", "Launch the ASTRAL interactive workbench."),
+    "synthetic": ("synthetic", "Run ASTRAL on a synthetic symbolic-regression problem."),
+    "benchmark": ("benchmark", "Evaluate ASTRAL and baseline algorithms on LLM-SRBench."),
+    "tool": ("tool", "Inspect or invoke an ASTRAL tool."),
 }
 
 
@@ -39,8 +39,8 @@ def setup_parser(parser: argparse.ArgumentParser | None = None) -> argparse.Argu
     """
     if parser is None:
         parser = argparse.ArgumentParser(
-            prog="astro-discovery",
-            description="AstroDiscovery command-line interface.",
+            prog="astral",
+            description="ASTRAL command-line interface.",
         )
 
     subparsers = parser.add_subparsers(

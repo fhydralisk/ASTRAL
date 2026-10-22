@@ -167,5 +167,5 @@ _deps/
 /baseline/
 /playground/
 
-# Persistent local AstroDiscovery conversations
+# Persistent local ASTRAL conversations
 /workspaces/

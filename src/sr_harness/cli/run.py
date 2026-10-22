@@ -24,12 +24,12 @@ def setup_parser(parser: argparse.ArgumentParser | None = None) -> argparse.Argu
     """
     if parser is None:
         parser = argparse.ArgumentParser(
-            prog="astro-discovery run",
-            description="Serve the AstroDiscovery interactive workbench.",
+            prog="astral run",
+            description="Serve the ASTRAL interactive workbench.",
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         )
     else:
-        parser.description = "Serve the AstroDiscovery interactive workbench."
+        parser.description = "Serve the ASTRAL interactive workbench."
         parser.formatter_class = argparse.ArgumentDefaultsHelpFormatter
     parser.add_argument("--name", default=SCRIPT_NAME, help=(
         "Experiment task name used when auto-generating exp_name."
@@ -102,7 +102,7 @@ def main(args: argparse.Namespace) -> int:
     try:
         import uvicorn
     except ImportError as exc:
-        raise SystemExit("Please reinstall AstroDiscovery with its default dependencies.") from exc
+        raise SystemExit("Please reinstall ASTRAL with its default dependencies.") from exc
 
     from sr_harness.web.app import create_app
     from sr_harness.web.conversations import ConversationRegistry
@@ -183,7 +183,7 @@ def main(args: argparse.Namespace) -> int:
     )
     browser_host = "127.0.0.1" if args.host in ("0.0.0.0", "::") else args.host
     url = f"http://{browser_host}:{args.port}"
-    print(f"AstroDiscovery Interactive: {url}", flush=True)
+    print(f"ASTRAL Interactive: {url}", flush=True)
     try:
         uvicorn.run(app, host=args.host, port=args.port)
     finally:

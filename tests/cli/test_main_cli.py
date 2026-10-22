@@ -9,12 +9,12 @@ from sr_harness.agents import SRAgent
 
 
 def test_main_help_lists_subcommands(capsys, monkeypatch):
-    monkeypatch.setattr("sys.argv", ["astro-discovery", "--help"])
+    monkeypatch.setattr("sys.argv", ["astral", "--help"])
     with pytest.raises(SystemExit) as exc_info:
         entrypoint()
     assert exc_info.value.code == 0
     output = capsys.readouterr().out
-    assert "AstroDiscovery command-line interface" in output
+    assert "ASTRAL command-line interface" in output
     assert "run" in output
     assert "synthetic" in output
     assert "benchmark" in output
@@ -23,22 +23,22 @@ def test_main_help_lists_subcommands(capsys, monkeypatch):
 
 
 def test_bare_command_prints_help(capsys, monkeypatch):
-    monkeypatch.setattr("sys.argv", ["astro-discovery"])
+    monkeypatch.setattr("sys.argv", ["astral"])
     assert entrypoint() == 0
     output = capsys.readouterr().out
-    assert "AstroDiscovery command-line interface" in output
-    assert "run        Launch the AstroDiscovery interactive workbench" in output
-    assert "synthetic  Run AstroDiscovery on a synthetic symbolic-regression problem" in output
-    assert "benchmark  Evaluate AstroDiscovery and baseline algorithms on LLM-SRBench" in output
+    assert "ASTRAL command-line interface" in output
+    assert "run        Launch the ASTRAL interactive workbench" in output
+    assert "synthetic  Run ASTRAL on a synthetic symbolic-regression problem" in output
+    assert "benchmark  Evaluate ASTRAL and baseline algorithms on LLM-SRBench" in output
 
 
 def test_run_help_is_delegated(capsys, monkeypatch):
-    monkeypatch.setattr("sys.argv", ["astro-discovery", "run", "--help"])
+    monkeypatch.setattr("sys.argv", ["astral", "run", "--help"])
     with pytest.raises(SystemExit) as exc_info:
         entrypoint()
     assert exc_info.value.code == 0
     output = capsys.readouterr().out
-    assert "usage: astro-discovery run" in output
+    assert "usage: astral run" in output
     assert "--web" not in output
     assert "--anonymize" not in output
     assert "--workspace-dir" in output
@@ -81,17 +81,17 @@ def test_run_read_only_does_not_create_a_missing_save_path(tmp_path):
 
 
 def test_synthetic_help_is_delegated(capsys, monkeypatch):
-    monkeypatch.setattr("sys.argv", ["astro-discovery", "synthetic", "--help"])
+    monkeypatch.setattr("sys.argv", ["astral", "synthetic", "--help"])
     with pytest.raises(SystemExit) as exc_info:
         entrypoint()
     assert exc_info.value.code == 0
     output = capsys.readouterr().out
-    assert "usage: astro-discovery synthetic" in output
+    assert "usage: astral synthetic" in output
     assert "--equation" in output
 
 
 def test_synthetic_defaults(monkeypatch):
-    argv = ["astro-discovery", "synthetic"]
+    argv = ["astral", "synthetic"]
     monkeypatch.setattr("sys.argv", argv)
     args = setup_parser().parse_args(argv[1:])
     assert args.local_sample_size == 1
@@ -115,7 +115,7 @@ def test_synthetic_defaults(monkeypatch):
 
 def test_synthetic_banned_tools_override_selected_tools(monkeypatch):
     argv = [
-        "astro-discovery",
+        "astral",
         "synthetic",
         "--tools",
         "evaluate_formula",
@@ -134,7 +134,7 @@ def test_synthetic_banned_tools_override_selected_tools(monkeypatch):
 
 def test_synthetic_features_are_space_separated_and_allow_nuisance_variables(monkeypatch):
     argv = [
-        "astro-discovery", "synthetic",
+        "astral", "synthetic",
         "--equation", "y = x1 + x2",
         "--features", "x1", "x2", "x3",
         "--n-samples", "5",
@@ -151,7 +151,7 @@ def test_synthetic_features_are_space_separated_and_allow_nuisance_variables(mon
 
 def test_synthetic_features_may_hide_equation_variables(monkeypatch):
     argv = [
-        "astro-discovery", "synthetic",
+        "astral", "synthetic",
         "--equation", "y = x1 + x2",
         "--features", "x1",
         "--seed", "42",
@@ -186,7 +186,7 @@ def test_workspace_dir_read_only_resolution_does_not_create_directory(tmp_path):
 
 
 def test_benchmark_requires_algorithm(capsys, monkeypatch):
-    monkeypatch.setattr("sys.argv", ["astro-discovery", "benchmark"])
+    monkeypatch.setattr("sys.argv", ["astral", "benchmark"])
     with pytest.raises(SystemExit) as exc_info:
         entrypoint()
     assert exc_info.value.code == 2
@@ -195,7 +195,7 @@ def test_benchmark_requires_algorithm(capsys, monkeypatch):
 
 def test_benchmark_boolean_optional_flags(monkeypatch):
     argv = [
-        "astro-discovery",
+        "astral",
         "benchmark",
         "--algorithm",
         "linear",

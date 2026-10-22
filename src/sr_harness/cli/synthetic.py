@@ -54,7 +54,7 @@ def setup_parser(parser: argparse.ArgumentParser | None = None) -> argparse.Argu
     """
     if parser is None:
         parser = argparse.ArgumentParser(
-            prog="astro-discovery synthetic",
+            prog="astral synthetic",
             description="Run SRAgent on a synthetic symbolic-regression problem.",
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         )
@@ -344,7 +344,7 @@ def main(args: argparse.Namespace) -> int:
     save_path = Path(args.save_path) if args.save_path else Path(args.save_dir) / args.exp_name
     save_path.mkdir(parents=True, exist_ok=True)
     args.save_path = str(save_path)
-    command = getattr(args, "invocation", ["astro-discovery", "synthetic"])
+    command = getattr(args, "invocation", ["astral", "synthetic"])
     args.invocation = " ".join(map(shlex.quote, command))
 
     setup_logging(

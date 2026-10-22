@@ -54,14 +54,14 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert not (session.workspace / "skills").exists()
     page = client.get('/')
     assert page.status_code == 200
-    assert client.get('/api/version').json() == {'version': package_version('astro-discovery')}
-    assert '<div class="brand"><div class="logo"><img src="/static/favicon.svg" alt="" width="30" height="30">Astro<span>Discovery</span></div><span id="app-version" class="app-version"></span></div>' in page.text
+    assert client.get('/api/version').json() == {'version': package_version('astral')}
+    assert '<div class="brand"><div class="logo"><img src="/static/favicon.svg?v=astral-2" alt="" width="30" height="30">ASTRAL</div><span id="app-version" class="app-version"></span></div>' in page.text
     assert ".app-version{color:var(--muted);font:600 9px/1" in page.text
     assert "$('app-version').textContent='v'+result.version" in page.text
     assert 'class="badge"' not in page.text
     assert 'id="search-record-link"' not in page.text
     assert 'id="prepare-tab"' in page.text
-    assert '<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">' in page.text
+    assert '<link rel="icon" href="/static/favicon.svg?v=astral-2" type="image/svg+xml">' in page.text
     favicon = client.get('/static/favicon.svg')
     assert favicon.status_code == 200
     assert favicon.headers['content-type'].startswith('image/svg+xml')
@@ -228,8 +228,8 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert 'button.composer-settings-button:is(#initial-prompt-toggle,#data-agent-settings-toggle,#settings-toggle)[aria-expanded="true"]{border:0;border-radius:7px;background:#e8ecf5;color:var(--accent)}' in page.text
     assert ':root[data-theme="dark"] button.composer-settings-button:is(#initial-prompt-toggle,#data-agent-settings-toggle,#settings-toggle){border:0;border-radius:7px;background:transparent;color:#abb1be}' in page.text
     assert ':root[data-theme="dark"] button.composer-settings-button:is(#initial-prompt-toggle,#data-agent-settings-toggle,#settings-toggle):hover{background:#1e2533;color:#cfd5e2}' in page.text
-    assert ':root[data-theme="dark"] button.composer-settings-button:is(#initial-prompt-toggle,#data-agent-settings-toggle,#settings-toggle)[aria-expanded="true"]{border:0;background:#232f47;color:#a6c6ff}' in page.text
-    assert ':root[data-theme="dark"] #initial-prompt-toggle[aria-expanded="true"]{background:#232f47!important;color:#a6c6ff}' in page.text
+    assert ':root[data-theme="dark"] button.composer-settings-button:is(#initial-prompt-toggle,#data-agent-settings-toggle,#settings-toggle)[aria-expanded="true"]{border:0;background:#232f47;color:#B6BFFF}' in page.text
+    assert ':root[data-theme="dark"] #initial-prompt-toggle[aria-expanded="true"]{background:#232f47!important;color:#B6BFFF}' in page.text
     assert '.composer>#initial-prompt-panel{border-color:#96a8ce;border-radius:17px;background:#f1f4fa}' in page.text
     assert ':root[data-theme="dark"] .composer>#initial-prompt-panel{border-color:#3d5d9d;background:#131a29}' in page.text
     assert '.initial-prompt-body #system-prompt{border:1px solid #d5dbe8;border-radius:4px;background:#fff;box-shadow:0 1px 2px #212b4008;color:var(--ink)}' in page.text
@@ -238,7 +238,7 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert '.initial-prompt-panel>.settings-heading{display:none}' in page.text
     assert '.initial-prompt-body{padding:12px}' in page.text
     assert ':root[data-theme="dark"] .data-agent-send{background:var(--accent);color:#fff}' in page.text
-    assert ':root[data-theme="dark"] .data-agent-send:hover{background:#102d59}' in page.text
+    assert ':root[data-theme="dark"] .data-agent-send:hover{background:#182361}' in page.text
     assert ':root[data-theme="dark"] .data-agent-send.stop{background:var(--danger)}' in page.text
     assert ':root[data-theme="dark"] .data-agent-send:disabled{background:#abb1be}' in page.text
     assert '.data-agent-settings{margin-top:2px;border-color:#96a8ce;border-radius:17px;background:#f1f4fa;box-shadow:none}' in page.text
@@ -296,7 +296,7 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert 'href="https://yuzhthu.github.io/SRHarness/"' in page.text
     assert "documentation:'Open documentation'" in page.text
     assert 'id="github-link"' in page.text
-    assert 'href="https://github.com/yuzhTHU/AstroDiscovery"' in page.text
+    assert 'href="https://github.com/yuzhTHU/ASTRAL"' in page.text
     assert "githubRepository:'Open GitHub repository'" in page.text
     assert "function compactEventContent(e)" in page.text
     assert "eventContent(card,meta,metaTime,compactEventContent(e))" in page.text
@@ -371,7 +371,7 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert "Object.assign(MESSAGE_CATALOGS.zh," not in page.text
     assert "uploadDataHelpPrefix:'上传数据文件，也可以从',uploadDataHelpSuffix:'快速开始'" in page.text
     assert "dataAgentHelp:'用自然语言指导 Agent 整理、清洗、补充或检查数据，结果将被保存在 context.data/ 目录以供使用'" in page.text
-    assert "dataAgentPlaceholder:'例如：将我上传的文件整理成 AstroDiscovery 可接受的格式'" in page.text
+    assert "dataAgentPlaceholder:'例如：将我上传的文件整理成 ASTRAL 可接受的格式'" in page.text
     assert "dataNextHint:'数据准备完成后，进入下一步',dataNextAction:'任务配置'" in page.text
     assert "taskNextHint:'任务配置完成后，进入下一步',taskNextAction:'符号回归'" in page.text
     assert "help.textContent=_('dataAgentHelp');link.textContent=_('dataAgentSafety')" in page.text

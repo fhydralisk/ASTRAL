@@ -9,13 +9,13 @@ LLM-SRBench 评估脚本 (浓缩版)
 
 Usage:
     # 测试单个问题
-    astro-discovery benchmark --exp_name test_my_algorithm --datasets lsrtransform --problem_names II.6.15b_1_0
+    astral benchmark --exp_name test_my_algorithm --datasets lsrtransform --problem_names II.6.15b_1_0
     # 测试单个数据集
-    astro-discovery benchmark --exp_name test_my_algorithm --datasets bio_pop_growth
+    astral benchmark --exp_name test_my_algorithm --datasets bio_pop_growth
     # 测试一系列问题
-    astro-discovery benchmark --problem_names MatSci2 MatSci19 CRK28 BPG1 PO6
+    astral benchmark --problem_names MatSci2 MatSci19 CRK28 BPG1 PO6
     # 测试特定算法
-    astro-discovery benchmark --algorithm linear --exp_name test_linear_fitting
+    astral benchmark --algorithm linear --exp_name test_linear_fitting
 """
 
 from __future__ import annotations
@@ -76,7 +76,7 @@ def setup_parser(parser: argparse.ArgumentParser | None = None) -> argparse.Argu
     """
     if parser is None:
         parser = argparse.ArgumentParser(
-            prog="astro-discovery benchmark",
+            prog="astral benchmark",
             description="LLM-SRBench Evaluation Script.",
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         )
@@ -682,7 +682,7 @@ def main(args: argparse.Namespace) -> int:
     save_path = Path(args.save_path) if args.save_path else Path(args.save_dir) / args.exp_name
     save_path.mkdir(parents=True, exist_ok=True)
     args.save_path = str(save_path)
-    command = getattr(args, "invocation", ["astro-discovery", "benchmark"])
+    command = getattr(args, "invocation", ["astral", "benchmark"])
     args.invocation = " ".join(map(shlex.quote, command))
 
     setup_logging(

@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "astro-discovery"
+name = "astral"
 version = "1.0.6"
-description = "AstroDiscovery: a human–AI interactive astronomy discovery platform"
+description = "ASTRAL: a human–AI interactive astronomy discovery platform"
 readme = "README.md"
 requires-python = ">=3.12"
 classifiers = [
@@ -44,7 +44,7 @@ dependencies = [
 ]
 
 [project.scripts]
-astro-discovery = "sr_harness.cli:entrypoint"
+astral = "sr_harness.cli:entrypoint"
 
 [project.optional-dependencies]
 nn = [
@@ -68,7 +68,7 @@ dev = [
     "ruff>=0.8",
 ]
 all = [
-    "astro-discovery[nn,tools,dev]",
+    "astral[nn,tools,dev]",
 ]
 
 [tool.setuptools.packages.find]

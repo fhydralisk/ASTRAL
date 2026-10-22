@@ -1,16 +1,16 @@
-# AstroDiscovery
+# ASTRAL
 
 **基于 [SRHarness](https://github.com/yuzhTHU/SRHarness) 构建的人机交互天文发现平台。**
 
 [English](README.md) | [简体中文](README.zh.md)
 
-[![GitHub](https://img.shields.io/github/stars/yuzhTHU/AstroDiscovery?style=flat&logo=github&label=GitHub)](https://github.com/yuzhTHU/AstroDiscovery)
+[![GitHub](https://img.shields.io/github/stars/yuzhTHU/ASTRAL?style=flat&logo=github&label=GitHub)](https://github.com/yuzhTHU/ASTRAL)
 [![Python](https://img.shields.io/badge/python-%E2%89%A53.12-173b73?logo=python&logoColor=white)](pyproject.toml)
-[![License](https://img.shields.io/github/license/yuzhTHU/AstroDiscovery)](LICENSE)
+[![License](https://img.shields.io/github/license/yuzhTHU/ASTRAL)](LICENSE)
 
-AstroDiscovery 将科学数据准备、智能体符号回归、公式评估和人工指导整合到交互式研究工作台中，并在 SRHarness 的基础上逐步发展天文发现工作流。
+ASTRAL 将科学数据准备、智能体符号回归、公式评估和人工指导整合到交互式研究工作台中，并在 SRHarness 的基础上逐步发展天文发现工作流。
 
-天文数据集、领域知识和专用天文技能是后续计划扩展的能力。当前版本提供继承自 SRHarness 的科学研究流程、AstroDiscovery 品牌界面，以及支持浅色和深色模式的深蓝主题。
+天文数据集、领域知识和专用天文技能是后续计划扩展的能力。当前版本提供继承自 SRHarness 的科学研究流程、ASTRAL 品牌界面，以及支持浅色和深色模式的深蓝主题。
 
 ## 当前能力
 
@@ -25,19 +25,19 @@ AstroDiscovery 将科学数据准备、智能体符号回归、公式评估和�
 需要 Python 3.12 或更高版本。目前通过源码安装，暂未配置 PyPI 和 Docker Hub 发布。
 
 ```bash
-git clone git@github.com:yuzhTHU/AstroDiscovery.git
-cd AstroDiscovery
+git clone git@github.com:yuzhTHU/ASTRAL.git
+cd ASTRAL
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -e .
 ```
 
-安装包名和命令均为 `astro-discovery`。为便于持续合并上游更新，Python 导入路径沿用 `sr_harness` 和 `sr_harness_engine`。
+安装包名和命令均为 `astral`。为便于持续合并上游更新，Python 导入路径沿用 `sr_harness` 和 `sr_harness_engine`。
 
 ## 启动交互式工作台
 
 ```bash
-astro-discovery run \
+astral run \
   --host 0.0.0.0 \
   --port 11002 \
   --workspace-dir ./workspaces \
@@ -51,7 +51,7 @@ astro-discovery run \
 配置 `OPENROUTER_API_KEY` 后，也可以运行合成数据的符号回归示例：
 
 ```bash
-astro-discovery synthetic \
+astral synthetic \
   --equation 'y = 1 + x1 ** 2 + 2 * x1 * x2' \
   --n-samples 200 \
   --seed 42 \
@@ -62,7 +62,7 @@ astro-discovery synthetic \
 
 ## 同步上游
 
-AstroDiscovery 是保留 SRHarness 历史的独立仓库。`origin` 指向 AstroDiscovery，`upstream` 指向 SRHarness：
+ASTRAL 是保留 SRHarness 历史的独立仓库。`origin` 指向 ASTRAL，`upstream` 指向 SRHarness：
 
 ```bash
 git remote add upstream git@github.com:yuzhTHU/SRHarness.git
@@ -75,8 +75,8 @@ git merge upstream/master
 
 ## 文档与致谢
 
-继承的引擎与工作流参见 [SRHarness 文档](https://yuzhthu.github.io/SRHarness/)和仓库内的 [docs](docs/) 目录。这些文档可能仍使用上游项目名称及 `sr-harness` 命令，在本项目中请使用 `astro-discovery`。
+继承的引擎与工作流参见 [SRHarness 文档](https://yuzhthu.github.io/SRHarness/)和仓库内的 [docs](docs/) 目录。这些文档可能仍使用上游项目名称及 `sr-harness` 命令，在本项目中请使用 `astral`。
 
-AstroDiscovery 基于 [SRHarness](https://github.com/yuzhTHU/SRHarness) 开发，相关研究参见论文 [SRHarness: A Harness for Agentic Symbolic Regression](https://arxiv.org/abs/2609.35501)。上游项目的研究结果应归属于 SRHarness。
+ASTRAL 基于 [SRHarness](https://github.com/yuzhTHU/SRHarness) 开发，相关研究参见论文 [SRHarness: A Harness for Agentic Symbolic Regression](https://arxiv.org/abs/2609.35501)。上游项目的研究结果应归属于 SRHarness。
 
 本项目采用 [MIT License](LICENSE)。

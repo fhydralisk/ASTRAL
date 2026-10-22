@@ -38,7 +38,7 @@ def main():
                 path.parent.mkdir(parents=True, exist_ok=True)
                 temporary = path.with_suffix(path.suffix + '.part')
                 try:
-                    request = urllib.request.Request(item['url'], headers={'User-Agent': 'AstroDiscovery-research/1.0'})
+                    request = urllib.request.Request(item['url'], headers={'User-Agent': 'ASTRAL-research/1.0'})
                     with urllib.request.urlopen(request, timeout=120) as response, temporary.open('wb') as out:
                         received = 0
                         while block := response.read(1024 * 1024):

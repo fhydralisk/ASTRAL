@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AstroDiscovery Search Viewer</title>
-  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <title>ASTRAL Search Viewer</title>
+  <link rel="icon" href="/static/favicon.svg?v=astral-2" type="image/svg+xml">
   <script>
     window.MathJax = {
       tex: {
@@ -26,7 +26,7 @@
       --line: #d8dee8;
       --edge: #7f8b9d;
       --root: #263238;
-      --accent: #173b73;
+      --accent: #1F2C7E;
     }
     :root[data-theme="dark"] {
       color-scheme: dark;
@@ -37,7 +37,7 @@
       --line: #282e3b;
       --edge: #6d7586;
       --root: #838b9c;
-      --accent: #8bb4ff;
+      --accent: #B6BFFF;
     }
     :root[data-theme="dark"] .control-bar,
     :root[data-theme="dark"] select,
@@ -924,7 +924,7 @@
 </head>
 <body>
   <header>
-    <h1>AstroDiscovery Search Viewer</h1>
+    <h1>ASTRAL Search Viewer</h1>
     <button id="refresh">Refresh</button>
     <button id="home">Home</button>
     <span id="status" class="muted"></span>
@@ -2357,7 +2357,7 @@
     }
 
     function toolColor(name) {
-      const palette = ["#173b73", "#6f5bd6", "#b54f9b", "#c75a2b", "#3f7fba", "#7b6d2d", "#2f855a", "#a33f4a", "#4a6f28", "#8b5e34"];
+      const palette = ["#1F2C7E", "#6f5bd6", "#b54f9b", "#c75a2b", "#3f7fba", "#7b6d2d", "#2f855a", "#a33f4a", "#4a6f28", "#8b5e34"];
       let hash = 0;
       const text = String(name || "");
       for (let i = 0; i < text.length; i++) hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
