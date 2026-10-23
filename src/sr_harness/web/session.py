@@ -317,6 +317,7 @@ class InteractiveSession:
                 "result": self.result,
                 "run_id": self.run_id,
                 "initial_prompt": self.initial_prompt,
+                "discovery_task": getattr(self, "discovery_task", None),
                 "context_ready": bool(self.context.data),
                 "workspace": str(self.workspace),
                 "data_state": self.data_state,
@@ -378,6 +379,7 @@ class InteractiveSession:
                     "data_agent_settings": self.data_agent_settings,
                     "evaluator_agent_settings": self.evaluator_agent_settings,
                     "initial_prompt": self.initial_prompt,
+                    "discovery_task": getattr(self, "discovery_task", None),
                     "prompt_overrides": self.prompt_overrides,
                     "workspace_lock_rules": self.workspace_manager.lock_rules,
                     "variable_descriptions": self.variable_descriptions,
@@ -425,7 +427,7 @@ class InteractiveSession:
             "run_state",
             "interactions",
         }
-        if set(snapshot) != expected_fields:
+        if set(snapshot) - {"discovery_task"} != expected_fields:
             raise ValueError("Persisted InteractiveSession does not match the current schema")
         if snapshot["version"] != 1:
             raise ValueError("Unsupported InteractiveSession snapshot version")
@@ -462,6 +464,10 @@ class InteractiveSession:
                 )
             self.evaluator_agent_settings = restored_evaluator_settings
             self.initial_prompt = str(snapshot["initial_prompt"])
+            self.discovery_task = snapshot.get("discovery_task")
+            if self.discovery_task:
+                from .discovery import restore_mounts
+                restore_mounts(self, self.discovery_task["name"])
             self.prompt_overrides = dict(snapshot["prompt_overrides"])
             self.workspace_manager.load_lock_rules(dict(snapshot["workspace_lock_rules"]))
             if "system" in self.prompt_overrides:

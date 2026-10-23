@@ -434,7 +434,9 @@ class ConversationRegistry:
         workspace = self.workspaces_dir / conversation_id
         run_dir = self.runs_dir / conversation_id
         session_dir = self.sessions_dir / conversation_id
-        shutil.copytree(old_workspace, workspace)
+        # Preserve registered input links: dereferencing would copy raw archives and
+        # discard their mount identity and read-only policy on session promotion.
+        shutil.copytree(old_workspace, workspace, symlinks=True)
         shutil.copytree(old_run_dir, run_dir)
         shutil.copytree(old_session_dir, session_dir)
         try:
@@ -871,6 +873,7 @@ def mount_conversations(app, registry: ConversationRegistry) -> None:
             (path.startswith("/api/workspace") and method in {"POST", "PUT", "PATCH", "DELETE"})
             or (method, path) in {
                 ("POST", "/api/data/demo"),
+                ("POST", "/api/data/discovery-tasks/load"),
                 ("PUT", "/api/data/selection"),
                 ("PUT", "/api/data/descriptions"),
                 ("PUT", "/api/evaluator"),

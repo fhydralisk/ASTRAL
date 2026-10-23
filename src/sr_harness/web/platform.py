@@ -966,6 +966,23 @@ def mount_platform(app, session: InteractiveSession):
             "truncated": truncated,
         }
 
+    @app.get("/api/data/discovery-tasks")
+    def discovery_tasks():
+        from .discovery import list_cases
+        return {"tasks": list_cases()}
+
+    @app.post("/api/data/discovery-tasks/load")
+    def load_discovery_task(payload: dict = Body(...)):
+        from .discovery import load_case
+        try:
+            return load_case(session, str(payload.get("name", "")))
+        except FileNotFoundError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except FileExistsError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except (ValueError, OSError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+
     @app.post("/api/data/demo")
     def create_demo(payload: dict | None = Body(default=None)):
         try:

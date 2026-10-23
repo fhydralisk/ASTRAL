@@ -62,7 +62,7 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert 'id="search-record-link"' not in page.text
     assert 'id="prepare-tab"' in page.text
     assert '<link rel="icon" href="/static/favicon.svg?v=astral-2" type="image/svg+xml">' in page.text
-    favicon = client.get('/static/favicon.svg')
+    favicon = client.get('/static/favicon.svg?v=astral-2')
     assert favicon.status_code == 200
     assert favicon.headers['content-type'].startswith('image/svg+xml')
     assert b'<svg' in favicon.content
