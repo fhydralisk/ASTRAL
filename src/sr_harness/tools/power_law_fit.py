@@ -37,7 +37,7 @@ class PowerLawFitTool(BaseTool):
             n_stability_folds: Number of disjoint folds for leave-one-fold-out exponent confidence intervals (2-20).
             show_diagnostics: Whether final metrics should include compact residual diagnostics.
         """
-        data = self.context.data
+        data = self.context.train_split.data
         if y is not None and not isinstance(y, str):
             return {"exceptions": [f"y must be a string expression, got {type(y).__name__}."]}
         if x is not None and (not isinstance(x, list) or any(not isinstance(item, str) for item in x)):

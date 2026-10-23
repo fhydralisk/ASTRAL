@@ -46,7 +46,7 @@ class HarmonicInteractionFitTool(BaseTool):
             show_diagnostics: Include residual diagnostics in the returned evaluation.
         """
         target_name = (y or self.context.target).strip().strip('"').strip("'")
-        data = self.context.data
+        data = self.context.train_split.data
         carrier_symbol = self.parse_formula(carrier)
         oscillator_symbol = self.parse_formula(oscillator)
         target_symbol = self.parse_formula(target_name)

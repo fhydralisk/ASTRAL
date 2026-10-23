@@ -611,8 +611,8 @@ class BaseTool(ABC, FactoryMixin):
                     f"the formula does not produce a finite MSE on the {split_name} set"
                 )
         evaluation = {
-            "formula": fitted_f.to_str(number_format='.8g'),
-            "target_expression": y.to_str(number_format='.8g'),
+            "formula": fitted_f.to_str(number_format='.17g'),
+            "target_expression": y.to_str(number_format='.17g'),
             "is_candidate": not ineligibility_reasons,
             "candidate_ineligibility_reasons": ineligibility_reasons,
             "data_split_results": data_split_results,

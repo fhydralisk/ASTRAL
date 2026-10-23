@@ -307,7 +307,7 @@ class TestBaseToolExportAndCall:
 
 
 class TestBaseToolEvaluate:
-    def test_formula_constants_are_serialized_with_eight_significant_digits(self):
+    def test_formula_constants_preserve_float64_roundtrip(self):
         x = np.arange(1.0, 5.0)
         tool = UnitSampleTool(context=AgentContext(data={"x": x, "y": 2 * x}, target="y"))
 
@@ -317,7 +317,10 @@ class TestBaseToolEvaluate:
             show_diagnostics=False,
         )
 
-        assert result["formula"] == "1.0582314 * x + 1.0029397"
+        np.testing.assert_array_equal(
+            engine.parse(result["formula"]).eval({"x": x}),
+            engine.parse("1.0582314356281874*x + 1.0029397100063842").eval({"x": x}),
+        )
 
     def test_evaluates_required_symbols_and_computes_formula_complexity(self):
         tool = UnitSampleTool(

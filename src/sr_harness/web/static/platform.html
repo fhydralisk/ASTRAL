@@ -1597,7 +1597,7 @@ function compactStreamEventBatch(events){
 }
 async function pollEvents(){try{
   await conversationReady;
-  const [searchEvents,dataEvents,evaluatorEvents]=await Promise.all([api('/api/control/events?after_seq='+seq),api('/api/data/agent/events?after_seq='+dataSeq),api('/api/evaluator/agent/events?after_seq='+evaluatorSeq)]);lastEventsAt=Date.now();
+  const searchEvents=await api('/api/control/events?after_seq='+seq),dataEvents=await api('/api/data/agent/events?after_seq='+dataSeq),evaluatorEvents=await api('/api/evaluator/agent/events?after_seq='+evaluatorSeq);lastEventsAt=Date.now();
   if((searchEvents.truncated&&seq)||(dataEvents.truncated&&dataSeq)||(evaluatorEvents.truncated&&evaluatorSeq))notice(_('eventBufferGap'));
   for(const [batch,render] of [[searchEvents,renderEvent],[dataEvents,renderDataEvent],[evaluatorEvents,renderEvaluatorEvent]])for(const e of compactStreamEventBatch(batch.events)){try{render(e)}catch(error){notice(_('eventRenderFailed',{seq:e.seq,message:error.message}))}}
   if(searchEvents.cursor_reset)seq=0;if(dataEvents.cursor_reset)dataSeq=0;if(evaluatorEvents.cursor_reset)evaluatorSeq=0;seq=Math.max(seq,...searchEvents.events.map(event=>event.seq));dataSeq=Math.max(dataSeq,...dataEvents.events.map(event=>event.seq));evaluatorSeq=Math.max(evaluatorSeq,...evaluatorEvents.events.map(event=>event.seq));

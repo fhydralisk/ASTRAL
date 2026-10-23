@@ -549,17 +549,16 @@ class SRAgent(Agent):
     @staticmethod
     def _build_mse_goal(restart_records) -> str:
         """Describe the next MSE objective from the current restart seeds."""
-        if not restart_records:
-            return "You should try to find a simple formula that fits the data with an MSE of EXACTLY 0."
-        best_mse = restart_records[0].metric("mse", "train")
-        if best_mse > 0:
-            return (
-                f"Your target is to find a formula with MSE < {best_mse * 0.1:.6g} "
-                f"(10x better than the previous best MSE of {best_mse:.6g})."
-            )
         return (
-            "The previous round already achieved MSE = 0. "
-            "Try to find a simpler formula that also achieves MSE = 0."
+            "Seek a compact expression with reliable held-out predictive performance. "
+            "Establish constant and simple linear baselines before increasing complexity. "
+            "Fit coefficients and preprocessing on training data only; use validation for "
+            "model selection and reserve any external test set for a single final assessment. "
+            "Measurements may be noisy: do not require zero error or arbitrary tenfold "
+            "improvement. Prefer simpler expressions when error differences are not robust "
+            "to resampling, and report competing forms when the observed range cannot "
+            "distinguish them. Exact recovery is warranted only by independent evidence "
+            "that the data are effectively noiseless."
         )
 
     def create_initial_system_prompt(self, restart_records: list[CandidateRecord]) -> str:

@@ -40,7 +40,7 @@ class RationalFitTool(BaseTool):
             complexity_penalty: Penalty per fitted coefficient added to validation RMSE after target-scale normalization.
             show_diagnostics: Whether final metrics should include compact residual diagnostics.
         """
-        data = self.context.data
+        data = self.context.train_split.data
         target_name = (y or self.context.target).strip().strip('"').strip("'")
         x = x or [name for name, value in data.items() if name != target_name and is_numeric_array(value)]
         p_degrees = sorted(set(

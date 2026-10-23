@@ -48,7 +48,7 @@ class SINDyTool(BaseTool):
             max_samples: Maximum number of data samples to use for fitting (for speed). Data is subsampled if larger.
             show_diagnostics: Whether final metrics should include compact residual diagnostics.
         """
-        data = self.context.data
+        data = self.context.train_split.data
         y = y if y is not None else self.context.target
         if y is None:
             raise ValueError("y is required when context.target is not configured")

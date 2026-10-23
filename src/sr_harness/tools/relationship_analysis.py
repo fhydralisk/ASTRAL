@@ -31,7 +31,7 @@ class RelationshipAnalysisTool(BaseTool):
             pairwise: Whether to also return full pairwise Pearson and Spearman matrices.
             binning: Binning strategy: "quantile" or "equal_width".
             n_folds: Number of disjoint cross-validation folds (2-20). Default: 5.
-            collapse_model: One-dimensional predictor fitted on each training fold: "bins", "spline", or "isotonic".
+            collapse_model: One-dimensional predictor fitted on each training fold: "bins", "spline", or "isotonic". Spline diagnostics support at most 5000 distinct training coordinates; use bins or isotonic for larger catalogs.
         """
         data = self.context.data
         target_name = (y or self.context.target).strip().strip('"').strip("'")
@@ -215,7 +215,16 @@ class RelationshipAnalysisTool(BaseTool):
             increasing = bool(stats.spearmanr(x, y).statistic >= 0)
             return IsotonicRegression(increasing=increasing, out_of_bounds="clip").fit(x, y).predict(test_x)
         if model == "spline":
+            # FITPACK's adaptive near-interpolating spline can take minutes or
+            # hours on large noisy catalogs. Do not silently subsample science
+            # data or hold the Agent inside an unbounded diagnostic call.
             unique_x, inverse = np.unique(x, return_inverse=True)
+            if len(unique_x) > 5000:
+                raise ValueError(
+                    "spline diagnostic exceeds 5000 distinct training coordinates; "
+                    "use collapse_model='bins' or 'isotonic' on the full sample, "
+                    "or prepare and document an explicit diagnostic subsample"
+                )
             means = np.bincount(inverse, weights=y) / np.bincount(inverse)
             if len(unique_x) >= 4:
                 smoothing = max(len(unique_x) * float(np.var(means)) * 1e-3, 0.0)

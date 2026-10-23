@@ -123,7 +123,7 @@ rational_fit(
 - For positive variables, try `call_sindy(y="log(y)", x=["log(x1)", "log(x2)", "log(x3)"], poly_degree=1, include_trig=false, threshold=0.01)`.
 - Use SINDy for a modest sparse library. Use PySR only after narrowing variables, operators, and target transformations.
 
-Do not infer a law from correlation alone. Screen on a deterministic subset, select structure on held-out data, refit constants on all samples, then run the final evaluator.
+Do not infer a law from correlation alone. Fit coefficients and transformations on the training split only. Use validation for structure selection; repeated selection makes it a development metric. Never refit on validation before reporting its score. Refit on development data only after freezing structure, and assess once on a separate external test set.
 
 ### 6. Analyze residual structure
 
@@ -151,7 +151,7 @@ When errors concentrate near a zero or pole, distinguish a missing singular fact
 Separate discovery metrics from the final metric:
 
 - Use rank, trimmed, signed-log, relative, log, or collapse scores to reveal structure.
-- Use the benchmark's original-domain metric and all valid samples to choose the final formula.
+- Use the original-domain validation metric to select candidates, keeping external test samples hidden until selection is frozen.
 - Check extrema, near-zero targets, singular regions, and finite prediction coverage.
 
 Submit only after residuals are structureless at expected numerical precision, or explicitly retain the best compact approximation. Stop dense polynomial, Chebyshev, or genetic-programming branches when expression size grows faster than held-out improvement.

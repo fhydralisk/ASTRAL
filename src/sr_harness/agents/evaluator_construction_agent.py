@@ -18,6 +18,35 @@ from ..utils import ParallelTimer
 from .agent import Agent
 
 
+def evaluator_probe_is_finite(result: Any) -> bool:
+    """Accept finite error metrics with or without extra diagnostics.
+
+    A split-only evaluator is valid without inventing a custom metric. Natural
+    language words such as "指标" do not declare a required metric contract.
+    This check validates execution, not whether the science task was fulfilled.
+    """
+    if not result.ok or not isinstance(result.result, dict):
+        return False
+    standard = {"mse", "rmse", "mae", "mape", "r2", "aic", "bic",
+                "pearson_r", "spearman_r", "complexity"}
+    splits = result.result.get("data_split_results", {})
+    if not isinstance(splits, dict) or not {"train", "validation"} <= set(splits):
+        return False
+    for split in splits.values():
+        metrics = split.get("metrics", {}) if isinstance(split, dict) else {}
+        if not isinstance(metrics, dict) or not standard <= set(metrics):
+            return False
+        if not all(isinstance(value, numbers.Real) and not isinstance(value, bool)
+                   for value in metrics.values()):
+            return False
+        # Constant baselines have undefined rank correlation; perfect fits can
+        # have -inf information criteria. Do not make those block a valid probe.
+        finite_names = (set(metrics) - standard) | {"mse", "rmse", "mae", "complexity"}
+        if not all(math.isfinite(float(metrics[name])) for name in finite_names):
+            return False
+    return True
+
+
 class EvaluatorConstructionAgent(Agent):
     """Construct and validate evaluator scripts without mutating live context state."""
 
@@ -186,41 +215,6 @@ class EvaluatorConstructionAgent(Agent):
         tool_events: list[dict[str, Any]] = []
         timeline_events: list[dict[str, Any]] = []
         update_needs_test = False
-        require_custom_metric = any(
-            marker in instruction.lower() for marker in ("metric", "rmse", "指标", "评测结果")
-        )
-
-        def test_has_finite_custom_metrics(result: Any) -> bool:
-            if not result.ok or not isinstance(result.result, dict):
-                return False
-            standard = {
-                "mse",
-                "rmse",
-                "mae",
-                "mape",
-                "r2",
-                "aic",
-                "bic",
-                "pearson_r",
-                "spearman_r",
-                "complexity",
-            }
-            split_results = result.result.get("data_split_results", {})
-            custom_values = []
-            for split in split_results.values():
-                metrics = split.get("metrics", {}) if isinstance(split, dict) else {}
-                if not standard <= set(metrics):
-                    return False
-                custom_values.extend(
-                    value for name, value in metrics.items() if name not in standard
-                )
-            return (not require_custom_metric or bool(custom_values)) and all(
-                isinstance(value, numbers.Real)
-                and not isinstance(value, bool)
-                and math.isfinite(float(value))
-                for value in custom_values
-            )
-
         step = 0
         while step < self.max_steps:
             step += 1
@@ -404,7 +398,7 @@ class EvaluatorConstructionAgent(Agent):
                 elif (
                     call.name == "validate_evaluator"
                     and update_needs_test
-                    and test_has_finite_custom_metrics(result)
+                    and evaluator_probe_is_finite(result)
                 ):
                     update_needs_test = False
             self._wait()
