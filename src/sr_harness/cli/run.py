@@ -104,6 +104,10 @@ def main(args: argparse.Namespace) -> int:
     except ImportError as exc:
         raise SystemExit("Please reinstall ASTRAL with its default dependencies.") from exc
 
+    # Explicit project configuration takes precedence over an inherited shell key.
+    from dotenv import load_dotenv
+    load_dotenv(Path.cwd() / ".env", override=True)
+
     from sr_harness.web.app import create_app
     from sr_harness.web.conversations import ConversationRegistry
 

@@ -54,8 +54,12 @@ class OpenAIParser(BaseParser):
                 if isinstance(params, str):
                     params = json.loads(params) if params.strip() else {}
             except json.JSONDecodeError as error:
-                _logger.warning(f"Skip malformed native tool call {raw!r}: {error}")
-                continue
+                raise ValueError(
+                    f"Malformed native tool call {name!r}: arguments are not complete JSON. "
+                    "Retry with a shorter tool call or a larger output-token budget."
+                ) from error
+            if not isinstance(params, dict):
+                raise ValueError(f"Native tool call {name!r} arguments must be a JSON object.")
             normalized.append(ToolCall(
                 name=name,
                 params=params,

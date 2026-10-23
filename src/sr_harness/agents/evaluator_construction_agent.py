@@ -125,7 +125,7 @@ class EvaluatorConstructionAgent(Agent):
         if not settings:
             return
         self._pending_runtime_settings = None
-        for name in ("llm_provider", "llm_model", "tool_parser", "llm_max_tokens"):
+        for name in ("llm_provider", "llm_model", "tool_parser", "llm_max_tokens", "max_steps"):
             if name in settings:
                 setattr(self, name, settings[name])
         if "skills" in settings:
@@ -221,7 +221,9 @@ class EvaluatorConstructionAgent(Agent):
                 for value in custom_values
             )
 
-        for step in range(1, self.max_steps + 1):
+        step = 0
+        while step < self.max_steps:
+            step += 1
             self._check_stop()
             response_id = f"evaluator:{uuid.uuid4().hex}"
             tool_schemas = {

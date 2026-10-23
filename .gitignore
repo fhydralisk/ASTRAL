@@ -169,3 +169,7 @@ _deps/
 
 # Persistent local ASTRAL conversations
 /workspaces/
+
+# Local replication research lives under ignored playground/replication/.
+/research/
+/scripts/research/

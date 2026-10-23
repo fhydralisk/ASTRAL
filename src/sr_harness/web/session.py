@@ -265,6 +265,7 @@ class InteractiveSession:
                     max(8192, self.data_agent_settings["llm_max_tokens"])
                     if self.data_agent_settings["llm_max_tokens"] is not None else None
                 ),
+                "max_steps": 64,
             }
         )
         self.pending_settings = None
@@ -458,6 +459,8 @@ class InteractiveSession:
                 raise ValueError("Persisted data-agent settings do not match the current schema")
             self.data_agent_settings = restored_data_settings
             restored_evaluator_settings = dict(snapshot["evaluator_agent_settings"])
+            # Historical sessions used a fixed 16-step evaluator budget.
+            restored_evaluator_settings.setdefault("max_steps", 64)
             if set(restored_evaluator_settings) != set(self.evaluator_agent_settings):
                 raise ValueError(
                     "Persisted evaluator-agent settings do not match the current schema"
@@ -917,6 +920,7 @@ class InteractiveSession:
                     tools=tools,
                     tool_parser=settings["tool_parser"],
                     llm_max_tokens=settings["llm_max_tokens"],
+                    max_steps=settings.get("max_steps", 64),
                     interaction_manager=self.evaluator_interaction_manager,
                 )
                 with self.lock:
@@ -1810,11 +1814,18 @@ class InteractiveSession:
             "proxy",
             "tools",
             "skills",
+            "max_steps",
         }
         unknown = set(payload) - allowed
         if unknown:
             raise ValueError(f"Unsupported evaluator-agent settings: {', '.join(sorted(unknown))}")
-        return InteractiveSession.validate_data_agent_settings(payload)
+        result = InteractiveSession.validate_data_agent_settings(payload)
+        if "max_steps" in payload:
+            steps = payload["max_steps"]
+            if isinstance(steps, bool) or not isinstance(steps, int) or not 1 <= steps <= 256:
+                raise ValueError("max_steps must be an integer between 1 and 256")
+            result["max_steps"] = steps
+        return result
 
     def configure_data_agent(self, payload):
         """Run the ``configure data agent`` operation.
