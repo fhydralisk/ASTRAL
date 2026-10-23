@@ -7,6 +7,7 @@ import json
 import logging
 import time
 import threading
+import queue
 import traceback
 import uuid
 from abc import ABC, abstractmethod
@@ -40,6 +41,8 @@ class ProviderSampleResult:
 
 class BaseAPI(ABC, FactoryMixin):
     """Common request, parser, and tool-call behavior for LLM providers."""
+
+    STREAM_IDLE_TIMEOUT_SECONDS = 300.0
 
     def __init__(
         self,
@@ -240,6 +243,69 @@ class BaseAPI(ABC, FactoryMixin):
         )
         return completion, response, message, message.get("content") or ""
 
+    def _cancellable_stream(self, client: Any, payload: dict[str, Any]):
+        """Keep cancellation responsive even while the provider has stopped sending.
+
+        The reader owns the SDK iterator. A bounded queue prevents it from racing
+        ahead; abandoning a request cannot publish into a subsequent request.
+        Network reads also have the provider adapter's finite idle timeout.
+        """
+        updates: queue.Queue = queue.Queue(maxsize=8)
+        abandoned = threading.Event()
+
+        def publish(kind, value):
+            while not abandoned.is_set():
+                try:
+                    updates.put((kind, value), timeout=0.05)
+                    return
+                except queue.Full:
+                    pass
+
+        def read():
+            stream = None
+            try:
+                stream = client.chat.completions.create(**payload)
+                for chunk in stream:
+                    if abandoned.is_set():
+                        break
+                    publish("chunk", chunk)
+                publish("done", None)
+            except Exception as exc:
+                publish("error", exc)
+            finally:
+                if stream is not None and callable(close := getattr(stream, "close", None)):
+                    try:
+                        close()
+                    except Exception:
+                        _logger.debug("Stream cleanup failed", exc_info=True)
+
+        reader = threading.Thread(target=read, name="srh-model-stream", daemon=True)
+        self.raise_if_cancelled()
+        reader.start()
+        last_chunk_at = time.monotonic()
+        try:
+            while True:
+                self.raise_if_cancelled()
+                try:
+                    kind, value = updates.get(timeout=0.05)
+                except queue.Empty:
+                    if time.monotonic() - last_chunk_at >= self.STREAM_IDLE_TIMEOUT_SECONDS:
+                        raise TimeoutError("Model stream stopped responding for the idle timeout")
+                    continue
+                self.raise_if_cancelled()
+                last_chunk_at = time.monotonic()
+                if kind == "error":
+                    raise value
+                if kind == "done":
+                    return
+                yield value
+        finally:
+            abandoned.set()
+            # Close the transport away from the UI/control thread. Some SDKs
+            # block while closing a read; their configured timeout bounds it.
+            if callable(close := getattr(client, "close", None)):
+                threading.Thread(target=close, name="srh-close-stream", daemon=True).start()
+
     def stream_openai_chat_completion(
         self,
         client: Any,
@@ -254,7 +320,7 @@ class BaseAPI(ABC, FactoryMixin):
             "stream": True,
             "stream_options": {"include_usage": True},
         }
-        stream = client.chat.completions.create(**stream_payload)
+        stream = self._cancellable_stream(client, stream_payload)
         content_parts: list[str] = []
         reasoning_parts: list[str] = []
         reasoning_details: list[Any] = []

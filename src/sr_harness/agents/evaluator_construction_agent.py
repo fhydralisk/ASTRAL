@@ -268,6 +268,8 @@ class EvaluatorConstructionAgent(Agent):
                     )
                     rows = list(call_result)
                 self._check_stop()
+                if call_result.ok is False:
+                    raise RuntimeError(call_result.error or "Model API request failed.")
             except InterruptedError:
                 self._record_force(latest_stream_update)
                 self._publish(
@@ -291,8 +293,6 @@ class EvaluatorConstructionAgent(Agent):
                     },
                 )
                 raise
-            if call_result.ok is False:
-                raise RuntimeError(call_result.error or "Model API request failed.")
             if not rows:
                 raise RuntimeError("EvaluatorConstructionAgent returned no usable response")
             response = rows[0]

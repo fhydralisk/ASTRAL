@@ -57,6 +57,8 @@ class OpenRouterAPI(BaseAPI):
         api_key = self.get_env("OPENROUTER_API_KEY", required=True)
         endpoint = self.get_env("OPENROUTER_ENDPOINT", "https://openrouter.ai/api/v1")
         client = OpenAI(
+            timeout=300.0,
+            max_retries=0,
             base_url=endpoint,
             api_key=api_key,
             http_client=DefaultHttpxClient(

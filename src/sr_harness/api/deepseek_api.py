@@ -44,6 +44,8 @@ class DeepSeekAPI(BaseAPI):
     ) -> ProviderSampleResult:
         endpoint = self.get_env("DEEPSEEK_ENDPOINT", "https://api.deepseek.com")
         client = OpenAI(
+            timeout=300.0,
+            max_retries=0,
             api_key=self.get_env("DEEPSEEK_API_KEY", required=True),
             base_url=endpoint,
             http_client=DefaultHttpxClient(
