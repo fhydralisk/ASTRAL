@@ -39,7 +39,7 @@ class GeminiAPI(BaseAPI):
         ]
 
     def _request_samples(
-        self, messages: List[Dict[str, str]], n=1, callback=None
+        self, messages: List[Dict[str, str]], n=1, callback=None, max_tokens=None
     ) -> Generator[APICallSample, None, dict[str, Any]]:
         ## Ensure this is a generator
         yield from []
@@ -67,6 +67,7 @@ class GeminiAPI(BaseAPI):
         api_key = self.get_env("GEMINI_API_KEY")
         config = types.GenerateContentConfig(
             candidate_count=n,
+            max_output_tokens=max_tokens,
             thinking_config=types.ThinkingConfig(
                 thinking_budget=0,
                 include_thoughts=True,
@@ -125,7 +126,8 @@ class GeminiAPI(BaseAPI):
                     continue
                 else:
                     message = {"role": "assistant", "content": content}
-                    tool_call = self.parse_tool_calls(message, content)
+                    finish_reason = getattr(candidate.finish_reason, "value", candidate.finish_reason)
+                    tool_call = [] if finish_reason == "MAX_TOKENS" else self.parse_tool_calls(message, content)
                     details.append(
                         {
                             "content": content,
@@ -137,6 +139,7 @@ class GeminiAPI(BaseAPI):
                         }
                     )
                     sample_response = self.format_response(message, tool_call, content)
+                    sample_response.finish_reason = finish_reason
                     sample = len(details)
                     if callback is not None:
                         self.report_progress(callback, {

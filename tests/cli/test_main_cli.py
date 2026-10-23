@@ -103,7 +103,7 @@ def test_synthetic_defaults(monkeypatch):
     assert args.llm_model == "deepseek/deepseek-v4-flash-0731"
     assert args.tools is None
     assert args.ban_tools == []
-    assert args.llm_max_tokens == 4096
+    assert args.llm_max_tokens is None
     assert args.verbose is False
     assert args.debug is False
 

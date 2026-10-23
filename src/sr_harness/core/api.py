@@ -18,6 +18,7 @@ class APICallSample:
     """
 
     content: str | None
+    finish_reason: str | None
     _tool_calls: list[ToolCall] = field(default_factory=list, repr=False)
     message_extra: dict[str, Any] = field(default_factory=dict)
 
@@ -26,8 +27,10 @@ class APICallSample:
         content: str | None,
         tool_calls: list[ToolCall] | None = None,
         message_extra: dict[str, Any] | None = None,
+        finish_reason: str | None = None,
     ) -> None:
         self.content = content
+        self.finish_reason = finish_reason
         self._tool_calls = tool_calls if tool_calls is not None else []
         self.message_extra = dict(message_extra or {})
 
@@ -39,9 +42,20 @@ class APICallSample:
     @property
     def reasoning(self) -> Any:
         """Return provider reasoning without imposing one provider field name."""
-        if "reasoning" in self.message_extra:
+        if self.message_extra.get("reasoning"):
             return self.message_extra["reasoning"]
-        return self.message_extra.get("reasoning_content")
+        if self.message_extra.get("reasoning_content"):
+            return self.message_extra["reasoning_content"]
+        return "".join(
+            item.get("text") or ""
+            for item in (self.message_extra.get("reasoning_details") or [])
+            if isinstance(item, dict)
+        ) or None
+
+    @property
+    def truncated(self) -> bool:
+        """Whether this sample ended at the provider's output limit."""
+        return self.finish_reason in {"length", "max_tokens", "max_output_tokens", "MAX_TOKENS"}
 
     @property
     def message(self) -> dict[str, Any]:
@@ -75,6 +89,11 @@ class APICallSummary:
     token_usage: dict[str, float] = field(default_factory=dict, init=False)
     money_usage: dict[str, float] = field(default_factory=dict, init=False)
     extra: dict[str, Any] = field(default_factory=dict, init=False)
+
+    @property
+    def truncated(self) -> bool:
+        """Whether any returned sample reached its output limit."""
+        return any(sample.truncated for sample in self.yielded)
 
     def __iter__(self):
         """Iterate over the generated contents."""

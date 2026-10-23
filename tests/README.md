@@ -18,6 +18,16 @@
 ./venv/python -m pytest tests/ -v -m paid
 ```
 
+## 离线浏览器回归
+
+安装 Node.js 的 `playwright` 包及其 Chromium 后，在仓库根目录运行：
+
+```bash
+node tests/web/stream_rendering.cjs
+```
+
+若 Playwright 安装在仓库外，可通过 `NODE_PATH` 指向包含该包的 `node_modules`；`CHROMIUM_EXECUTABLE` 可指定已有 Chromium。测试拦截所有网络请求，覆盖停止按钮、未完成的 Markdown、流式节点和滚动位置、推理分片、截断收尾，以及不同屏幕宽度下的公式布局，不调用真实模型。
+
 ## 测试分类与标记
 
 所有测试通过 pytest marker 分为三类：

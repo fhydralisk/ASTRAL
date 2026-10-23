@@ -93,7 +93,7 @@ sr-harness run --host 0.0.0.0 --port 8000
 | `--llm-model` | `deepseek/deepseek-v4-flash-0731` | Base model |
 | `--strong-llm-provider` | base provider | Provider used by automatic routing |
 | `--strong-llm-model` | none | Optional stronger model |
-| `--llm-max-tokens` | `4096` | Maximum output tokens per response |
+| `--llm-max-tokens` | automatic | Optional output cap; omitted uses the provider default |
 | `--tool-parser` | `openai` | `openai`, `text`, `json`, or `xml` |
 | `--tools` | symbolic-regression defaults | Available tools; specify the list explicitly to disable selected defaults or enable non-default tools |
 | `--ban-tools` | empty | Remove (ablate) selected tools from `--tools` |

@@ -203,7 +203,7 @@ class InteractiveSession:
             "strong_llm_model": None,
             "auto_routing": True,
             "tool_parser": "openai",
-            "llm_max_tokens": 4096,
+            "llm_max_tokens": None,
             "tools": None,
             "skills": None,
             "max_refinement_depth": 50,
@@ -261,7 +261,10 @@ class InteractiveSession:
                     for name in self._capability_skill_manager.load_skills()
                     if name != "discover-symbolic-laws"
                 ],
-                "llm_max_tokens": max(8192, self.data_agent_settings["llm_max_tokens"]),
+                "llm_max_tokens": (
+                    max(8192, self.data_agent_settings["llm_max_tokens"])
+                    if self.data_agent_settings["llm_max_tokens"] is not None else None
+                ),
             }
         )
         self.pending_settings = None
@@ -1678,8 +1681,8 @@ class InteractiveSession:
                 if isinstance(v, bool) or not isinstance(v, int) or not 1 <= v <= 1000:
                     raise ValueError(f"{k} must be an integer between 1 and 1000")
             elif k == "llm_max_tokens":
-                if isinstance(v, bool) or not isinstance(v, int) or not 1 <= v <= 1_000_000:
-                    raise ValueError("llm_max_tokens must be an integer between 1 and 1000000")
+                if v is not None and (isinstance(v, bool) or not isinstance(v, int) or not 1 <= v <= 1_000_000):
+                    raise ValueError("llm_max_tokens must be null (automatic) or an integer between 1 and 1000000")
             elif k in nonnegative_integers or k == "tool_free_stop_review_rounds":
                 if isinstance(v, bool) or not isinstance(v, int) or not 0 <= v <= 1000:
                     raise ValueError(f"{k} must be an integer between 0 and 1000")
@@ -1766,8 +1769,8 @@ class InteractiveSession:
         for key, value in result.items():
             if key == "llm_max_tokens":
                 upper = 1_000_000
-                if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= upper:
-                    raise ValueError(f"{key} must be an integer between 1 and {upper}")
+                if value is not None and (isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= upper):
+                    raise ValueError(f"{key} must be null (automatic) or an integer between 1 and {upper}")
             elif key in {"tools", "skills"}:
                 if (
                     not isinstance(value, list)
@@ -1876,7 +1879,7 @@ class InteractiveSession:
                 api(
                     "Reply with exactly SRHARNESS_OK.",
                     n=1,
-                    max_tokens=min(settings["llm_max_tokens"], 64),
+                    max_tokens=min(settings["llm_max_tokens"] or 64, 64),
                 )
             )
             tool_rows = list(
@@ -1884,7 +1887,7 @@ class InteractiveSession:
                     "Call report_model_test with answer set to SRHARNESS_TOOL_OK. "
                     "Use the tool instead of answering in plain text.",
                     n=1,
-                    max_tokens=min(settings["llm_max_tokens"], 128),
+                    max_tokens=min(settings["llm_max_tokens"] or 128, 128),
                 )
             )
         plain_response = plain_rows[0].content if plain_rows else ""

@@ -99,7 +99,7 @@ sr-harness run --host 0.0.0.0 --port 8000
 | `--llm-model` | `deepseek/deepseek-v4-flash-0731` | 基础模型名 |
 | `--strong-llm-provider` | 基础 provider | 自动路由的强模型 provider |
 | `--strong-llm-model` | 无 | 自动路由的强模型 |
-| `--llm-max-tokens` | `4096` | 单次模型回复最大 token |
+| `--llm-max-tokens` | 自动 | 可选的单次输出上限；不设置时使用服务商默认预算 |
 | `--tool-parser` | `openai` | `openai`、`text`、`json` 或 `xml` |
 | `--tools` | 符号回归默认工具集 | 可用工具列表；显式指定时也可禁用部分工具或启用非默认工具 |
 | `--ban-tools` | 空 | 从 `--tools` 中移除（消融）部分工具 |

@@ -58,7 +58,7 @@ class SRAgentInteractive(SRAgent):
         global_width: int = 1,
         max_restart_loop: int = 1,
         restart_top_k: int = 1,
-        llm_max_tokens: int = 4096,
+        llm_max_tokens: int | None = None,
         max_workers: int = 0,
         validation_fraction: float = 0.2,
         split_by: str = "random",
@@ -447,7 +447,9 @@ class SRAgentInteractive(SRAgent):
             self._append_buffer_messages(buffer, [prompt], R=R, C=C, L=L)
             self._forced_interruption_pending = False
             return None
-        if getattr(self, "_pending_stop_at_boundary", False):
+        if self._last_response_was_truncated and self.pause_on_truncated_response:
+            self.interaction_manager.request_pause()
+        elif getattr(self, "_pending_stop_at_boundary", False):
             self._pending_stop_at_boundary = False
             self.interaction_manager.request_pause()
         elif (
@@ -820,19 +822,27 @@ class SRAgentInteractive(SRAgent):
             K: f"{self.run_state.run_id}:{R}:{C}:{L}:{K}"
             for K in range(1, self.local_sample_size + 1)
         }
-        for K, response_id in response_ids.items():
+        started_samples: set[int] = set()
+
+        def start_sample(K: int) -> None:
+            if K in started_samples:
+                return
+            started_samples.add(K)
             self.interaction_manager.publish_event("assistant_started", {
-                "response_id": response_id,
+                "response_id": response_ids[K],
                 "coord": coord | {"K": K},
                 "tool_schemas": tool_schemas,
                 "provider": route.provider,
                 "model": route.model,
             })
+        # Show the first wait immediately; later samples start only when reached.
+        start_sample(1)
         last_stream_emit: dict[int, float] = {}
         latest_stream_updates: dict[int, dict[str, Any]] = {}
 
         def callback(update: dict[str, Any]) -> None:
             K = max(1, min(int(update.get("sample", 1)), self.local_sample_size))
+            start_sample(K)
             latest_stream_updates[K] = update
             now = time.monotonic()
             if update.get("type") == "delta" and now - last_stream_emit.get(K, 0.0) < 0.08:
@@ -864,7 +874,7 @@ class SRAgentInteractive(SRAgent):
             response_error = "用户强制中止"
             self._forced_interruption_pending = True
             responses = []
-            for K in range(1, self.local_sample_size + 1):
+            for K in sorted(started_samples):
                 update = latest_stream_updates.get(K, {})
                 message = {
                     "role": "assistant",
@@ -878,10 +888,10 @@ class SRAgentInteractive(SRAgent):
                 ))
             usage = {"token": {}, "price": {}}
         except Exception as exc:
-            for K, response_id in response_ids.items():
+            for K in sorted(started_samples):
                 self.interaction_manager.publish_event("assistant_failed", {
                     **latest_stream_updates.get(K, {}),
-                    "response_id": response_id,
+                    "response_id": response_ids[K],
                     "coord": coord | {"K": K},
                     "provider": route.provider,
                     "model": route.model,
@@ -894,6 +904,7 @@ class SRAgentInteractive(SRAgent):
             "price": self.money_counter.named_count,
         }
         for K, response in enumerate(responses, 1):
+            start_sample(K)
             content = response.content
             calls = response.tool_calls
             message = response.message
@@ -902,6 +913,7 @@ class SRAgentInteractive(SRAgent):
                 {
                     "response_id": response_ids[K],
                     "content": content,
+                    "finish_reason": response.finish_reason,
                     "reasoning": message.get("reasoning", ""),
                     "message": message,
                     "tool_calls": calls,

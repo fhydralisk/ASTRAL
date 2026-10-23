@@ -39,7 +39,7 @@ class DataPreparationAgent(Agent):
         context: AgentContext,
         tools: list[str] | None = None,
         tool_parser: str | BaseParser = "openai",
-        llm_max_tokens: int = 4096,
+        llm_max_tokens: int | None = None,
         skills: list[str] | None = None,
         interaction_manager: InteractionManager,
     ) -> None:
@@ -196,6 +196,7 @@ class DataPreparationAgent(Agent):
         self._append_prompt({"role": "user", "content": instruction})
         committed = False
         final_content = ""
+        truncated = False
         while True:
             self._check_stop()
             self.turn_count += 1
@@ -253,6 +254,8 @@ class DataPreparationAgent(Agent):
                     )
                     responses = list(call_result)
                 self._check_stop()
+                if call_result.ok is False and not call_result.truncated:
+                    raise RuntimeError(call_result.error or "Model API request failed.")
             except InterruptedError:
                 self._record_force(latest_stream_update)
                 self._publish(
@@ -286,18 +289,18 @@ class DataPreparationAgent(Agent):
                 "token": call_result.token_usage,
                 "price": call_result.money_usage,
             }
-            if call_result.ok is False:
-                raise RuntimeError(call_result.error or "Model API request failed.")
             if not responses:
                 raise RuntimeError("The model returned no usable response")
             response = responses[0]
             content, calls, message = response.content, response.tool_calls, response.message
             final_content = content or ""
+            truncated = call_result.truncated
             self._publish(
                 "assistant_completed",
                 {
                     "response_id": response_id,
                     "content": content,
+                    "finish_reason": response.finish_reason,
                     "message": message,
                     "tool_calls": calls,
                     "tool_schemas": tool_schemas,
@@ -307,6 +310,10 @@ class DataPreparationAgent(Agent):
                     "model": self.llm_model,
                 },
             )
+            if truncated:
+                if content:
+                    self.buffer.append(message)
+                break
             if not calls:
                 self.buffer.append(message)
                 if self._wait():
@@ -322,6 +329,7 @@ class DataPreparationAgent(Agent):
             self._wait()
         result = {
             "message": final_content,
+            "finish_reason": "length" if truncated else "stop",
             "committed": committed,
             "context": self.context.schema(),
         }
