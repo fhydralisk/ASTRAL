@@ -54,13 +54,13 @@ Publishing uses [Hugging Face Trusted Publishers](https://huggingface.co/docs/hu
 with OIDC. No personal access token or `HF_TOKEN` GitHub secret is needed.
 
 In the target Space's **Settings → Trusted Publishers**, add **GitHub Actions**
-with all three restrictions:
+with all three exact GitHub OIDC claim restrictions:
 
 | Setting | Value |
 | --- | --- |
-| Repository | `yuzhTHU/SRHarness` |
-| Branch | `master` |
-| Workflow | `publish-huggingface.yml` |
+| Repository (`repository`) | `yuzhTHU/SRHarness` |
+| Branch (`ref`) | `refs/heads/master` |
+| Workflow (`workflow_ref`) | `yuzhTHU/SRHarness/.github/workflows/publish-huggingface.yml@refs/heads/master` |
 
 Use the Space-level trusted publisher, not the account-level CI/CD identity
 (which provides different, read-oriented permissions). Each matching workflow
