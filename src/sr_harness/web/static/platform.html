@@ -97,6 +97,16 @@
 :is(#data-model-test,#evaluator-test){border-color:var(--line);background:#fff;color:var(--ink)}:is(#data-model-test,#evaluator-test):not(:disabled):hover{border-color:#b9c9c6;background:#edf4f3;color:#29443f}:root[data-theme="dark"] :is(#data-model-test,#evaluator-test){border-color:#3b4a47;background:#18201f;color:#dce7e5}:root[data-theme="dark"] :is(#data-model-test,#evaluator-test):not(:disabled):hover{border-color:#526762;background:#22302d;color:#fff}:root[data-theme="dark"] :is(button.primary,.data-agent-send,#data-upload){color:#fff}
 .conversation-title{max-width:min(360px,32vw);overflow:hidden;padding:5px 9px;border-color:transparent;background:transparent;color:var(--muted);font-size:11px;text-overflow:ellipsis;white-space:nowrap}.conversation-title:hover{background:#edf4f3;color:var(--ink)}.conversation-title-editor{display:flex;min-width:150px;max-width:min(360px,32vw);gap:4px}.conversation-title-editor input{min-width:0;width:100%;height:30px}.conversation-title-editor button{width:28px;height:28px;padding:0}.workspace-panel-tabs{display:flex;align-items:center;gap:3px}.workspace-panel-tabs button{padding:5px 8px;border:0;background:transparent;color:var(--muted);font-size:11px}.workspace-panel-tabs button.active{background:#eaf3f0;color:var(--accent)}.conversation-actions[hidden]{display:none!important}.conversation-list{min-height:0;flex:1;overflow:auto;padding:7px 8px}.conversation-item{display:flex;width:100%;min-width:0;align-items:center;gap:8px;margin-bottom:3px;padding:8px;border:0;background:transparent;text-align:left}.conversation-item:hover{background:#edf3f2}.conversation-item.active{background:#e4f0ed;color:var(--accent)}.conversation-item-icon{display:grid;place-items:center;flex:0 0 24px;width:24px;height:24px;border-radius:8px;background:#e8efee;color:#72837f}.conversation-item-copy{min-width:0;flex:1}.conversation-item-name{display:block;overflow:hidden;font-size:11px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}.conversation-item-time{display:block;color:var(--muted);font-size:8px}.conversation-empty{margin:12px;color:var(--muted);font-size:10px}:root[data-theme="dark"] .conversation-title:hover,:root[data-theme="dark"] .workspace-panel-tabs button.active,:root[data-theme="dark"] .conversation-item:hover{background:#22302d}:root[data-theme="dark"] .conversation-item.active{background:#29413c;color:#74c7bb}:root[data-theme="dark"] .conversation-item-icon{background:#25322f;color:#9baca8}
 .conversation-title-editor{display:block}.conversation-row{position:relative;display:flex;min-width:0;align-items:center;margin-bottom:3px;border-radius:8px}.conversation-row .conversation-item{min-width:0;flex:1;margin:0}.conversation-item-actions{position:relative;flex:0 0 25px;margin:0;padding:0;border:0;background:transparent;opacity:0}.conversation-row:hover .conversation-item-actions,.conversation-row.active .conversation-item-actions,.conversation-item-actions[open]{opacity:1}.conversation-item-actions>summary{display:grid;place-items:center;width:25px;height:25px;border-radius:7px;color:var(--muted);font-size:15px;line-height:1;list-style:none}.conversation-item-actions>summary::-webkit-details-marker{display:none}.conversation-item-actions>summary:hover,.conversation-item-actions[open]>summary{background:#dce9e6;color:var(--accent)}.conversation-item-menu{position:absolute;z-index:80;top:27px;right:0;width:108px;padding:4px;border:1px solid var(--line);border-radius:9px;background:#fff;box-shadow:0 9px 28px #2539362b}.conversation-item-menu button,.conversation-item-menu a{display:block;width:100%;padding:6px 8px;border:0;border-radius:6px;background:transparent;color:inherit;text-align:left;font-size:10px}.conversation-item-menu button:hover,.conversation-item-menu a:hover{background:#edf4f2}.conversation-item-menu .conversation-archive-action{color:#ad5b55}.conversation-inline-editor{min-width:0;flex:1;padding:5px 4px}.conversation-inline-editor input{width:100%;height:34px;border-color:#9fc5be;background:#fff;box-shadow:0 3px 12px #31564f12;font-size:11px}:root[data-theme="dark"] .conversation-item-menu{background:#1b2523}:root[data-theme="dark"] .conversation-inline-editor input{background:#18201f}
+
+.agent-output{min-width:0;max-width:100%;width:100%;box-sizing:border-box}
+.reasoning-block{display:block;min-width:0;width:100%}
+.reasoning-content{width:100%;max-width:100%;padding-right:25px;box-sizing:border-box}
+.reasoning-block:not(.expanded)>.reasoning-content{white-space:nowrap;max-height:1.7em;overflow:hidden}
+.reasoning-toggle-top{position:absolute;top:7px;right:2px;margin:0}
+.reasoning-block:not(.expanded)>.markdown-rendered p{white-space:nowrap;margin:0}
+.event>.stream-reasoning,.event>.stream-content{display:block;width:100%;min-width:0;max-width:100%;overflow-wrap:anywhere}
+.event>.stream-reasoning{max-height:240px;overflow:auto}
+.markdown-math,.markdown-math-inline{min-width:0;max-width:100%;overflow-x:auto}
 .truncation-notice{margin:8px 0;padding:8px 10px;border-left:3px solid #c49b43;color:var(--muted);font-size:12px}
 </style><style>
 /* Relationship preview: fixed section heading with a compact, tactile channel picker. */
@@ -388,7 +398,7 @@ function markdownFragment(value){
     if(/^\s*([-*_])(?:\s*\1){2,}\s*$/.test(line)){fragment.append(el('hr'));index+=1;continue}
     const list=line.match(/^\s*(?:([-+*])|(\d+)\.)\s+(.+)$/);if(list){const ordered=Boolean(list[2]),container=el(ordered?'ol':'ul');while(index<lines.length){const item=lines[index].match(/^\s*(?:([-+*])|(\d+)\.)\s+(.+)$/);if(!item||Boolean(item[2])!==ordered)break;const entry=el('li');appendMarkdownInline(entry,item[3]);container.append(entry);index+=1}fragment.append(container);continue}
     if(/^\s*>\s?/.test(line)){const parts=[];while(index<lines.length&&/^\s*>\s?/.test(lines[index]))parts.push(lines[index++].replace(/^\s*>\s?/,''));const quote=el('blockquote');appendMarkdownInline(quote,parts.join('\n'));fragment.append(quote);continue}
-    const paragraph=[];while(index<lines.length&&lines[index].trim()&&!/^\s*(?:```|\$\$|#{1,6}\s|>|(?:[-+*]|\d+\.)\s)/.test(lines[index]))paragraph.push(lines[index++].trim());inlineBlock('p',paragraph.join(' '));
+    const paragraph=[],start=index;while(index<lines.length&&lines[index].trim()&&!/^\s*(?:```|\$\$|#{1,6}\s|>|(?:[-+*]|\d+\.)\s)/.test(lines[index]))paragraph.push(lines[index++].trim());if(index===start)paragraph.push(lines[index++]);inlineBlock('p',paragraph.join(' '));
   }
   return fragment;
 }
@@ -937,11 +947,12 @@ async function startPreparedRun(userPrompt=''){
 function disclosure(parent,title,value,open=false){if(value===undefined||value===null||value==='')return;const d=el('details');d.open=open;d.append(el('summary',title),el('pre',pretty(value)));parent.append(d)}
 function layoutPreview(block){
   if(!block.isConnected)return;
-  const content=block.querySelector('.reasoning-content'),topToggle=block.querySelector('.reasoning-toggle-top'),bottomToggle=block.querySelector('.reasoning-toggle-bottom'),wasExpanded=block.classList.contains('expanded');
-  block.classList.remove('expanded');content.classList.remove('truncated');topToggle.hidden=true;bottomToggle.hidden=true;
-  const needsDisclosure=content.scrollWidth>content.clientWidth+1;
-  if(needsDisclosure){topToggle.hidden=false;block.classList.toggle('expanded',wasExpanded);content.classList.toggle('truncated',!wasExpanded);bottomToggle.hidden=!wasExpanded}
-  topToggle.textContent=wasExpanded&&needsDisclosure?'↑':'⌄';topToggle.title=_(wasExpanded&&needsDisclosure?'collapse':'expand');topToggle.setAttribute('aria-expanded',String(wasExpanded&&needsDisclosure));bottomToggle.setAttribute('aria-expanded',String(wasExpanded&&needsDisclosure));
+  const content=block.querySelector('.reasoning-content'),topToggle=block.querySelector('.reasoning-toggle-top'),bottomToggle=block.querySelector('.reasoning-toggle-bottom'),expanded=block.classList.contains('expanded');
+  // Measure the current layout; toggling display while observing width caused reflow during streaming.
+  const lineHeight=parseFloat(getComputedStyle(content).lineHeight)||20;
+  const needsDisclosure=expanded||content.scrollWidth>content.clientWidth+1||content.scrollHeight>lineHeight+2;
+  topToggle.hidden=!needsDisclosure;bottomToggle.hidden=!expanded;content.classList.toggle('truncated',needsDisclosure&&!expanded);
+  topToggle.textContent=expanded?'↑':'⌄';topToggle.title=_(expanded?'collapse':'expand');topToggle.setAttribute('aria-expanded',String(expanded));bottomToggle.setAttribute('aria-expanded',String(expanded));
 }
 const previewWidths=new WeakMap(),previewObserver=new ResizeObserver(entries=>{for(const entry of entries){const width=entry.contentRect.width;if(previewWidths.get(entry.target)===width)continue;previewWidths.set(entry.target,width);layoutPreview(entry.target)}});
 function previewBlock(parent,value,extraClass='',agentOutput=false){
@@ -1110,29 +1121,35 @@ function appendTruncationNotice(card,payload){
   if(!['length','max_tokens','max_output_tokens','MAX_TOKENS'].includes(payload.finish_reason)||card.querySelector('.truncation-notice'))return;
   card.append(el('div',currentLocale.startsWith('zh')?'本轮输出达到上限，已保留已有内容。可发送“继续”，或在设置中调整输出上限后继续。':'Output limit reached. Partial output is preserved. Send “continue”, or adjust the output limit in settings before continuing.','truncation-notice'));
 }
+function settleAssistantCards(cards,error){
+  for(const [responseId,card] of cards){card.querySelector('.stream-progress')?.remove();if(error&&!card.querySelector('.stream-error'))card.append(el('pre',error,'stream-error'));assistantStreamStates.delete(responseId)}
+  cards.clear();
+}
 function renderAssistantStreamEvent(e,{feed,cards,dataMode=false,contextScope='data'}){
   const p=e.payload||{},responseId=p.response_id;if(!responseId)return;
   const follow=feed.scrollHeight-feed.scrollTop-feed.clientHeight<100;
   if(feed.querySelector('p.muted'))feed.replaceChildren();if(!dataMode)$('welcome')?.remove();
   let state=assistantStreamStates.get(responseId)||{started:e.timestamp,statusStarted:performance.now()/1000,content:'',reasoning:'',tool_calls:[],tool_schemas:p.tool_schemas||{},coord:p.coord,turn:p.turn,provider:p.provider,model:p.model,status:'modelWaiting'};
-  let card=cards.get(responseId);
-  if(card){const reasoning=card.querySelector('.stream-reasoning'),content=card.querySelector('.stream-content');if(reasoning)state.reasoningExpanded=reasoning.classList.contains('expanded');if(content)state.contentExpanded=content.classList.contains('expanded')}
   const nextStatus=p.type==='retry'?'modelRetrying':p.type==='delta'||p.type==='complete'?'modelStreaming':state.status;if(nextStatus!==state.status){state.status=nextStatus;state.statusStarted=performance.now()/1000}
   for(const key of ['content','reasoning','tool_calls','tool_schemas','coord','turn','provider','model'])if(p[key]!==undefined)state[key]=p[key];
+  if(p.message&&!state.reasoning){const m=p.message;state.reasoning=m.reasoning||m.reasoning_content||(m.reasoning_details||[]).map(item=>item?.text||'').join('')}
   assistantStreamStates.set(responseId,state);
-  if(!card){card=el('article');card.dataset.started=state.started;cards.set(responseId,card);feed.append(card)}
-  const restoreExpansion=()=>{for(const [selector,expanded] of [['.stream-reasoning',state.reasoningExpanded],['.stream-content',state.contentExpanded]])if(expanded){const block=card.querySelector(selector);if(block){block.classList.add('expanded');layoutPreview(block)}}};
-  const failed=e.kind.endsWith('_error');card.className='event '+(failed?'tool_error ':'assistant ')+e.kind;if(dataMode)unobservePreviewBlocks(card);card.replaceChildren();
-  const meta=el('div',undefined,'meta'),label=failed?_('eventModelError'):_('eventAgent'),metaTime=el('span',new Date(Number(state.started)*1000).toLocaleTimeString(currentLocale),'meta-time');meta.append(eventBadge('agent',label,failed));
-  if(dataMode&&state.turn)meta.append(contextScope==='evaluator'?evaluatorContextLink(state.turn):dataContextLink(state.turn));
-  else if(state.coord)meta.append(el('span',Object.entries(state.coord).map(([key,value])=>key+value).join(' · '),'meta-coord'));
-  const badge=modelBadge(state.provider,state.model);if(badge)meta.append(badge);meta.append(metaTime);card.append(meta);
-  if(failed){if(state.reasoning){if(dataMode)previewBlock(card,state.reasoning,'stream-reasoning',true);else card.append(agentOutputBlock(state.reasoning,'stream-reasoning'))}if(state.content){if(dataMode)previewBlock(card,state.content,'message-preview-block stream-content',true);else card.append(agentOutputBlock(state.content,'stream-content'))}restoreExpansion();card.append(el('pre',p.error||_('failed')));cards.delete(responseId);assistantStreamStates.delete(responseId);if(follow)feed.scrollTop=feed.scrollHeight;else if(!dataMode)$('follow').hidden=false;return}
-  card.append(streamProgress(state.statusStarted,state.status));
-  if(state.reasoning){if(dataMode)previewBlock(card,state.reasoning,'stream-reasoning',true);else card.append(agentOutputBlock(state.reasoning,'stream-reasoning'))}
-  if(state.content){if(dataMode)previewBlock(card,state.content,'message-preview-block stream-content',true);else card.append(agentOutputBlock(state.content,'stream-content'))}
-  if(state.tool_calls?.length){const holder=el('div',undefined,'stream-tool-calls');toolCallsBlock(holder,state.tool_calls,state.tool_schemas);card.append(holder)}
-  restoreExpansion();
+  let card=cards.get(responseId);
+  if(!card){
+    card=el('article',undefined,'event assistant '+e.kind);card.dataset.started=state.started;cards.set(responseId,card);feed.append(card);
+    const meta=el('div',undefined,'meta'),metaTime=el('span',new Date(Number(state.started)*1000).toLocaleTimeString(currentLocale),'meta-time');meta.append(eventBadge('agent',_('eventAgent')));
+    if(dataMode&&state.turn)meta.append(contextScope==='evaluator'?evaluatorContextLink(state.turn):dataContextLink(state.turn));
+    else if(state.coord)meta.append(el('span',Object.entries(state.coord).map(([key,value])=>key+value).join(' · '),'meta-coord'));
+    const badge=modelBadge(state.provider,state.model);if(badge)meta.append(badge);meta.append(metaTime);card.append(meta,streamProgress(state.statusStarted,state.status),agentOutputBlock('','stream-reasoning'),agentOutputBlock('','stream-content'),el('div',undefined,'stream-tool-calls'));
+  }
+  // Keep the same nodes and scroll positions across deltas; never replace the whole card.
+  for(const key of ['reasoning','content']){const node=card.querySelector('.stream-'+key);node.hidden=!state[key];renderAgentOutput(node,state[key]||'')}
+  const holder=card.querySelector('.stream-tool-calls'),signature=JSON.stringify([state.tool_calls,state.tool_schemas]);
+  if(holder.dataset.signature!==signature){holder.dataset.signature=signature;holder.replaceChildren();if(state.tool_calls?.length)toolCallsBlock(holder,state.tool_calls,state.tool_schemas)}
+  const failed=e.kind.endsWith('_error')||p.type==='failed',terminal=e.kind.endsWith('_error')||['assistant','data_assistant','evaluator_assistant'].includes(e.kind);
+  const progress=card.querySelector('.stream-progress');
+  if(failed||terminal){progress?.remove();if(failed){card.classList.add('tool_error');if(!card.querySelector('.stream-error'))card.append(el('pre',p.error||_('failed'),'stream-error'))}appendTruncationNotice(card,p);if(terminal){cards.delete(responseId);assistantStreamStates.delete(responseId)}}
+  else if(progress){progress.dataset.status=state.status;progress.dataset.started=state.statusStarted;updateStreamProgress(progress)}
   if(follow)feed.scrollTop=feed.scrollHeight;else if(!dataMode)$('follow').hidden=false;
 }
 function trackActivity(e) {
@@ -1144,6 +1161,7 @@ function trackActivity(e) {
   if(e.kind==='context'){latestContext=p;const key=contextKey(p.coord);if(key)contextHistory.set(key,p)}
 }
 function renderEvent(e) {
+  if(['execution_completed','execution_failed'].includes(e.kind))settleAssistantCards(assistantCards,e.kind==='execution_failed'?(e.payload?.error||e.payload?.result?.error||_('failed')):null);
   if(e.kind==='prompt_added'){renderPromptAdded(e,$('feed'));return}
   if(e.kind==='state_changed')e={...e,kind:'lifecycle',payload:{state:e.payload?.current}};
   else if(e.kind==='command_received')e={...e,kind:'control',payload:e.payload};
@@ -1173,7 +1191,7 @@ function renderEvent(e) {
   } else if(e.kind==='assistant') {
     if(p.coord)metaTime.before(contextLink(Object.entries(p.coord).map(([k,v])=>k+v).join(' · '),p.coord));const badge=modelBadge(p.provider,p.model);if(badge)metaTime.before(badge);
     const m=p.message||{},details=Array.isArray(m.reasoning_details)?m.reasoning_details:[];
-    const reasoning=m.reasoning||m.reasoning_content||details.map(x=>x?.text||'').join('\n');
+    const reasoning=m.reasoning||m.reasoning_content||details.map(x=>x?.text||'').join('');
     reasoningBlock(card,reasoning);
     if(p.content)card.append(agentOutputBlock(p.content,'message-preview-block'));
     toolCallsBlock(card,p.tool_calls,p.tool_schemas);appendTruncationNotice(card,p);
@@ -1214,9 +1232,10 @@ function renderDataEvent(e){
     renderDataContextEventCard(e,feed);
     return;
   }
+  if(e.kind==='data_error')settleAssistantCards(dataAssistantCards,p.error||_('failed'));
   if(e.kind==='data_complete'){
-    if(p.status==='stopped')for(const card of dataAssistantCards.values()){card.querySelector('.stream-progress')?.remove();card.append(el('div',_('dataAgentStopped'),'small muted'))}
-    if(p.status==='stopped'){dataAssistantCards.clear();assistantStreamStates.clear()}
+    if(p.status==='stopped')for(const card of dataAssistantCards.values())card.append(el('div',_('dataAgentStopped'),'small muted'));
+    settleAssistantCards(dataAssistantCards);
     return;
   }
   feed.hidden=false;
@@ -1243,7 +1262,7 @@ function renderDataEvent(e){
   card.append(meta);
   if(e.kind==='data_user')previewBlock(card,p.content||'','message-preview-block');
   else if(e.kind==='data_assistant'){
-    const message=p.message||{},details=Array.isArray(message.reasoning_details)?message.reasoning_details:[],reasoning=message.reasoning||message.reasoning_content||details.map(item=>item?.text||'').join('\n');
+    const message=p.message||{},details=Array.isArray(message.reasoning_details)?message.reasoning_details:[],reasoning=message.reasoning||message.reasoning_content||details.map(item=>item?.text||'').join('');
     reasoningBlock(card,reasoning);if(p.content)previewBlock(card,p.content,'message-preview-block',true);toolCallsBlock(card,p.tool_calls,p.tool_schemas);appendTruncationNotice(card,p);
     const usage=usageSummary(p.usage,cumulativeDataUsage(p));if(usage)card.append(el('div',usage,'usage-line'));
     if(p.response_id){dataAssistantCards.delete(p.response_id);assistantStreamStates.delete(p.response_id)}
@@ -1268,17 +1287,17 @@ function renderEvaluatorEvent(e){
     return;
   }
   if(e.kind==='evaluator_user'){appendEvaluatorAgentEvent('user',p,e.timestamp);return}
+  if(e.kind==='evaluator_error'){settleAssistantCards(evaluatorAssistantCards,p.error||_('failed'));renderGenericEventCard(e,feed);return}
   if(e.kind==='evaluator_complete'){
-    for(const [responseId,card] of evaluatorAssistantCards){card.querySelector('.stream-progress')?.remove();assistantStreamStates.delete(responseId)}
-    if(p.status==='stopped')feed.append(el('div',_('evaluatorAgentStopped'),'small muted'));evaluatorAssistantCards.clear();return;
+    settleAssistantCards(evaluatorAssistantCards);
+    if(p.status==='stopped')feed.append(el('div',_('evaluatorAgentStopped'),'small muted'));return;
   }
   if(['evaluator_assistant_start','evaluator_assistant_delta','evaluator_assistant_error'].includes(e.kind)){
     renderAssistantStreamEvent(e,{feed,cards:evaluatorAssistantCards,dataMode:true,contextScope:'evaluator'});return;
   }
   if(e.kind==='evaluator_assistant'){
     renderAssistantStreamEvent(e,{feed,cards:evaluatorAssistantCards,dataMode:true,contextScope:'evaluator'});
-    const card=evaluatorAssistantCards.get(p.response_id);card?.querySelector('.stream-progress')?.remove();if(card)appendTruncationNotice(card,p);
-    evaluatorAssistantCards.delete(p.response_id);assistantStreamStates.delete(p.response_id);return;
+    return;
   }
   if(e.kind==='evaluator_tool_start')appendEvaluatorAgentEvent('tool_start',p,e.timestamp);
   if(e.kind==='evaluator_tool_result')appendEvaluatorAgentEvent('tool_result',p,e.timestamp);

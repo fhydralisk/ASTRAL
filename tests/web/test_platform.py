@@ -514,7 +514,7 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert '.data-agent-card{display:grid;grid-template-columns:minmax(0,1fr)' in page.text
     assert '.reasoning-block.expanded .reasoning-content{display:block;width:100%' in page.text
     assert "previewBlock(card,p.content,'message-preview-block',true)" in page.text
-    assert "if(dataMode)previewBlock(card,state.content,'message-preview-block stream-content',true)" in page.text
+    assert "agentOutputBlock('','stream-reasoning')" in page.text
     assert "localStorage.getItem('sr-harness-markdown-'+scope)" in page.text
     assert "function markdownFragment(value)" in page.text
     assert "function texMath(source,display=false)" in page.text
@@ -537,9 +537,6 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert "localStorage.setItem('sr-harness-candidate-number-digits',String(candidateFormulaDigits))" in page.text
     assert "candidateFormulaNumberMode==='scientific'?number.toExponential(candidateFormulaDigits):number.toFixed(candidateFormulaDigits)" in page.text
     assert "mountCandidateFormulaControl();" in page.text
-    assert "state.reasoningExpanded=reasoning.classList.contains('expanded')" in page.text
-    assert "state.contentExpanded=content.classList.contains('expanded')" in page.text
-    assert "const restoreExpansion=()=>" in page.text
     assert 'function unobservePreviewBlocks(parent)' in page.text
     assert 'id="up"' not in page.text
     assert 'id="path"' not in page.text

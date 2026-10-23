@@ -42,9 +42,15 @@ class APICallSample:
     @property
     def reasoning(self) -> Any:
         """Return provider reasoning without imposing one provider field name."""
-        if "reasoning" in self.message_extra:
+        if self.message_extra.get("reasoning"):
             return self.message_extra["reasoning"]
-        return self.message_extra.get("reasoning_content")
+        if self.message_extra.get("reasoning_content"):
+            return self.message_extra["reasoning_content"]
+        return "".join(
+            item.get("text") or ""
+            for item in (self.message_extra.get("reasoning_details") or [])
+            if isinstance(item, dict)
+        ) or None
 
     @property
     def truncated(self) -> bool:
