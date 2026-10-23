@@ -110,7 +110,7 @@ def test_missing_credential_performs_no_git_or_network_operations(monkeypatch, t
     def unexpected(*args, **kwargs):
         pytest.fail("Deployment attempted work before validating its credential")
     monkeypatch.setattr(publisher, "source_snapshot", unexpected)
-    with pytest.raises(ValueError, match="HF_TOKEN"):
+    with pytest.raises(ValueError, match="authentication"):
         publisher.publish(
             repository=Path("/nonexistent"), revision="HEAD", repo_id="owner/space", token=token,
         )
@@ -226,3 +226,39 @@ def test_wait_does_not_fail_on_previous_deployments_build_error(monkeypatch):
         app_url="https://app.example", token="fake",
         api=SimpleNamespace(get_space_runtime=runtime),
     )
+
+
+def test_cli_uses_oidc_credential_without_persistent_secret(monkeypatch, capsys):
+    import huggingface_hub
+
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.setenv("HF_OIDC_RESOURCE", "spaces/owner/space")
+    monkeypatch.setattr(huggingface_hub, "get_token", lambda: "temporary-oidc-credential")
+    calls = []
+    def publish(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(oid="new-commit")
+    monkeypatch.setattr(publisher, "publish", publish)
+    monkeypatch.setattr(publisher, "source_snapshot", lambda *args: ("source", "1.0.7", {}))
+    monkeypatch.setattr(publisher, "wait_for_deployment", lambda **kwargs: calls.append(kwargs))
+
+    publisher.main(["--repo-id", "owner/space", "--app-url", "https://app.example"])
+
+    assert len(calls) == 2
+    assert all(call["token"] == "temporary-oidc-credential" for call in calls)
+    assert calls[1]["expected_commit"] == "new-commit"
+    assert "temporary-oidc-credential" not in capsys.readouterr().out
+
+
+def test_oidc_failure_stops_before_publishing(monkeypatch):
+    import huggingface_hub
+
+    monkeypatch.setenv("HF_OIDC_RESOURCE", "spaces/owner/space")
+    def reject():
+        raise RuntimeError("Trusted Publisher claims did not match")
+    def unexpected(**kwargs):
+        pytest.fail("Publishing attempted after failed authentication")
+    monkeypatch.setattr(huggingface_hub, "get_token", reject)
+    monkeypatch.setattr(publisher, "publish", unexpected)
+    with pytest.raises(RuntimeError, match="claims did not match"):
+        publisher.main([])

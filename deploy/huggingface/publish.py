@@ -49,7 +49,9 @@ def publish(
 ) -> Any:
     """Replace managed application files in one commit, preserving other Space files."""
     if not token or not token.strip():
-        raise ValueError("HF_TOKEN is required; configure the GitHub Actions repository secret")
+        raise ValueError(
+            "Hugging Face authentication is required; configure the Space Trusted Publisher for CI"
+        )
 
     from huggingface_hub import CommitOperationAdd, CommitOperationDelete, HfApi
 
@@ -145,10 +147,13 @@ def main(argv: list[str] | None = None) -> None:
             "repo_id": args.repo_id, "commit": commit, "version": version, "files": sorted(files),
         }, indent=2))
         return
+    from huggingface_hub import get_token
+
     try:
+        token = get_token()
         result = publish(
             repository=REPOSITORY, revision=args.revision, repo_id=args.repo_id,
-            token=os.environ.get("HF_TOKEN"),
+            token=token,
         )
     except ValueError as error:
         parser.error(str(error))
@@ -156,7 +161,7 @@ def main(argv: list[str] | None = None) -> None:
     _, version, _ = source_snapshot(REPOSITORY, args.revision)
     wait_for_deployment(
         repo_id=args.repo_id, version=version, expected_commit=result.oid, app_url=args.app_url,
-        token=os.environ.get("HF_TOKEN"), timeout=args.wait_timeout,
+        token=token, timeout=args.wait_timeout,
     )
 
 

@@ -50,13 +50,34 @@ runs when the version in `pyproject.toml` changes on `master`, alongside the PyP
 and Docker Hub workflows. It can also be started manually from GitHub Actions to
 redeploy the current version.
 
-Configure these GitHub Actions settings in the source repository:
+Publishing uses [Hugging Face Trusted Publishers](https://huggingface.co/docs/hub/trusted-publishers)
+with OIDC. No personal access token or `HF_TOKEN` GitHub secret is needed.
 
-- **Secret `HF_TOKEN`:** a Hugging Face access token with write permission for the
-  target Space. Prefer a fine-grained token restricted to that Space.
-- **Variable `HF_SPACE_ID` (optional):** defaults to `YuMeow/SRHarness`.
-- **Variable `HF_SPACE_URL` (optional):** defaults to
-  `https://yumeow-srharness.hf.space`; set this too when deploying another Space.
+In the target Space's **Settings → Trusted Publishers**, add **GitHub Actions**
+with all three restrictions:
+
+| Setting | Value |
+| --- | --- |
+| Repository | `yuzhTHU/SRHarness` |
+| Branch | `master` |
+| Workflow | `publish-huggingface.yml` |
+
+Use the Space-level trusted publisher, not the account-level CI/CD identity
+(which provides different, read-oriented permissions). Each matching workflow
+run receives a short-lived token with write access to this Space only.
+
+The workflow has `id-token: write` permission and sets
+`HF_OIDC_RESOURCE=spaces/YuMeow/SRHarness`; the Hugging Face client exchanges the
+GitHub identity for a temporary publishing credential. The credential is never
+printed or saved as a GitHub secret. An exchange failure stops deployment.
+
+For another deployment, set the optional GitHub Actions variables `HF_SPACE_ID`
+and `HF_SPACE_URL` (defaults: `YuMeow/SRHarness` and
+`https://yumeow-srharness.hf.space`) and register a trusted publisher on that Space.
+
+After saving the trust rule, open **GitHub Actions → Publish Hugging Face Space →
+Run workflow**, select `master`, and run it once to verify the authorization and
+deployment. Subsequent version changes on `master` trigger it automatically.
 
 The workflow exports the selected Git commit, uploads only the application source
 and Docker build inputs, and installs the dedicated Space README. It removes
