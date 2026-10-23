@@ -7,8 +7,7 @@
 [![Docker](https://img.shields.io/docker/v/yumeoww/sr-harness?sort=semver&logo=docker&logoColor=white&label=Docker)](https://hub.docker.com/r/yumeoww/sr-harness)
 [![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-4e968b?logo=materialformkdocs&logoColor=white)](https://yuzhthu.github.io/SRHarness/)
 [![Live WebUI](https://img.shields.io/badge/WebUI-live-4e968b?logo=googlechrome&logoColor=white)](http://sim1.fiblab.tech:30000/)
-[![Hugging Face Space](https://img.shields.io/badge/Hugging%20Face-Space-ffd21e?logo=huggingface&logoColor=black)](https://huggingface.co/spaces/YuMeow/SRHarness)
-[![Hugging Face WebUI](https://img.shields.io/badge/WebUI-Hugging%20Face-4e968b?logo=googlechrome&logoColor=white)](https://yumeow-srharness.hf.space/)
+[![Hugging Face WebUI](https://img.shields.io/badge/WebUI-Hugging%20Face-ffd21e?logo=huggingface&logoColor=black)](https://yumeow-srharness.hf.space/)
 [![arXiv](https://img.shields.io/badge/arXiv-2609.35501-b31b1b?logo=arxiv&logoColor=white)](https://arxiv.org/abs/2609.35501)
 [![Documentation build](https://github.com/yuzhTHU/SRHarness/actions/workflows/docs.yml/badge.svg?branch=dev)](https://github.com/yuzhTHU/SRHarness/actions/workflows/docs.yml)
 [![Python](https://img.shields.io/badge/python-%E2%89%A53.12-3776AB?logo=python&logoColor=white)](https://pypi.org/project/sr-harness/)
@@ -49,8 +48,9 @@ See the [installation guide](https://yuzhthu.github.io/SRHarness/install/) for p
 
 ### Hugging Face Spaces
 
-Try the hosted WebUI at <https://yumeow-srharness.hf.space/> or visit its
-[Hugging Face Space](https://huggingface.co/spaces/YuMeow/SRHarness).
+Try the hosted WebUI at <https://yumeow-srharness.hf.space/>. Once the deployment
+workflow is configured, version releases update this instance alongside PyPI and
+Docker Hub.
 
 To deploy your own Docker Space, use the dedicated
 [Space README template](deploy/huggingface/README.space.md) in the Hugging Face

@@ -1,0 +1,85 @@
+name: Publish Hugging Face Space
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - pyproject.toml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-huggingface
+  cancel-in-progress: false
+
+jobs:
+  changes:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.changes.outputs.publish }}
+      version: ${{ steps.changes.outputs.version }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Detect project version change
+        id: changes
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          python - <<'PY'
+          import os
+          import subprocess
+          import tomllib
+          from pathlib import Path
+
+          current = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+          publish = os.environ["GITHUB_EVENT_NAME"] == "workflow_dispatch"
+          if not publish:
+              previous_source = subprocess.check_output([
+                  "git", "show", f"{os.environ['BEFORE']}:pyproject.toml",
+              ], text=True)
+              previous = tomllib.loads(previous_source)["project"]["version"]
+              publish = current != previous
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              print(f"publish={str(publish).lower()}", file=output)
+              print(f"version={current}", file=output)
+          PY
+
+  publish:
+    needs: changes
+    if: needs.changes.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check publishing credential
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "::error::Set the HF_TOKEN repository secret to a token with write access to the Space."
+            exit 1
+          fi
+      - name: Install Hugging Face client
+        run: python -m pip install huggingface_hub==2.2.0
+      - name: Publish committed source to the Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE_ID: ${{ vars.HF_SPACE_ID || 'YuMeow/SRHarness' }}
+          HF_SPACE_URL: ${{ vars.HF_SPACE_URL || 'https://yumeow-srharness.hf.space' }}
+        run: python deploy/huggingface/publish.py --revision "$GITHUB_SHA"

@@ -43,7 +43,32 @@ sr-harness run \
 
 The health endpoint is `/health`.
 
-## 2. Configure model credentials
+## 2. Publish automatically from GitHub
+
+The [Publish Hugging Face Space workflow](../../.github/workflows/publish-huggingface.yml)
+runs when the version in `pyproject.toml` changes on `master`, alongside the PyPI
+and Docker Hub workflows. It can also be started manually from GitHub Actions to
+redeploy the current version.
+
+Configure these GitHub Actions settings in the source repository:
+
+- **Secret `HF_TOKEN`:** a Hugging Face access token with write permission for the
+  target Space. Prefer a fine-grained token restricted to that Space.
+- **Variable `HF_SPACE_ID` (optional):** defaults to `YuMeow/SRHarness`.
+- **Variable `HF_SPACE_URL` (optional):** defaults to
+  `https://yumeow-srharness.hf.space`; set this too when deploying another Space.
+
+The workflow exports the selected Git commit, uploads only the application source
+and Docker build inputs, and installs the dedicated Space README. It removes
+obsolete files under `src/` while preserving other Space repository files and
+settings. Local experiments and uncommitted work are excluded.
+
+After uploading, it waits for the running commit to match the uploaded commit,
+for `/api/version` to report the expected version, and for `/health` to pass. A failed build or an unsuccessful startup makes
+the workflow fail. The public application entry is
+<https://yumeow-srharness.hf.space/>.
+
+## 3. Configure model credentials
 
 Add provider credentials under the Space's **Settings → Secrets**. Supported
 secret names include:
@@ -61,7 +86,7 @@ public use and its cost are intentional. SRHarness lets each browser session
 configure its own provider key in the WebUI, but `--isolate-users` is
 cookie-based isolation rather than authentication or abuse prevention.
 
-## 3. Choose a storage policy
+## 4. Choose a storage policy
 
 The image writes conversations, uploaded data, settings, and run artifacts to
 `/data`.
@@ -73,7 +98,7 @@ The image writes conversations, uploaded data, settings, and run artifacts to
   through the WebUI. Use a private Space for sensitive work and apply an
   appropriate retention policy.
 
-## 4. Resource expectations
+## 5. Resource expectations
 
 CPU Basic is enough to start the WebUI and use remote LLM providers. Symbolic
 regression workloads can be CPU- and memory-intensive, so larger hardware may
