@@ -1,15 +1,3 @@
----
-title: SRHarness
-emoji: 🔬
-colorFrom: blue
-colorTo: green
-sdk: docker
-app_port: 8000
-pinned: false
-license: mit
-short_description: Agentic symbolic regression workbench
----
-
 # SRHarness: A Harness for Agentic Symbolic Regression
 
 [English](README.md) | [简体中文](README.zh.md)
@@ -64,9 +52,10 @@ See the [installation guide](https://yuzhthu.github.io/SRHarness/install/) for p
 Try the hosted WebUI at <https://yumeow-srharness.hf.space/> or visit its
 [Hugging Face Space](https://huggingface.co/spaces/YuMeow/SRHarness).
 
-The repository can also be deployed directly as a Docker Space. See the
-[Hugging Face deployment guide](deploy/huggingface/README.md) for creation,
-secrets, persistence, and security guidance.
+To deploy your own Docker Space, use the dedicated
+[Space README template](deploy/huggingface/README.space.md) in the Hugging Face
+repository. See the [Hugging Face deployment guide](deploy/huggingface/README.md)
+for setup, secrets, persistence, and security guidance.
 
 ## Quick Start
 

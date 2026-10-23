@@ -1,19 +1,34 @@
 # Deploying SRHarness on Hugging Face Spaces
 
 SRHarness can run as a Hugging Face Docker Space using the repository's root
-`Dockerfile`. The Space metadata at the top of the root `README.md` tells
-Hugging Face to expose the application's existing port, `8000`.
+`Dockerfile`. The dedicated [Space README template](README.space.md) contains
+its display settings and Docker configuration, including port `8000`.
+
+Hugging Face reads these settings from the top of **its own repository's root
+`README.md`**. The GitHub README stays focused on the project introduction.
+See the [official Space configuration reference](https://huggingface.co/docs/hub/spaces-config-reference).
 
 ## 1. Create the Space
 
 Create a new Space with the **Docker** SDK. A private Space is recommended when
-the deployment uses an owner-funded model API key. Then push this repository to
-the Space repository:
+the deployment uses an owner-funded model API key. Use a separate checkout for
+the Space. From the SRHarness repository, export the committed source and install
+the Space-specific README before committing the deployment:
 
 ```bash
-git remote add huggingface https://huggingface.co/spaces/OWNER/SPACE_NAME
-git push huggingface HEAD:main
+git clone https://huggingface.co/spaces/OWNER/SPACE_NAME ../srharness-space
+git archive HEAD | tar -x -C ../srharness-space
+cp ../srharness-space/deploy/huggingface/README.space.md ../srharness-space/README.md
+git -C ../srharness-space add .
+git -C ../srharness-space commit -m "Deploy SRHarness"
+git -C ../srharness-space push
 ```
+
+When updating an existing Space checkout, synchronize the committed project
+files, including removing files deleted upstream, and reapply the README template
+before committing. Keep any Space-specific metadata customizations in that
+checkout. Do not push the GitHub branch directly to the Space: its README does
+not contain the configuration Hugging Face needs.
 
 The container starts the equivalent of:
 

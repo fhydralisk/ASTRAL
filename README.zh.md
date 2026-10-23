@@ -52,7 +52,8 @@ pip install sr-harness
 可以直接访问在线 WebUI：<https://yumeow-srharness.hf.space/>，或前往对应的
 [Hugging Face Space](https://huggingface.co/spaces/YuMeow/SRHarness)。
 
-本仓库也可以直接部署为 Docker Space。创建 Space、配置密钥、数据持久化与安全注意事项参见
+部署自己的 Docker Space 时，请在 Hugging Face 仓库中使用独立的
+[Space README 模板](deploy/huggingface/README.space.md)。部署步骤、密钥配置、数据持久化与安全注意事项参见
 [Hugging Face 部署指南](deploy/huggingface/README.md)。
 
 ## 快速开始
