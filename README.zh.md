@@ -7,6 +7,8 @@
 [![Docker](https://img.shields.io/docker/v/yumeoww/sr-harness?sort=semver&logo=docker&logoColor=white&label=Docker)](https://hub.docker.com/r/yumeoww/sr-harness)
 [![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-4e968b?logo=materialformkdocs&logoColor=white)](https://yuzhthu.github.io/SRHarness/)
 [![Live WebUI](https://img.shields.io/badge/WebUI-live-4e968b?logo=googlechrome&logoColor=white)](http://sim1.fiblab.tech:30000/)
+[![Hugging Face Space](https://img.shields.io/badge/Hugging%20Face-Space-ffd21e?logo=huggingface&logoColor=black)](https://huggingface.co/spaces/YuMeow/SRHarness)
+[![Hugging Face WebUI](https://img.shields.io/badge/WebUI-Hugging%20Face-4e968b?logo=googlechrome&logoColor=white)](https://yumeow-srharness.hf.space/)
 [![arXiv](https://img.shields.io/badge/arXiv-2609.35501-b31b1b?logo=arxiv&logoColor=white)](https://arxiv.org/abs/2609.35501)
 [![Documentation build](https://github.com/yuzhTHU/SRHarness/actions/workflows/docs.yml/badge.svg?branch=dev)](https://github.com/yuzhTHU/SRHarness/actions/workflows/docs.yml)
 [![Python](https://img.shields.io/badge/python-%E2%89%A53.12-3776AB?logo=python&logoColor=white)](https://pypi.org/project/sr-harness/)
@@ -45,6 +47,14 @@ pip install sr-harness
 
 模型服务配置、源码安装、开发环境及可选集成参见[安装文档](https://yuzhthu.github.io/SRHarness/install/)。
 
+### Hugging Face Spaces
+
+可以直接访问在线 WebUI：<https://yumeow-srharness.hf.space/>，或前往对应的
+[Hugging Face Space](https://huggingface.co/spaces/YuMeow/SRHarness)。
+
+本仓库也可以直接部署为 Docker Space。创建 Space、配置密钥、数据持久化与安全注意事项参见
+[Hugging Face 部署指南](deploy/huggingface/README.md)。
+
 ## 快速开始
 
 ### 发现一个已知方程：`sr-harness synthetic`
@@ -78,7 +88,7 @@ sr-harness run \
   --save-path ./logs/webui
 ```
 
-随后打开 <http://127.0.0.1:8000/>。对话注册信息和各对话工作区保存在 `./workspaces`，会话快照和运行记录保存在 `./logs/webui`。也可以直接访问在线实例：<http://sim1.fiblab.tech:30000/>。
+随后打开 <http://127.0.0.1:8000/>。对话注册信息和各对话工作区保存在 `./workspaces`，会话快照和运行记录保存在 `./logs/webui`。也可以直接访问在线实例：<http://sim1.fiblab.tech:30000/> 或 <https://yumeow-srharness.hf.space/>。
 
 ## 文档
 
