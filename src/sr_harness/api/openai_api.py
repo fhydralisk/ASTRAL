@@ -48,7 +48,7 @@ class OpenAIAPI(BaseAPI):
         self,
         messages: List[Dict[str, str]],
         n=1,
-        max_tokens=4096,
+        max_tokens=None,
         temperature=1.0,
         top_p=1.0,
         use_chat_completions=False,
@@ -119,7 +119,7 @@ class OpenAIAPI(BaseAPI):
         self,
         messages: List[Dict[str, str]],
         n: int = 1,
-        max_tokens: int = 4096,
+        max_tokens: int | None = None,
         temperature: float = 1.0,
         top_p: float = 1.0,
         callback: ProgressCallback | None = None,
@@ -152,7 +152,7 @@ class OpenAIAPI(BaseAPI):
             "reasoning": {"summary": "auto"},
             "model": self.model,
             "top_p": top_p,
-            "max_output_tokens": max_tokens,
+            **({"max_output_tokens": max_tokens} if max_tokens is not None else {}),
             "temperature": temperature,
             # "prompt_cache_retention": "24h"  # 官网上说有这个参数可以延长 cache 保存时间，但实际用起来会报错
             # "n": n,  # OpenAI Response API 不支持 parameter n
@@ -313,7 +313,7 @@ class OpenAIAPI(BaseAPI):
         self,
         messages: List[Dict[str, str]],
         n: int = 1,
-        max_tokens: int = 4096,
+        max_tokens: int | None = None,
         temperature: float = 1.0,
         top_p: float = 1.0,
         callback: ProgressCallback | None = None,
@@ -346,7 +346,7 @@ class OpenAIAPI(BaseAPI):
             "n": n,
             "model": (model := self.model),
             "top_p": top_p,
-            "max_tokens": max_tokens,
+            **({"max_tokens": max_tokens} if max_tokens is not None else {}),
             "temperature": temperature,
         }
         if self.tool_box is None:
@@ -381,7 +381,10 @@ class OpenAIAPI(BaseAPI):
                 response_dict = {"choices": [{"message": choice.message.to_dict()}]}
                 message = choice.message.to_dict()
                 content = message["content"]
-                tool_call = self.parse_tool_calls(message, content)
+                truncated = getattr(choice, "finish_reason", None) == "length"
+                if truncated:
+                    message.pop("tool_calls", None)
+                tool_call = [] if truncated else self.parse_tool_calls(message, content)
                 details.append(
                     {
                         "content": content,
@@ -392,6 +395,7 @@ class OpenAIAPI(BaseAPI):
                     }
                 )
                 sample_response = self.format_response(message, tool_call, content)
+                sample_response.finish_reason = getattr(choice, "finish_reason", None)
                 if callback is not None:
                     self.report_progress(callback, {
                         "type": "complete",

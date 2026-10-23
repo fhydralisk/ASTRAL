@@ -128,7 +128,7 @@ class SiliconFlowAPI(BaseAPI):
         self,
         messages: List[Dict[str, str]],
         n=1,
-        max_tokens=1024,
+        max_tokens=None,
         temperature=1.0,
         top_p=1.0,
         callback: ProgressCallback | None = None,
@@ -152,7 +152,7 @@ class SiliconFlowAPI(BaseAPI):
             "min_p": 0.05,
             "stream": False,
             "thinking_budget": 1024,
-            "max_tokens": max_tokens,
+            **({"max_tokens": max_tokens} if max_tokens is not None else {}),
             "temperature": temperature,
             "frequency_penalty": 0.5,
         }
@@ -231,8 +231,13 @@ class SiliconFlowAPI(BaseAPI):
         )
         for sample, choice in enumerate(responses["choices"], 1):
             content = choice["message"].get("content") or ""
-            tool_call = self.parse_tool_calls(choice["message"], content)
-            sample_response = self.format_response(choice["message"], tool_call, content)
+            message = dict(choice["message"])
+            truncated = choice.get("finish_reason") == "length"
+            if truncated:
+                message.pop("tool_calls", None)
+            tool_call = [] if truncated else self.parse_tool_calls(message, content)
+            sample_response = self.format_response(message, tool_call, content)
+            sample_response.finish_reason = choice.get("finish_reason")
             if callback is not None:
                 self.report_progress(callback, {
                     "type": "complete",

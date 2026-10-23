@@ -38,7 +38,7 @@ class DeepSeekAPI(BaseAPI):
         messages: list[dict[str, Any]],
         *,
         sample_index: int,
-        max_tokens=4096,
+        max_tokens=None,
         temperature=1,
         callback: ProgressCallback | None = None,
     ) -> ProviderSampleResult:
@@ -63,7 +63,7 @@ class DeepSeekAPI(BaseAPI):
                 }
                 for message in messages
             ],
-            "max_tokens": max_tokens,
+            **({"max_tokens": max_tokens} if max_tokens is not None else {}),
             "temperature": temperature,
         }
         if self.tool_box is None:
@@ -95,7 +95,6 @@ class DeepSeekAPI(BaseAPI):
             sample=sample_index,
             callback=callback,
         )
-        tool_calls = self.parse_tool_calls(message, content)
         token_usage = self.openai_token_usage(completion, other_key="other")
         money_usage = {
             "prompt": 0.28 / 1e6 * token_usage.get("prompt", 0),
@@ -108,16 +107,19 @@ class DeepSeekAPI(BaseAPI):
         if finish_reason == "length":
             partial_message = dict(message)
             partial_message.pop("tool_calls", None)
+            partial_response = self.format_response(partial_message, [], content)
+            partial_response.finish_reason = "length"
             return ProviderSampleResult(
-                response=self.format_response(partial_message, [], content),
+                response=partial_response,
                 token_usage=token_usage,
                 money_usage=money_usage,
                 raw_response=raw_response,
                 error=(
-                    f"DeepSeekAPI({self.model}) exhausted max_tokens={max_tokens}; "
+                    f"DeepSeekAPI({self.model}) exhausted max_tokens={max_tokens if max_tokens is not None else 'provider default'}; "
                     "increase the Agent's maximum output length and retry."
                 ),
             )
+        tool_calls = self.parse_tool_calls(message, content)
         if not (tool_calls or content.strip()):
             raise ValueError(
                 f"DeepSeekAPI({self.model}) returned empty content and no usable tool calls."

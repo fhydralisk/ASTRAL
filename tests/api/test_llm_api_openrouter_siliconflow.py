@@ -426,7 +426,8 @@ def test_openrouter_stream_preserves_reasoning_when_output_limit_is_exhausted(mo
     assert updates[-2]["type"] == "complete"
     assert updates[-2]["reasoning"] == "a long chain of reasoning"
     assert updates[-2]["finish_reason"] == "length"
-    assert updates[-1]["type"] == "failed"
+    assert updates[-1]["type"] == "truncated"
+    assert result.truncated
 
 
 def test_openrouter_empty_response_uses_same_retry_backoff(monkeypatch):

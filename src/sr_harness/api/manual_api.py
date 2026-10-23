@@ -36,7 +36,7 @@ class ManualAPI(BaseAPI):
         return ["manual"]
 
     def _request_samples(
-        self, messages: List[Dict[str, str]], n=1, callback=None
+        self, messages: List[Dict[str, str]], n=1, callback=None, max_tokens=None
     ) -> Generator[APICallSample, None, dict[str, Any]]:
         import pyperclip, tiktoken
 

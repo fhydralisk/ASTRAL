@@ -30,7 +30,7 @@ class EvaluatorConstructionAgent(Agent):
         tools: list[BaseTool],
         interaction_manager: InteractionManager,
         tool_parser: str = "openai",
-        llm_max_tokens: int = 4096,
+        llm_max_tokens: int | None = None,
         max_steps: int = 16,
     ) -> None:
         self.llm_provider = llm_provider
@@ -268,7 +268,7 @@ class EvaluatorConstructionAgent(Agent):
                     )
                     rows = list(call_result)
                 self._check_stop()
-                if call_result.ok is False:
+                if call_result.ok is False and not call_result.truncated:
                     raise RuntimeError(call_result.error or "Model API request failed.")
             except InterruptedError:
                 self._record_force(latest_stream_update)
@@ -297,11 +297,13 @@ class EvaluatorConstructionAgent(Agent):
                 raise RuntimeError("EvaluatorConstructionAgent returned no usable response")
             response = rows[0]
             content, calls, message = response.content, response.tool_calls, response.message
-            self.buffer.append(message)
+            if content or not call_result.truncated:
+                self.buffer.append(message)
             assistant_event = {
                 "kind": "assistant",
                 "timestamp": time.time(),
                 "content": content or "",
+                "finish_reason": response.finish_reason,
                 "message": json_value(message),
                 "tool_calls": [
                     {"name": call.name, "params": json_value(call.params), "id": call.id}
@@ -314,6 +316,7 @@ class EvaluatorConstructionAgent(Agent):
                 {
                     **event_context,
                     "content": content or "",
+                    "finish_reason": response.finish_reason,
                     "reasoning": message.get("reasoning", ""),
                     "message": json_value(message),
                     "tool_calls": assistant_event["tool_calls"],
@@ -323,6 +326,10 @@ class EvaluatorConstructionAgent(Agent):
                     },
                 },
             )
+            if call_result.truncated:
+                self.interaction_manager.request_pause()
+                self._wait()
+                continue
             if not calls:
                 if update_needs_test:
                     self._append_prompt(

@@ -70,7 +70,7 @@ class SRAgent(Agent):
         global_width: int = 1,
         max_restart_loop: int = 1,
         restart_top_k: int = 1,
-        llm_max_tokens: int = 4096,
+        llm_max_tokens: int | None = None,
         max_workers: int = 0,
         validation_fraction: float = 0.2,
         split_by: str = "random",
@@ -861,7 +861,8 @@ class SRAgent(Agent):
             )
             _logger.debug(tool_calls_for_log)
         usage = self.record_llm_result(llm_result, R=R, L=L, C=C)
-        if llm_result.ok is False:
+        self._last_response_was_truncated = llm_result.truncated
+        if llm_result.ok is False and not llm_result.truncated:
             raise RuntimeError(llm_result.error or "Model API request failed.")
         return response_list, usage
 

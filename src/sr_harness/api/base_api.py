@@ -169,7 +169,8 @@ class BaseAPI(ABC, FactoryMixin):
             yield sample_result.response
             if sample_result.error:
                 self.report_progress(callback, {
-                    "type": "failed",
+                    "type": "truncated" if sample_result.response.truncated else "failed",
+                    "finish_reason": sample_result.response.finish_reason,
                     "sample": sample_index,
                     "error": sample_result.error,
                 })

@@ -70,7 +70,7 @@ class LMStudioAPI(BaseAPI):
         self,
         messages: List[Dict[str, str]],
         n: int = 1,
-        max_tokens: int = 4096,
+        max_tokens: int | None = None,
         temperature: float = 1.0,
         top_p: float = 1.0,
         callback=None,
@@ -85,7 +85,7 @@ class LMStudioAPI(BaseAPI):
             "messages": [dict(message) for message in messages],
             "n": n,
             "top_p": top_p,
-            "max_tokens": max_tokens,
+            **({"max_tokens": max_tokens} if max_tokens is not None else {}),
             "temperature": temperature,
             "stream": False,
         }
@@ -168,11 +168,15 @@ class LMStudioAPI(BaseAPI):
         for sample, choice in enumerate(choices, 1):
             message = choice.get("message") or {}
             content = message.get("content") or ""
-            tool_call = self.parse_tool_calls(message, content)
+            truncated = choice.get("finish_reason") == "length"
+            if truncated:
+                message = {key: value for key, value in message.items() if key != "tool_calls"}
+            tool_call = [] if truncated else self.parse_tool_calls(message, content)
             if not (content.strip() or tool_call):
                 _logger.warning(f"LMStudioAPI({self.model}) returned an empty choice.")
             details.append({"content": content, "tool_call": tool_call, "message": message})
             sample_response = self.format_response(message, tool_call, content)
+            sample_response.finish_reason = choice.get("finish_reason")
             if callback is not None:
                 self.report_progress(callback, {
                     "type": "complete",

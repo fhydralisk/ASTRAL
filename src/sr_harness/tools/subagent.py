@@ -85,7 +85,7 @@ class SubagentTool(BaseTool):
             provider,
             model=model,
         )
-        result = api(messages, n=1, max_tokens=getattr(self.context.args, "llm_max_tokens", 4096))
+        result = api(messages, n=1, max_tokens=getattr(self.context.args, "llm_max_tokens", None))
         content = ""
         for response in result:
             content = response.content or ""

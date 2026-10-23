@@ -122,8 +122,8 @@ def setup_parser(parser: argparse.ArgumentParser | None = None) -> argparse.Argu
     parser.add_argument("--restart_top_k", type=int, default=1, help=(
         "Number of previous best formulas to inject into the next restart prompt."
     ))
-    parser.add_argument("--llm_max_tokens", type=int, default=4096, help=(
-        "Maximum number of tokens to generate for each LLM response."
+    parser.add_argument("--llm_max_tokens", type=int, default=None, help=(
+        "Optional output-token cap per response; omitted uses the provider default."
     ))
     parser.add_argument("--tool_parser", default="openai", choices=["openai", "text", "json", "xml"], help=(
         "Tool response parser type."

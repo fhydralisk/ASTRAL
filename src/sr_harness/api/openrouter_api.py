@@ -48,7 +48,7 @@ class OpenRouterAPI(BaseAPI):
         messages: list[dict[str, Any]],
         *,
         sample_index: int,
-        max_tokens=4096,
+        max_tokens=None,
         temperature=1.0,
         top_p=1.0,
         callback: ProgressCallback | None = None,
@@ -70,7 +70,7 @@ class OpenRouterAPI(BaseAPI):
             "model": self.model,
             "messages": [dict(message) for message in messages],
             "top_p": top_p,
-            "max_tokens": max_tokens,
+            **({"max_tokens": max_tokens} if max_tokens is not None else {}),
             "temperature": temperature,
         }
         if self.model == "openai/gpt-oss-120b":
@@ -112,7 +112,6 @@ class OpenRouterAPI(BaseAPI):
             sample=sample_index,
             callback=callback,
         )
-        tool_calls = self.parse_tool_calls(message, content)
         choices = raw_response.get("choices") or [{}]
         finish_reason = raw_response.get("finish_reason") or choices[0].get("finish_reason")
         token_usage = self.openai_token_usage(completion)
@@ -121,20 +120,24 @@ class OpenRouterAPI(BaseAPI):
         if finish_reason == "length":
             partial_message = dict(message)
             partial_message.pop("tool_calls", None)
+            budget = max_tokens if max_tokens is not None else "provider default"
             error = (
-                f"OpenRouterAPI({self.model}) exhausted max_tokens={max_tokens}; "
+                f"OpenRouterAPI({self.model}) exhausted max_tokens={budget}; "
                 "the response was truncated before the model completed its turn. "
                 "Increase the Agent's maximum output length and retry. "
-                f"模型已耗尽 max_tokens={max_tokens}，响应在本轮完成前被截断；"
+                f"模型已耗尽 max_tokens={budget}，响应在本轮完成前被截断；"
                 "请增大 Agent 的最大输出长度后重试。"
             )
+            partial_response = self.format_response(partial_message, [], content)
+            partial_response.finish_reason = "length"
             return ProviderSampleResult(
-                response=self.format_response(partial_message, [], content),
+                response=partial_response,
                 token_usage=token_usage,
                 money_usage=money_usage,
                 raw_response=raw_response,
                 error=error,
             )
+        tool_calls = self.parse_tool_calls(message, content)
         if not (tool_calls or content.strip()):
             raise ValueError(
                 f"OpenRouterAPI({self.model}) returned empty content and no usable tool calls."
