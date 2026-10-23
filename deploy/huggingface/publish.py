@@ -11,7 +11,6 @@ import tarfile
 import time
 import tomllib
 from typing import Any
-from urllib.error import URLError
 from urllib.request import urlopen
 
 
@@ -92,7 +91,6 @@ def wait_for_deployment(
     timeout: float = 1200, poll_interval: float = 15, api: Any = None,
 ) -> None:
     """Wait for the build to finish and the public application to serve this version."""
-    import httpx
     from huggingface_hub import HfApi
 
     client = api if api is not None else HfApi(token=token)
@@ -116,7 +114,7 @@ def wait_for_deployment(
                 return
             status = (f"Space stage={stage}, running commit={running_commit}, "
                       f"app version={current}, health={health}")
-        except (httpx.HTTPError, URLError, TimeoutError, ValueError) as error:
+        except (OSError, ValueError) as error:
             status = f"Waiting for application responses ({type(error).__name__})"
         print(status, flush=True)
         remaining = deadline - time.monotonic()

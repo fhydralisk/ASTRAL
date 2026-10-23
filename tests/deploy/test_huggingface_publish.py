@@ -262,3 +262,25 @@ def test_oidc_failure_stops_before_publishing(monkeypatch):
     monkeypatch.setattr(publisher, "publish", unexpected)
     with pytest.raises(RuntimeError, match="claims did not match"):
         publisher.main([])
+
+
+def test_wait_recovers_network_errors_without_legacy_httpx(monkeypatch):
+    import sys
+
+    monkeypatch.setitem(sys.modules, "httpx", None)
+    monkeypatch.setattr(publisher.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(publisher, "read_app_json", lambda url: (
+        {"version": "1.0.7"} if url.endswith("/api/version") else {"status": "ok"}
+    ))
+    attempts = []
+    def runtime(repo):
+        attempts.append(repo)
+        if len(attempts) == 1:
+            raise OSError("Transient transport error")
+        return SimpleNamespace(stage="RUNNING", raw={"sha": "new-commit"})
+    publisher.wait_for_deployment(
+        repo_id="owner/space", version="1.0.7", expected_commit="new-commit",
+        app_url="https://app.example", token="fake",
+        api=SimpleNamespace(get_space_runtime=runtime),
+    )
+    assert len(attempts) == 2
