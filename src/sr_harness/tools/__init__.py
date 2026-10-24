@@ -34,6 +34,10 @@ from .finish_search import FinishSearchTool
 from .read_source import ReadSourceTool
 from .validate_evaluator import ValidateEvaluatorTool
 from .configure_variable_roles import VariableRolesTool
+from .validate_discovery_contract import ValidateDiscoveryContractTool
+from .calibrate_observation_scatter import CalibrateObservationScatterTool
+from .evaluate_observational_formula import EvaluateObservationalFormulaTool, SubmitObservationalFormulaTool
+from .observational_statistics import ObservationalStatisticsTool
 
 __all__ = [
     "BaseTool", "CodeExecutorTool", "ConstantFitTool",
@@ -46,4 +50,7 @@ __all__ = [
     "ToolMetadata", "ToolRunAbort", "ValidateContextDataTool",
     "ValidateEvaluatorTool", "VariableRolesTool", "WebFetchTool", "WebSearchTool",
     "WorkspaceCodeExecutorTool", "WorkspaceShellTool",
+    "ValidateDiscoveryContractTool", "CalibrateObservationScatterTool",
+    "EvaluateObservationalFormulaTool", "SubmitObservationalFormulaTool",
+    "ObservationalStatisticsTool",
 ]

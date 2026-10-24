@@ -533,6 +533,7 @@ function renderEvaluatorLineNumbers(){const code=$('evaluator-code'),lines=Math.
 function evaluatorChoices(){return [
   {id:'default',label:'DefaultEvaluator（默认评测）',label_en:'DefaultEvaluator (default)'},
   {id:'graph',label:'GraphEvaluator（图与超图）',label_en:'GraphEvaluator (graph/hypergraph)'},
+  {id:'observational',label:'ObservationalEvaluator（观测数据）',label_en:'ObservationalEvaluator (observations)'},
   ...(evaluatorConfiguration?.evaluators||[]),
 ]}
 async function selectEvaluatorSource(){

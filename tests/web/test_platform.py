@@ -1611,6 +1611,7 @@ def test_data_agent_model_test_checks_completion_and_tool_call(platform, monkeyp
 @pytest.mark.parametrize("selected,class_name", [
     ("default", "DefaultEvaluator"),
     ("graph", "GraphEvaluator"),
+    ("observational", "ObservationalEvaluator"),
 ])
 def test_evaluator_source_preview_does_not_select_or_create_files(platform, selected, class_name):
     _, session = platform

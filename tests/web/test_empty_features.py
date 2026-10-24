@@ -6,7 +6,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from sr_harness.core import load_context_data
-from sr_harness.evaluator import DefaultEvaluator
+from sr_harness.evaluator import DefaultEvaluator, ObservationalEvaluator
+from sr_harness.tools.evaluate_observational_formula import EvaluateObservationalFormulaTool
 from sr_harness.web.app import create_app
 from sr_harness.web.session import InteractiveSession
 
@@ -103,3 +104,32 @@ def test_selection_endpoint_rejects_non_list_features(workbench, features):
     response = client.put("/api/data/selection", json={"target": "y", "features": features})
     assert response.status_code == 400, response.text
     assert session.context.feature_names() == ("x",)
+
+
+def test_density_evaluator_uses_regular_selection_preview_and_start(workbench):
+    client, session, seen = workbench
+    save_arrays(session, {"y": np.linspace(.1, .8, 6), "partition": np.array(["train"] * 4 + ["validation"] * 2)})
+    contract = {
+        "version": 1, "task_type": "unbinned_distribution", "target": "y", "features": [],
+        "roles": {"y": "target", "partition": "split"}, "split": "partition", "selection": {},
+        "measure": "per unit y", "support": {"lower": 0, "upper": 1},
+        "objective": "negative_log_likelihood",
+    }
+    (session.workspace / "discovery_contract.json").write_text(json.dumps(contract))
+    selected = client.put("/api/data/selection", json={"target": "y", "features": []})
+    assert selected.status_code == 200, selected.text
+    source = client.get("/api/evaluator", params={"selected": "observational"})
+    assert source.status_code == 200, source.text
+    configured = client.put("/api/evaluator", json={"selected": "observational", "source": source.json()["source"]})
+    assert configured.status_code == 200, configured.text
+    assert isinstance(session.context.evaluator, ObservationalEvaluator)
+    preview = client.post("/api/data/prompts", json={"target": "y", "features": []})
+    assert preview.status_code == 200, preview.text
+    assert "Feature names: []" in preview.json()["user_prompt"]
+    actual = start(client, session, seen, features=[], ranking_metric="negative_log_likelihood",
+                   force_initial_diagnostics=False, tools=["evaluate_observational_formula", "submit_observational_formula"],
+                   user_prompt="Explore the observed distribution without a prescribed family.")
+    assert actual["X"] == {}
+    result = EvaluateObservationalFormulaTool(context=session.context).execute("1")
+    assert result["is_candidate"]
+    assert result["data_split_results"]["validation"]["metrics"]["negative_log_likelihood"] == pytest.approx(0)
