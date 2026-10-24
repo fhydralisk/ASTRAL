@@ -17,9 +17,9 @@ class ManualAPI(BaseAPI):
         """Initialize the manual terminal provider adapter.
 
         Args:
-            model: Placeholder model name (defaults to ``"manual"``).
-            save_path: Optional directory path for saving transcripts.
-            **kwargs: Additional arguments forwarded to :class:`BaseAPI`.
+            model (str): Placeholder model name (defaults to ``"manual"``).
+            save_path (str | Path | None): Optional directory path for saving transcripts.
+            **kwargs (Any): Additional arguments forwarded to :class:`BaseAPI`.
         """
         super().__init__(model=model, **kwargs)
         self.save_path = Path(save_path or tempfile.gettempdir())
