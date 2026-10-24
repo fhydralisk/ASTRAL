@@ -14,14 +14,24 @@ _logger = logging.getLogger(f"sr_harness.{__name__}")
 
 @BaseAPI.register("openai")
 class OpenAIAPI(BaseAPI):
-    """Azure OpenAI adapter for the gpt-4o-mini and gpt-5-mini workflows."""
+    """LLM provider adapter for OpenAI and Azure OpenAI models (supporting both Responses and Chat Completions APIs)."""
 
     def __init__(self, model: str = "gpt-5-mini", **kwargs: Any) -> None:
+        """Initialize the OpenAI / Azure OpenAI adapter.
+
+        Args:
+            model: OpenAI deployment or model name (defaults to ``"gpt-5-mini"``).
+            **kwargs: Additional arguments forwarded to :class:`BaseAPI`.
+        """
         super().__init__(model=model, **kwargs)
         self.dummy_message = 'Please proofread the message above and say "I have received it."'
 
     def cancel(self) -> str:
-        """Report that the current synchronous SDK request cannot be preempted."""
+        """Request cancellation and note that in-flight synchronous OpenAI SDK calls cannot be preempted mid-request.
+
+        Returns:
+            str: Human-readable notice describing cancellation behavior.
+        """
         return (
             "OpenAIAPI does not support force-interrupting an active non-streaming request. "
             "The Agent will pause at its next safe boundary."
@@ -30,7 +40,16 @@ class OpenAIAPI(BaseAPI):
     def format_response(
         self, message: Any, tool_calls: list[ToolCall], content: str | None = None
     ) -> APICallSample:
-        """Convert one OpenAI or Azure message into one API-call sample."""
+        """Convert an OpenAI Responses or Chat Completions message into an :class:`~sr_harness.core.APICallSample`.
+
+        Args:
+            message: Provider response item or message dictionary.
+            tool_calls: Normalized tool calls extracted from the response.
+            content: Optional explicit text content override.
+
+        Returns:
+            APICallSample: Normalized assistant response sample.
+        """
         if hasattr(message, "to_dict"):
             message = message.to_dict()
         elif hasattr(message, "model_dump"):
@@ -41,7 +60,11 @@ class OpenAIAPI(BaseAPI):
 
     @property
     def model_list(self) -> list[str]:
-        """Return the OpenAI and Azure models explicitly supported by this adapter."""
+        """Return the OpenAI / Azure OpenAI model identifiers supported by this adapter.
+
+        Returns:
+            list[str]: Supported model names.
+        """
         return ["gpt-4o-mini", "gpt-5-mini"]
 
     def _request_samples(
@@ -90,13 +113,14 @@ class OpenAIAPI(BaseAPI):
             return results
 
     def build_native_tool_description(self, use_chat_completions: bool = False) -> List[Dict]:
-        """Build native tool description.
+        """Format enabled tools into the schema structure expected by OpenAI's Responses or Chat Completions API.
 
         Args:
-            use_chat_completions: The use chat completions value.
+            use_chat_completions: If ``True``, return Chat Completions ``{"type": "function", "function": ...}``
+                entries; if ``False``, return flattened Responses API tool definitions.
 
         Returns:
-            List[Dict]: The operation result.
+            List[Dict]: List of OpenAI tool schema dictionaries.
         """
         tools = self.tool_box.format_tools()
         if not isinstance(tools, list):
@@ -124,17 +148,21 @@ class OpenAIAPI(BaseAPI):
         top_p: float = 1.0,
         callback: ProgressCallback | None = None,
     ) -> Generator[APICallSample, None, dict[str, Any]]:
-        """Create responses.
+        """Sample completions using the OpenAI ``responses.create`` API (used for reasoning models such as ``gpt-5-mini``).
 
         Args:
-            messages: Conversation messages in provider-compatible order.
-            n: The n value.
-            max_tokens: The max tokens value.
-            temperature: The temperature value.
-            top_p: The top p value.
+            messages: Conversation messages in OpenAI format.
+            n: Number of independent samples to request.
+            max_tokens: Optional maximum output token limit.
+            temperature: Sampling temperature.
+            top_p: Nucleus sampling probability threshold.
+            callback: Optional progress callback.
+
+        Yields:
+            APICallSample: Normalized response samples as they complete.
 
         Returns:
-            Generator yielding call samples and returning aggregate metadata.
+            dict[str, Any]: Aggregated token usage, cost, and status summary.
         """
         ## Ensure this is a generator
         yield from []
@@ -318,17 +346,21 @@ class OpenAIAPI(BaseAPI):
         top_p: float = 1.0,
         callback: ProgressCallback | None = None,
     ) -> Generator[APICallSample, None, dict[str, Any]]:
-        """Create chat completions.
+        """Sample completions using the standard OpenAI ``chat.completions.create`` API.
 
         Args:
-            messages: Conversation messages in provider-compatible order.
-            n: The n value.
-            max_tokens: The max tokens value.
-            temperature: The temperature value.
-            top_p: The top p value.
+            messages: Conversation messages in OpenAI format.
+            n: Number of independent samples to request.
+            max_tokens: Optional maximum output token limit.
+            temperature: Sampling temperature.
+            top_p: Nucleus sampling probability threshold.
+            callback: Optional progress callback.
+
+        Yields:
+            APICallSample: Normalized response samples as they complete.
 
         Returns:
-            Generator yielding call samples and returning aggregate metadata.
+            dict[str, Any]: Aggregated token usage, cost, and status summary.
         """
         ## Ensure this is a generator
         yield from []
@@ -440,13 +472,13 @@ class OpenAIAPI(BaseAPI):
         return results
 
     def parse_usage(self, response: Response) -> Dict:
-        """Parse usage.
+        """Extract token counts and estimated USD cost from an OpenAI Responses API result.
 
         Args:
-            response: Provider response object.
+            response: OpenAI ``Response`` object.
 
         Returns:
-            Dict: The operation result.
+            Dict: Dictionary containing ``token_usage`` and ``money_usage`` breakdowns.
         """
         usage = {"token": defaultdict(float), "price": defaultdict(float)}
         if response.model.startswith("gpt-5-mini"):
@@ -501,13 +533,13 @@ class OpenAIAPI(BaseAPI):
         return usage
 
     def parse_chat_completions_usage(self, response: ChatCompletion) -> Dict:
-        """Parse chat completions usage.
+        """Extract token counts and estimated USD cost from an OpenAI ``ChatCompletion`` result.
 
         Args:
-            response: Provider response object.
+            response: OpenAI ``ChatCompletion`` object.
 
         Returns:
-            Dict: The operation result.
+            Dict: Dictionary containing ``token_usage`` and ``money_usage`` breakdowns.
         """
         usage = {"token": defaultdict(float), "price": defaultdict(float)}
         if response.model.startswith("gpt-4o-mini"):

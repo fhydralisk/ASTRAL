@@ -6,67 +6,28 @@ from typing import Dict, List, Type, TypeVar
 T = TypeVar('T', bound='FactoryMixin')
 
 class FactoryMeta(ABCMeta):
+    """Metaclass that maintains an isolated subclass registry per base class family."""
     @property
     def all_registered_classes(cls) -> List[Type]:
-        """Return the registry of all registered classes."""
+        """Return all subclasses registered under this factory hierarchy.
+
+        Returns:
+            List[Type]: Registered subclass types.
+        """
         return list(cls.REGISTRY_DICT.values())
     
     @property
     def all_registered_names(cls) -> List[str]:
-        """Return the registry of all registered class names."""
+        """Return all registered lookup names under this factory hierarchy.
+
+        Returns:
+            List[str]: Registered class names.
+        """
         return list(cls.REGISTRY_DICT.keys())
 
 
 class FactoryMixin(metaclass=FactoryMeta):
-    """
-    Mixin class that provides factory pattern capabilities for any class.
-
-    Any class inheriting from this mixin gains the ability to:
-    1. Register subclasses via @<Class>.register('name')
-    2. Create instances via <Class>.create(config, *args, **kwargs)
-
-    The base class is automatically registered as 'default' model.
-
-    ═══════════════════════════════════════════════════════════════════════════
-    INHERITANCE ORDER (IMPORTANT)
-    ═══════════════════════════════════════════════════════════════════════════
-
-    FactoryMixin should be placed BEFORE other base classes in the inheritance:
-
-        class MyModel(FactoryMixin, nn.Module):
-            ...
-
-    This ensures correct Method Resolution Order (MRO) so that:
-    1. create() method resolves correctly
-    2. Each subclass has its own independent registry
-
-    ═══════════════════════════════════════════════════════════════════════════
-    EXAMPLE
-    ═══════════════════════════════════════════════════════════════════════════
-
-    ```python
-    from sr_harness.utils import FactoryMixin
-
-    class MyModel(FactoryMixin, nn.Module):
-        def __init__(self, config, tokenizer):
-            super().__init__()
-            self.config = config
-
-    @MyModel.register('gcn')
-    class GCNModel(MyModel):
-        def __init__(self, config, tokenizer):
-            super().__init__(config, tokenizer)
-            # ... custom architecture
-
-    # Usage - create() automatically handles model selection
-    config = MyConfig(model='gcn')
-    model = MyModel.create(config, tokenizer)
-
-    # 'default' is automatically the base class
-    config = MyConfig(model='default')
-    model = MyModel.create(config, tokenizer)  # Returns MyModel instance
-    ```
-    """
+    """Mixin providing ``@Cls.register(name)`` and ``Cls.create(name, ...)`` factory registration."""
 
     REGISTRY_DICT: Dict[str, Type] = None  # type: ignore
     """
@@ -91,13 +52,13 @@ class FactoryMixin(metaclass=FactoryMeta):
 
     @classmethod
     def register(cls, name: str):
-        """
-        Decorator to register a model subclass.
+        """Class decorator that registers a subclass under ``name`` (case-insensitive).
 
-        Usage:
-            @MyModel.register('gcn')
-            class GCNModel(MyModel):
-                ...
+        Args:
+            name: Unique registry key for the decorated subclass.
+
+        Returns:
+            Callable: Decorator that registers and returns the subclass.
         """
         def decorator(model_cls: type) -> type:
             cls.REGISTRY_DICT[name] = model_cls
@@ -107,20 +68,16 @@ class FactoryMixin(metaclass=FactoryMeta):
 
     @classmethod
     def create(cls: Type[T], name: str, *args, create_instance=True, **kwargs) -> T | Type[T]:
-        """
-        Factory method to create instance based on config.model.
+        """Look up a registered subclass by ``name`` and optionally instantiate it.
 
         Args:
-            config: Configuration object with model type specified in config.model
-            *args: Positional arguments passed to constructor
-            create_instance: 
-            **kwargs: Keyword arguments passed to constructor
+            name: Registered name of the subclass.
+            *args: Positional arguments passed to the subclass constructor when ``create_instance=True``.
+            create_instance: If ``True``, instantiate and return the object; if ``False``, return the class itself.
+            **kwargs: Keyword arguments passed to the subclass constructor.
 
         Returns:
-            Instantiated object of the type specified in config.model
-
-        Raises:
-            ValueError: If config.model is not found in REGISTRY_DICT
+            T | Type[T]: Instantiated object or registered subclass.
         """
         # 'default' refers to the base class itself
         if name == 'default':

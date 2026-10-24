@@ -23,6 +23,20 @@ def llm_judge_equivalence(
     max_retry = 3,
     retry_timeout = 5,
 ):
+    """Query an LLM to judge whether two symbolic expressions ``f_true`` and ``f_pred`` are mathematically equivalent after fitting constants.
+
+    Args:
+        f_true: Ground-truth symbolic expression.
+        f_pred: Discovered candidate symbolic expression.
+        ranges: Mapping of variable names to ``(min, max)`` domain bounds.
+        llm_provider: LLM provider name used for the judge call.
+        llm_model: Model identifier used for the judge call.
+        max_retry: Maximum number of retry attempts on transient API errors.
+        retry_timeout: Delay in seconds between retries.
+
+    Returns:
+        tuple[bool, dict, str]: Tuple of ``(is_equivalent, usage_dict, explanation_text)``.
+    """
     from ..api import BaseAPI # utils 内的模块原则上不应该依赖于外部代码，加上这个防止循环依赖
     from .parse_json_with_template import parse_json_with_template
 
@@ -92,6 +106,19 @@ def my_nsimplify(
     relation_bound=4, 
     max_relation_terms=2
 ) -> List[str] | str:
+    """Approximate floating-point numbers as simple rational expressions or combinations of symbolic constants (such as $\pi$ and $e$).
+
+    Args:
+        vals: Single float or list of floats to rationalize.
+        constants: Optional mapping of named symbolic constants to their numeric values.
+        tolerance: Maximum absolute approximation error allowed.
+        max_denominator: Maximum denominator permitted in rational approximations.
+        relation_bound: Maximum integer coefficient magnitude in linear combinations.
+        max_relation_terms: Maximum number of terms in a symbolic constant combination.
+
+    Returns:
+        List[str] | str: Symbolic string approximation(s) for ``vals``.
+    """
     constants = {str(k): float(v) for k, v in constants.items() if math.isfinite(float(v)) and float(v) != 0}
     if is_single := isinstance(vals, (int, float)):
         vals = [vals]
@@ -169,11 +196,27 @@ def get_symbolic_acc(
     wait_for_human: bool = False,
     return_details: bool = False,
 ) -> Dict[str, Any]:
-    """Check candidate recovery with numeric diagnostics and a structural judge.
+    """Check whether a discovered expression ``f_pred`` recovers the ground-truth formula ``f_true``.
 
-    The numeric comparison on ``data`` is a diagnostic, not proof of symbolic
-    identity. With ``llm_judge=True``, the structural verdict decides the final
-    result (allowing small coefficient rounding and domain identities).
+    Combines high-precision numerical equivalence checks, rational constant
+    simplification, and an optional LLM equivalence judge.
+
+    Args:
+        f_true: Ground-truth symbolic expression.
+        f_pred: Candidate symbolic expression to verify.
+        data: Mapping of variable names to observed NumPy arrays.
+        atol: Absolute tolerance for numerical equivalence checks.
+        rtol: Relative tolerance for numerical equivalence checks.
+        nsimplify_tolerance: Tolerance used when rationalizing floating-point constants.
+        llm_judge: Whether to fall back to an LLM judge when algebraic simplification is inconclusive.
+        llm_provider: LLM provider name for the optional equivalence judge.
+        llm_model: Model identifier for the optional equivalence judge.
+        wait_for_human: Whether to prompt on stdin when equivalence remains ambiguous.
+        return_details: If ``True``, return a full diagnostic dictionary instead of a boolean.
+
+    Returns:
+        Dict[str, Any] | bool: Diagnostic dictionary (when ``return_details=True``)
+            or boolean symbolic equivalence verdict.
     """
     for var in (
         [var.name for var in f_true.iter_preorder() if isinstance(var, engine.Variable)] +

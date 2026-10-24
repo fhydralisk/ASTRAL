@@ -17,7 +17,15 @@ def screen_frontend_error(
     error: BaseException,
     environment: Mapping[str, str] | None = None,
 ) -> tuple[str, tuple[str, ...]]:
-    """Return the raw error unless a temporary sensitive marker is detected."""
+    """Redact sensitive API keys or credentials from an exception message before displaying it in the UI.
+
+    Args:
+        error: Exception raised during a provider or runtime operation.
+        environment: Optional session environment containing API keys to scrub.
+
+    Returns:
+        tuple[str, tuple[str, ...]]: Pair of ``(sanitized_message, matched_markers)``.
+    """
     message = str(error).strip() or type(error).__name__
     findings: list[str] = []
     chain: list[BaseException] = []

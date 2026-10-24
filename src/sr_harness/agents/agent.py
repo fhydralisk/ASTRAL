@@ -24,10 +24,12 @@ def _execute_tool_call_in_subprocess(tool: BaseTool, tool_call: ToolCall) -> Too
 
 
 class Agent(ABC, FactoryMixin):
-    """Base class for tool-using agents.
+    """Abstract base class for tool-using language-model agents.
 
-    Subclasses own their task loop and scientific state. This class only owns
-    common API/tool initialization and tool execution mechanics.
+    Provides shared mechanics for binding an :class:`~sr_harness.core.AgentContext`,
+    initializing enabled tools and the LLM provider adapter, and executing tool
+    calls either serially or in parallel worker processes. Concrete subclasses
+    implement their own conversation loop and domain state management.
     """
 
     context: AgentContext
@@ -36,21 +38,22 @@ class Agent(ABC, FactoryMixin):
 
     @abstractmethod
     def run(self, *args: Any, **kwargs: Any) -> Any:
-        """Run the agent's task loop.
+        """Execute the agent's main task loop.
 
         Args:
-            *args: Positional inputs accepted by the concrete agent.
-            **kwargs: Keyword inputs accepted by the concrete agent.
+            *args: Positional arguments defined by the concrete agent subclass.
+            **kwargs: Keyword arguments defined by the concrete agent subclass.
 
         Returns:
-            The result defined by the concrete agent implementation.
+            Any: Task result produced by the concrete agent implementation.
         """
 
     def initialize_with_context(self, context: AgentContext) -> None:
-        """Initialize the agent's tools and API from one shared context.
+        """Bind tools, skills, and the model API to a shared runtime context.
 
         Args:
-            context: Shared agent and tool context.
+            context: Shared agent and tool execution context containing data,
+                workspace access, and runtime settings.
         """
         self.context = context
         tools = [tool_cls(context=context) for tool_cls in self.tool_cls_list]
@@ -64,21 +67,21 @@ class Agent(ABC, FactoryMixin):
         )
 
     def set_messages(self, messages: list[dict[str, Any]]) -> None:
-        """Expose the current prompt through the shared tool context.
+        """Store the active conversation messages on the shared tool context.
 
         Args:
-            messages: Conversation messages in provider-compatible order.
+            messages: Conversation messages ordered as sent to the model provider.
         """
         self.context.args.messages = deepcopy(messages)
 
     def execute_action(self, actions: list[ToolCall]) -> list[ToolCallResult]:
-        """Execute tool calls serially.
+        """Execute a batch of tool calls sequentially in the current process.
 
         Args:
-            actions: Tool calls to execute.
+            actions: Normalized tool calls emitted by the language model.
 
         Returns:
-            Results in the same order as ``actions``.
+            list[ToolCallResult]: Tool execution results in the same order as ``actions``.
         """
         if self.tool_box is None:
             raise RuntimeError("Agent must be initialized with context before executing tools")
@@ -106,14 +109,14 @@ class Agent(ABC, FactoryMixin):
         actions: list[ToolCall],
         max_workers: int,
     ) -> list[ToolCallResult]:
-        """Execute independent tool calls in worker processes.
+        """Execute a batch of independent tool calls concurrently across worker processes.
 
         Args:
-            actions: Tool calls to execute.
-            max_workers: Maximum number of parallel workers.
+            actions: Normalized tool calls emitted by the language model.
+            max_workers: Maximum number of worker processes to spawn.
 
         Returns:
-            Results in the same order as ``actions``.
+            list[ToolCallResult]: Tool execution results in the same order as ``actions``.
         """
         if self.tool_box is None:
             raise RuntimeError("Agent must be initialized with context before executing tools")

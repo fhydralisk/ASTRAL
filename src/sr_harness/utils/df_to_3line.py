@@ -2,6 +2,15 @@ import pandas as pd
 from .tag2ansi import tag2ansi
 
 def df_to_3line(df: pd.DataFrame, float_format: str | None = None):
+    """Format a pandas ``DataFrame`` as a clean three-line ASCII table for logs and prompts.
+
+    Args:
+        df: Input :class:`pandas.DataFrame` to format.
+        float_format: Optional ``printf``/format specification applied to floating-point columns.
+
+    Returns:
+        str: Formatted three-line table string.
+    """
     idx = df.index
     if not isinstance(idx, pd.MultiIndex):
         idx = pd.MultiIndex.from_arrays([idx], names=df.index.names)

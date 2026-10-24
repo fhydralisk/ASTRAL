@@ -76,19 +76,18 @@ def format_pareto_front(
     columns: Sequence[str] = DEFAULT_PARETO_COLUMNS,
     title_mapping: dict[str, str] = DEFAULT_TITLE_MAPPING,
 ) -> str:
-    """Format candidate records from ``SRAgent.get_pareto_front``.
-
-    Dotted split paths such as ``validation.metrics.r2`` are resolved below
-    each record's ``data_split_results`` mapping. ``formula`` and other
-    top-level fields are resolved directly from the record.
+    """Render a list of Pareto-optimal candidate dictionaries as an aligned summary table.
 
     Args:
-        - balance: records the two objectives used to construct the supplied
-        front and their directions. Set ``concise=True`` for an LLM-facing list;
-        the default renders a richer three-line table for human-facing logs.
-        - formula_max_length: preserves full formulas, while an integer
-        truncates formulas to that total length, including the ellipsis.
-        - title_mapping: maps column names to their display titles.
+        pareto_front: List of candidate dictionaries from ``SRAgent.get_pareto_front``.
+        concise: Whether to omit decorative borders for compact prompt inclusion.
+        formula_max_length: Optional character limit for truncating long formula strings.
+        balance: Sequence of ``(metric_key, direction)`` objectives displayed in the header.
+        columns: Ordered sequence of metric keys to include as table columns.
+        title_mapping: Mapping from internal metric keys to human-readable column headers.
+
+    Returns:
+        str: Formatted Pareto front table.
     """
     balance = _validate_balance(balance)
     columns = tuple(columns)

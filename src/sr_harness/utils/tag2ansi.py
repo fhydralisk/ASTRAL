@@ -57,8 +57,13 @@ COLOR_TABLE = {
 
 
 def parse_tag(tag: str) -> str:
-    """
-    支持 [bold+red], [italic+#FFAA00], [color123]
+    """Convert a style tag token (such as ``"bold+red"`` or ``"#FFAA00"``) into its ANSI escape sequence.
+
+    Args:
+        tag: Style tag specification string.
+
+    Returns:
+        str: Corresponding ANSI escape sequence, or ``""`` if unrecognized.
     """
     parts = tag.split(" ")
     seq = ""
@@ -89,6 +94,15 @@ def parse_tag(tag: str) -> str:
 
 
 def find_matching_paren(s: str, start_idx: int) -> int:
+    """Find the index of the closing ``]`` matching the opening ``[`` at ``start_idx``.
+
+    Args:
+        s: Input string containing bracketed tags.
+        start_idx: Index of the opening ``[`` character.
+
+    Returns:
+        int: Index of the matching ``]``, or ``-1`` if unbalanced.
+    """
     stack = []
     pairs = {")": "(", "}": "{", "]": "["}
     opens = set(pairs.values())
@@ -104,6 +118,14 @@ def find_matching_paren(s: str, start_idx: int) -> int:
 
 
 def auto_insert_reset(segment: str) -> str:
+    """Recursively replace ``[style ... ]`` blocks in ``segment`` with ANSI codes and nested reset sequences.
+
+    Args:
+        segment: Text segment containing bracketed style markup.
+
+    Returns:
+        str: String with style tags converted to ANSI sequences.
+    """
     if (reset_pos := segment.find("[reset]")) != -1:
         return segment[:reset_pos] + RESET_CODE["reset"] + segment[reset_pos + len("[reset]") :]
     elif not (stripped := segment.lstrip()):
@@ -126,9 +148,13 @@ def auto_insert_reset(segment: str) -> str:
 
 
 def tag2ansi(text: str) -> str:
-    """
-    将 [tag1 tag2] 转换为 ANSI 码并智能插入 reset。
-    支持多种颜色定义方式、样式组合、自动闭合。
+    """Convert custom ``[style ...]`` markup tags in ``text`` into terminal ANSI escape codes.
+
+    Args:
+        text: Input string with optional ``[color ...]`` / ``[bold ...]`` markup.
+
+    Returns:
+        str: ANSI-escaped string.
     """
     pattern = re.compile(r"\[(?!reset)([a-zA-Z0-9+#]+(?: [a-zA-Z0-9+#]+)*)\]")
 

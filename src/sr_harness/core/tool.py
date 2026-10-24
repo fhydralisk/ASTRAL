@@ -8,10 +8,10 @@ from typing import Any, Dict
 
 @dataclass
 class ToolMetadata:
-    """Description and parameter schema exposed for a tool.
+    """Declarative metadata describing a tool's name, purpose, and JSON parameter schema.
 
-    ``description`` and ``parameters`` may be omitted so ``BaseTool`` can infer
-    them from the implementation's signature and docstring.
+    When ``description`` or ``parameters`` are omitted, :class:`~sr_harness.tools.BaseTool`
+    infers them automatically from ``execute()``'s type annotations and Google-style docstring.
     """
 
     name: str
@@ -21,7 +21,15 @@ class ToolMetadata:
 
 @dataclass
 class ToolCall:
-    """Normalized tool call emitted by LLM APIs and parsers."""
+    """Normalized representation of a single tool invocation requested by a language model.
+
+    Attributes:
+        name: Registered name of the tool to invoke.
+        params: Dictionary of keyword arguments passed to ``tool.execute(**params)``.
+        id: Optional provider-assigned tool-call identifier.
+        raw: Optional raw provider tool-call structure.
+        raw_str: Optional raw text snippet from which the call was parsed.
+    """
 
     name: str
     params: dict
@@ -39,10 +47,11 @@ class ToolCall:
 
 @dataclass
 class ToolCallResult:
-    """Structured result returned by the tool execution boundary.
+    """Standardized outcome returned by ``BaseTool.__call__()``.
 
-    ``result`` retains the complete machine-readable value, while
-    ``result_str`` is the bounded representation returned to the model.
+    ``result`` preserves the full machine-readable dictionary for run logging and
+    candidate extraction, whereas ``result_str`` is a concise, length-bounded text
+    summary formatted for the language model's next turn.
     """
 
     ok: bool
@@ -51,14 +60,14 @@ class ToolCallResult:
     meta_data: Dict[str, Any]
 
     def get(self, key: str, default: Any = None) -> Any:
-        """Run the ``get`` operation.
+        """Look up a key inside the structured ``result`` dictionary when ``result`` is a mapping.
 
         Args:
-            key: The key value.
-            default: Fallback value.
+            key: Dictionary key to look up in ``self.result``.
+            default: Value returned when ``key`` is absent.
 
         Returns:
-            Any: The operation result.
+            Any: Value associated with ``key``, or ``default``.
         """
         return self.result.get(key, default)
 

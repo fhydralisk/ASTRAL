@@ -7,6 +7,14 @@ from collections.abc import Mapping
 
 
 def serialize(args: Any):
+    """Recursively convert dataclasses, namespaces, paths, arrays, and mappings into JSON-serializable primitives.
+
+    Args:
+        args: Arbitrary Python object to convert.
+
+    Returns:
+        Any: JSON-serializable representation of ``args``.
+    """
     if args is None or isinstance(args, (str, int, float, bool)):
         return args
     if isinstance(args, Path):

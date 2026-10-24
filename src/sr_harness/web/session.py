@@ -95,9 +95,16 @@ EVALUATOR_CONTEXT_SETTING_NAMES = (
 
 
 class SessionStartError(RuntimeError):
-    """Report which phase failed while starting an interactive search."""
+    """Exception raised when starting an interactive symbolic-regression run fails during preflight or launch."""
 
     def __init__(self, message: str, *, run_id: str, started: bool):
+        """Initialize the session startup error with run context.
+
+        Args:
+            message: Human-readable explanation of the startup failure.
+            run_id: Identifier of the run that failed to start.
+            started: Whether the background search thread had already been spawned.
+        """
         super().__init__(message)
         self.run_id = run_id
         self.started = started
@@ -131,7 +138,7 @@ PROVIDER_API_KEY_VARIABLES = {
 
 
 class InteractiveSession:
-    """Own one run for the lifetime of the server; no account/session registry."""
+    """Stateful controller for one interactive workbench conversation, coordinating data preparation, evaluator setup, and symbolic regression."""
 
     def __init__(
         self,
@@ -144,6 +151,18 @@ class InteractiveSession:
         workspace_path=None,
         read_only=False,
     ):
+        """Initialize an interactive workbench session and its workspace, environment, and interaction managers.
+
+        Args:
+            log_dir: Base directory for run logs when ``run_dir`` is not explicitly set.
+            agent_options: Optional initial overrides for agent model and search settings.
+            initial_prompt: Optional initial research problem description.
+            env_path: Optional path to the conversation's private ``.env`` file.
+            workspace_files: Optional host files or directories mounted read-only into the workspace.
+            run_dir: Optional directory where per-run search logs are persisted.
+            workspace_path: Optional explicit directory path for the conversation workspace.
+            read_only: Whether to disable all mutating operations on this session.
+        """
         self.sr_interaction_manager = SRInteractionManager()
         self.data_interaction_manager = InteractionManager()
         self.evaluator_interaction_manager = InteractionManager()
@@ -289,7 +308,7 @@ class InteractiveSession:
         self.start_idempotency_key = None
 
     def interrupt_active_work(self) -> None:
-        """Force active model/tool operations toward a safe shutdown boundary."""
+        """Signal any running symbolic-regression, data-preparation, or evaluator-construction thread to stop promptly."""
         for manager in (
             self.sr_interaction_manager,
             self.data_interaction_manager,
@@ -299,7 +318,11 @@ class InteractiveSession:
                 manager.command("force_pause")
 
     def snapshot(self):
-        """Return a serializable snapshot of the current session."""
+        """Build a JSON-serializable status snapshot of the session for WebUI polling.
+
+        Returns:
+            dict[str, Any]: Current states, settings, top-k candidates, and usage counters.
+        """
         with self.lock:
             self._sync_manifest_descriptions()
             topk = (
@@ -333,10 +356,13 @@ class InteractiveSession:
             }
 
     def idle_persistence_revision(self):
-        """Skip repeated writes only when no agent thread can mutate the session.
+        """Return a revision tuple that remains constant while the session is completely idle.
 
-        Active or paused agent threads keep the existing persistence behavior.
-        HTTP mutations also advance a generation even if they raise an error.
+        Allows the background persistence worker to skip redundant disk writes when
+        no agent thread is active and no HTTP mutation has occurred.
+
+        Returns:
+            tuple | None: Revision tuple when idle, or ``None`` while any agent thread is running.
         """
         with self.lock:
             if any(thread is not None and thread.is_alive() for thread in (
@@ -361,7 +387,11 @@ class InteractiveSession:
             return json.dumps(json_value(metadata), sort_keys=True, ensure_ascii=False)
 
     def export_persistent_state(self) -> dict[str, Any]:
-        """Return a JSON-safe snapshot that can be restored in a new process."""
+        """Serialize the session's durable settings, timelines, and search state for disk persistence.
+
+        Returns:
+            dict[str, Any]: JSON-serializable session snapshot.
+        """
         with self.lock:
             data_agent_buffer = (
                 list(self.data_agent.buffer)
@@ -401,7 +431,14 @@ class InteractiveSession:
             )
 
     def restore_persistent_state(self, snapshot: dict[str, Any]) -> None:
-        """Restore a durable snapshot and terminate operations lost on restart."""
+        """Restore settings, variable descriptions, timelines, and search state from a saved snapshot.
+
+        Any agent turn that was mid-flight when the server previously exited is
+        marked as ``"interrupted"``.
+
+        Args:
+            snapshot: Session state dictionary previously produced by :meth:`export_persistent_state`.
+        """
         expected_fields = {
             "version",
             "run_id",
@@ -623,7 +660,11 @@ class InteractiveSession:
             self.context.args.data_revision += 1
 
     def evaluator_configuration(self):
-        """Return the selected evaluator and every available evaluator."""
+        """Return the active evaluator selection, catalog of built-in and custom evaluators, and editor source code.
+
+        Returns:
+            dict[str, Any]: Evaluator configuration payload for the Task Setup tab.
+        """
         metadata = self._evaluator_metadata()
         return {
             "selected": metadata["selected"],
@@ -729,14 +770,25 @@ class InteractiveSession:
         }
 
     def evaluator_editable(self) -> bool:
-        """Return whether evaluator mutation is safe for the active search."""
+        """Return whether the active evaluator can currently be changed or edited.
+
+        Returns:
+            bool: ``True`` when the symbolic-regression search is idle or safely paused.
+        """
         if self.state == "idle":
             return True
         control = self.sr_interaction_manager.status()
         return self.state in {"starting", "running"} and control["interaction_state"] == "paused"
 
     def configure_evaluator(self, payload):
-        """Validate and select an evaluator before symbolic regression starts."""
+        """Select a built-in evaluator or validate and save custom evaluator Python source in ``context.evaluator/``.
+
+        Args:
+            payload: Request dictionary containing ``selected`` and optional ``source``.
+
+        Returns:
+            dict[str, Any]: Updated evaluator configuration payload.
+        """
         if not self.evaluator_editable():
             raise ValueError(
                 "Pause the search and wait for a safe boundary before changing the evaluator"
@@ -824,7 +876,14 @@ class InteractiveSession:
         return self.evaluator_configuration()
 
     def test_evaluator(self, payload):
-        """Validate the selected evaluator against the best available formula."""
+        """Test a candidate evaluator configuration against the current best formula (or a baseline linear formula).
+
+        Args:
+            payload: Request dictionary specifying ``selected`` and optional ``source`` to test.
+
+        Returns:
+            dict[str, Any]: Test formula string and train/validation metric results.
+        """
         evaluator_id = str(payload.get("selected", self._evaluator_metadata()["selected"])).strip()
         source = str(payload.get("source", ""))
         available = {
@@ -881,7 +940,14 @@ class InteractiveSession:
         return {"formula": formula, "result": json_value(result.result)}
 
     def assist_evaluator(self, payload):
-        """Let a restricted agent construct, exercise, and repair an evaluator."""
+        """Run the Evaluator Construction Agent synchronously for one natural-language instruction.
+
+        Args:
+            payload: Request dictionary containing ``message`` and optional current editor ``source``.
+
+        Returns:
+            dict[str, Any]: Agent completion status, message, and any validated evaluator source.
+        """
         if not self.evaluator_editable():
             raise ValueError(
                 "Pause the search and wait for a safe boundary before using EvaluatorConstructionAgent"
@@ -944,7 +1010,14 @@ class InteractiveSession:
         }
 
     def start_evaluator_assistance(self, payload):
-        """Start evaluator construction in a cancellable background thread."""
+        """Launch the Evaluator Construction Agent in a background thread for a user instruction.
+
+        Args:
+            payload: Request dictionary containing ``message`` and optional editor ``source``.
+
+        Returns:
+            dict[str, Any]: Updated session snapshot reflecting the running evaluator agent.
+        """
         with self.lock:
             instruction = str(payload.get("message", "")).strip()
             if not instruction:
@@ -965,7 +1038,11 @@ class InteractiveSession:
         return self.snapshot()
 
     def stop_evaluator_assistance(self):
-        """Request cancellation of the active evaluator-construction turn."""
+        """Request a safe pause (first click) or immediate interruption (second click) of the Evaluator Construction Agent.
+
+        Returns:
+            dict[str, Any]: Updated session snapshot.
+        """
         with self.lock:
             interaction_state = self.evaluator_interaction_manager.state
             if interaction_state not in {"running", "pausing"}:
@@ -1005,7 +1082,14 @@ class InteractiveSession:
             self.evaluator_interaction_manager.finish_agent_execution()
 
     def configure_evaluator_agent(self, payload):
-        """Validate and persist evaluator-construction agent model settings."""
+        """Validate and apply model, proxy, parser, and capability settings for the Evaluator Construction Agent.
+
+        Args:
+            payload: Settings dictionary submitted from the Evaluator Agent settings panel.
+
+        Returns:
+            dict[str, Any]: Updated session snapshot.
+        """
         self._ensure_settings_editable()
         settings = self.validate_evaluator_agent_settings(payload)
         self.validate_capabilities(settings, agent="evaluator")
@@ -1020,17 +1104,27 @@ class InteractiveSession:
         return self.snapshot()
 
     def test_evaluator_agent_model(self, payload):
-        """Test evaluator-construction agent model settings without applying them."""
+        """Test connectivity and tool-calling support for the Evaluator Construction Agent's model settings.
+
+        Args:
+            payload: Candidate model settings to test.
+
+        Returns:
+            dict[str, Any]: Diagnostic result with ``ok``, ``accessible``, and ``tool_call_ok``.
+        """
         updates = self.validate_evaluator_agent_settings(payload)
         self.validate_capabilities(updates, agent="evaluator")
         settings = {**self.evaluator_agent_settings, **updates}
         return self._test_model(settings, proxy=settings.get("proxy", ""))
 
     def capabilities(self, agent: str = "search"):
-        """Describe configurable tools and user-facing skills for the Web UI.
+        """Return available tools, skills, and default selections for the specified agent scope.
 
         Args:
-            agent: The agent value.
+            agent: Agent scope identifier (``"search"``, ``"data"``, or ``"evaluator"``).
+
+        Returns:
+            dict[str, Any]: Catalog of tools, skills, and default enabled names.
         """
         if agent not in {"search", "data", "evaluator"}:
             raise ValueError(f"Unsupported agent capability scope: {agent}")
@@ -1072,11 +1166,14 @@ class InteractiveSession:
         }
 
     def validate_capabilities(self, settings, agent: str = "search"):
-        """Validate capabilities.
+        """Validate and normalize user-selected ``tools`` and ``skills`` lists for ``agent``.
 
         Args:
-            settings: Runtime settings to validate or apply.
-            agent: The agent value.
+            settings: Raw settings dictionary containing optional ``tools`` and ``skills`` keys.
+            agent: Target agent scope (``"search"``, ``"data"``, or ``"evaluator"``).
+
+        Returns:
+            dict[str, list[str]]: Validated ``tools`` and ``skills`` name lists.
         """
         catalog = self.capabilities(agent)
         for key, catalog_key in (("tools", "tools"), ("skills", "skills")):
@@ -1099,10 +1196,14 @@ class InteractiveSession:
             raise ValueError("Evaluator-agent skills require the read_skill tool")
 
     def provider_credential(self, provider: str):
-        """Report credential availability without exposing the secret value.
+        """Check whether an API key is configured for ``provider`` without exposing the secret key itself.
 
         Args:
-            provider: The provider value.
+            provider: Model provider name (e.g., ``"openrouter"``, ``"deepseek"``).
+
+        Returns:
+            dict[str, Any]: Dictionary with ``provider``, ``env_var``, ``configured``,
+                and ``stored_in_env_file``.
         """
         provider = str(provider).strip().lower()
         try:
@@ -1119,11 +1220,14 @@ class InteractiveSession:
         }
 
     def set_provider_credential(self, provider: str, api_key: str):
-        """Atomically update this conversation's private dotenv file.
+        """Save a provider API key to the conversation's private ``.env`` file and update the session environment.
 
         Args:
-            provider: The provider value.
-            api_key: The api key value.
+            provider: Model provider name.
+            api_key: Non-empty secret API key string.
+
+        Returns:
+            dict[str, Any]: Updated credential status from :meth:`provider_credential`.
         """
         status = self.provider_credential(provider)
         if not isinstance(api_key, str) or not api_key.strip():
@@ -1145,10 +1249,10 @@ class InteractiveSession:
         return self.provider_credential(provider)
 
     def set_proxy(self, proxy: str) -> None:
-        """Persist the optional model proxy and update this server process.
+        """Save an outbound HTTP/SOCKS proxy URL to the conversation's private ``.env`` file.
 
         Args:
-            proxy: Proxy URL, or an empty string to clear the configured proxy.
+            proxy: Validated proxy URL, or an empty string to disable proxying.
         """
         proxy = self.validate_proxy(proxy)
         self.env_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1170,13 +1274,13 @@ class InteractiveSession:
 
     @staticmethod
     def validate_proxy(proxy: str) -> str:
-        """Validate and normalize an optional HTTP or SOCKS proxy URL.
+        """Validate and normalize an optional HTTP, HTTPS, or SOCKS proxy URL.
 
         Args:
-            proxy: Proxy URL supplied by the Web UI.
+            proxy: Raw proxy URL string from the UI.
 
         Returns:
-            The stripped URL, or an empty string when proxying is disabled.
+            str: Trimmed proxy URL, or ``""`` when empty.
         """
         if not isinstance(proxy, str):
             raise ValueError("proxy must be a string")
@@ -1192,10 +1296,10 @@ class InteractiveSession:
 
     @staticmethod
     def validate_setting_dependencies(settings):
-        """Validate setting dependencies.
+        """Verify cross-field constraints across validated runtime settings (such as OOD split variables and stop-guard thresholds).
 
         Args:
-            settings: Runtime settings to validate or apply.
+            settings: Dictionary of candidate runtime settings.
         """
         if (
             settings.get("stop_guard_mode") == "metric_threshold"
@@ -1215,10 +1319,13 @@ class InteractiveSession:
             raise ValueError("force_initial_diagnostics requires the discover-symbolic-laws skill")
 
     def start(self, payload):
-        """Run the ``start`` operation.
+        """Validate task configuration and start the interactive symbolic-regression search in a background thread.
 
         Args:
-            payload: Serializable event payload.
+            payload: Startup payload containing variable selections, prompts, and optional setting overrides.
+
+        Returns:
+            dict[str, Any]: Session snapshot after starting the search.
         """
         with self.lock:
             idempotency_key = payload.get("idempotency_key")
@@ -1313,10 +1420,13 @@ class InteractiveSession:
         return response
 
     def prepare_data(self, instruction: str):
-        """Continue the persistent data-agent conversation in the background.
+        """Start or continue the Data Preparation Agent in a background thread with ``instruction``.
 
         Args:
-            instruction: Natural-language instruction for the agent.
+            instruction: Natural-language instruction for the Data Preparation Agent.
+
+        Returns:
+            dict[str, Any]: Updated session snapshot.
         """
         with self.lock:
             instruction = instruction.strip()
@@ -1369,10 +1479,10 @@ class InteractiveSession:
         return self.snapshot()
 
     def stop_data_preparation(self):
-        """Request cancellation of the active data-preparation turn.
+        """Request a safe pause or immediate interruption of the active Data Preparation Agent turn.
 
         Returns:
-            Updated session state showing that cancellation is pending.
+            dict[str, Any]: Updated session snapshot.
         """
         with self.lock:
             interaction_state = self.data_interaction_manager.state
@@ -1451,10 +1561,14 @@ class InteractiveSession:
             self.data_interaction_manager.finish_agent_execution()
 
     def preview_initial_prompts(self, payload):
-        """Run the ``preview initial prompts`` operation.
+        """Generate the default system and user prompts from the current variable configuration and problem description.
 
         Args:
-            payload: Serializable event payload.
+            payload: Dictionary containing ``target``, ``features``, ``problem_description``,
+                and ``variable_descriptions``.
+
+        Returns:
+            dict[str, str]: Generated ``problem_description``, ``system_prompt``, and ``user_prompt``.
         """
         description = str(
             payload.get(
@@ -1522,10 +1636,13 @@ class InteractiveSession:
 
     @staticmethod
     def validate_variable_descriptions(payload):
-        """Validate variable descriptions.
+        """Validate that ``variable_descriptions`` in ``payload`` maps variable names to strings.
 
         Args:
-            payload: Serializable event payload.
+            payload: Request dictionary containing an optional ``variable_descriptions`` mapping.
+
+        Returns:
+            dict[str, str]: Mapping of variable names to non-empty trimmed description strings.
         """
         descriptions = payload.get("variable_descriptions", {})
         if not isinstance(descriptions, dict) or any(
@@ -1536,13 +1653,17 @@ class InteractiveSession:
         return {name: value.strip() for name, value in descriptions.items() if value.strip()}
 
     def create_demo(self, kind: str = "polynomial"):
-        """Create and load a manifest-backed sample dataset.
+        """Generate a built-in sample dataset in ``context.data/`` and load it into the shared context.
+
+        Args:
+            kind: Sample dataset kind (``"polynomial"``, ``"grouped_parameters"``,
+                ``"driven_ode"``, or ``"kuramoto_ba"``).
 
         Returns:
-            Path to the newly created ``context.data`` directory.
+            Path: Path to the created ``context.data/`` directory.
 
         Raises:
-            FileExistsError: If ``context.data`` already exists and is not empty.
+            FileExistsError: If ``context.data/`` already exists and is non-empty.
         """
         with self.lock:
             path = self.workspace / "context.data"
@@ -1573,7 +1694,11 @@ class InteractiveSession:
             return path
 
     def reload_context_data(self):
-        """Reload ``context.data`` from the workspace into the shared context."""
+        """Validate and reload ``context.data/`` from the workspace into the shared :class:`~sr_harness.core.AgentContext`.
+
+        Returns:
+            dict[str, Any]: Summary of the reloaded dataset revision and variables.
+        """
         with self.lock:
             if self.data_state in {"running", "stopping"}:
                 raise ValueError(
@@ -1660,11 +1785,14 @@ class InteractiveSession:
 
     @staticmethod
     def validate_settings(payload, initial=False):
-        """Validate settings.
+        """Validate and coerce a dictionary of symbolic-regression runtime settings.
 
         Args:
-            payload: Serializable event payload.
-            initial: Optional initial parameter values.
+            payload: Raw settings dictionary from the client.
+            initial: If ``True``, populate missing fields with default values.
+
+        Returns:
+            dict[str, Any]: Validated settings dictionary.
         """
         allowed = set(RUNTIME_SETTING_NAMES)
         bounded_integers = {
@@ -1760,10 +1888,13 @@ class InteractiveSession:
 
     @staticmethod
     def validate_data_agent_settings(payload):
-        """Validate data agent settings.
+        """Validate and coerce model, proxy, parser, and capability settings for the Data Preparation Agent.
 
         Args:
-            payload: Serializable event payload.
+            payload: Raw settings dictionary from the client.
+
+        Returns:
+            dict[str, Any]: Validated data-agent settings dictionary.
         """
         result = {key: value for key, value in payload.items() if key in DATA_AGENT_SETTING_NAMES}
         for key, value in result.items():
@@ -1795,7 +1926,14 @@ class InteractiveSession:
 
     @staticmethod
     def validate_evaluator_agent_settings(payload):
-        """Validate the restricted evaluator-agent model settings."""
+        """Validate and coerce model, proxy, parser, and capability settings for the Evaluator Construction Agent.
+
+        Args:
+            payload: Raw settings dictionary from the client.
+
+        Returns:
+            dict[str, Any]: Validated evaluator-agent settings dictionary.
+        """
         allowed = {
             "llm_provider",
             "llm_model",
@@ -1811,10 +1949,13 @@ class InteractiveSession:
         return InteractiveSession.validate_data_agent_settings(payload)
 
     def configure_data_agent(self, payload):
-        """Run the ``configure data agent`` operation.
+        """Apply or queue updated settings for the Data Preparation Agent.
 
         Args:
-            payload: Serializable event payload.
+            payload: Settings dictionary submitted from the Data Preparation settings panel.
+
+        Returns:
+            dict[str, Any]: Updated session snapshot.
         """
         self._ensure_settings_editable()
         with self.lock:
@@ -1830,13 +1971,13 @@ class InteractiveSession:
         return self.snapshot()
 
     def test_data_agent_model(self, payload):
-        """Test plain completion and tool-call support without changing agent history.
+        """Test connectivity and tool-calling support for the Data Preparation Agent's model settings.
 
         Args:
-            payload: Data-agent settings currently entered in the Web UI.
+            payload: Candidate data-agent settings to test.
 
         Returns:
-            Connectivity and parsed tool-call diagnostics.
+            dict[str, Any]: Test result containing ``ok``, ``accessible``, and ``tool_call_ok``.
         """
         updates = self.validate_data_agent_settings(payload)
         self.validate_capabilities(updates, agent="data")
@@ -1844,13 +1985,13 @@ class InteractiveSession:
         return self._test_model(settings, proxy=settings.get("proxy", ""))
 
     def test_model(self, payload):
-        """Test the symbolic-regression model settings without applying them.
+        """Test connectivity and tool-calling support for the symbolic-regression agent's model settings.
 
         Args:
-            payload: Runtime settings currently entered in the Web UI.
+            payload: Candidate symbolic-regression model settings to test.
 
         Returns:
-            Connectivity and parsed tool-call diagnostics.
+            dict[str, Any]: Test result containing ``ok``, ``accessible``, and ``tool_call_ok``.
         """
         updates = self.validate_settings(payload, initial=self.state == "idle")
         self.validate_capabilities(updates)
@@ -1912,10 +2053,13 @@ class InteractiveSession:
         }
 
     def configure(self, payload):
-        """Run the ``configure`` operation.
+        """Apply or queue updated runtime settings for the symbolic-regression agent.
 
         Args:
-            payload: Serializable event payload.
+            payload: Settings dictionary submitted from the Run Settings panel.
+
+        Returns:
+            dict[str, Any]: Updated session snapshot.
         """
         self._ensure_settings_editable()
         with self.lock:
@@ -1950,14 +2094,17 @@ class InteractiveSession:
                 raise ValueError("Run has finished")
 
     def resolve(self, path, *, access: str = "read"):
-        """Resolve .
+        """Resolve a workspace-relative path with the requested access permission.
 
         Args:
-            path: Filesystem path.
-            access: Intended workspace operation.
+            path: Workspace-relative file or directory path.
+            access: Requested operation mode (``"read"``, ``"write"``, ``"create"``, or ``"remove"``).
 
         Returns:
-            The resolved readable or writable path.
+            Path: Validated filesystem path inside the workspace.
+
+        Raises:
+            ValueError: If the path is outside the workspace or disallowed by lock/mount rules.
         """
         candidate = self.workspace_manager.resolve(str(path), access=access)
         if candidate is None:

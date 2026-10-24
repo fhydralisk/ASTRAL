@@ -30,7 +30,20 @@ def open_beneath(
     disallow_symlinks: bool = False,
     flags: int = os.O_RDONLY | os.O_CLOEXEC,
 ) -> int:
-    """Atomically open a path without allowing resolution above ``root``."""
+    """Atomically open ``relative_path`` beneath ``root`` using Linux ``openat2(RESOLVE_BENEATH)``.
+
+    Prevents ``..`` traversal and symlinks that resolve outside ``root`` at the
+    kernel system-call boundary.
+
+    Args:
+        root: Trusted root directory path.
+        relative_path: Path relative to ``root`` to open.
+        disallow_symlinks: If ``True``, also set ``RESOLVE_NO_SYMLINKS`` to reject all symlinks.
+        flags: POSIX ``os.open`` flags (defaults to ``os.O_RDONLY | os.O_CLOEXEC``).
+
+    Returns:
+        int: Open OS file descriptor owned by the caller.
+    """
     syscall_number = _SYS_OPENAT2.get(platform.machine())
     if syscall_number is None:
         raise OSError(errno.ENOSYS, "openat2 is unsupported on this architecture")

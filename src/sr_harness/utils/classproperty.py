@@ -1,11 +1,12 @@
 # Copyright (c) 2024-present, Yumeow. Licensed under the MIT License.
 class classproperty(object):
-    """
-    自定义的类属性装饰器。
-    允许通过 ClassName.property_name 直接获取动态计算的类属性，
-    同时也支持 instance.property_name。
-    """
+    """Descriptor decorator that turns a method taking ``cls`` into a read-only class property."""
     def __init__(self, fget):
+        """Wrap ``fget`` as a class-level property descriptor.
+
+        Args:
+            fget: Callable accepting the owner class ``cls`` and returning the property value.
+        """
         self.fget = fget
 
     def __get__(self, owner_instance, owner_class):

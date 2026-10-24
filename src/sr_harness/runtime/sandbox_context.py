@@ -32,11 +32,17 @@ def _json_value(value: Any) -> Any:
 
 
 def sandbox_arguments(args: argparse.Namespace) -> dict[str, Any]:
-    """Return the evaluator/tool argument whitelist exposed to untrusted code.
+    """Extract the allowlisted subset of ``AgentContext.args`` safe to expose to sandboxed code.
 
-    New ``AgentContext.args`` fields are private by default. Provider credentials,
-    proxy configuration, model settings, callbacks, and session objects therefore
-    remain in the server process unless this contract is deliberately expanded.
+    Provider API keys, proxy settings, model configurations, callbacks, and
+    session internals are excluded so untrusted custom tools and evaluators
+    receive only data-splitting and scoring parameters.
+
+    Args:
+        args: Full runtime configuration namespace from ``AgentContext.args``.
+
+    Returns:
+        dict[str, Any]: Sanitized dictionary of allowlisted evaluation arguments.
     """
     result: dict[str, Any] = {}
     for name in _ALLOWED_ARGUMENTS:

@@ -24,11 +24,11 @@ MAX_UPLOAD = 256 * 1024 * 1024
 
 
 def mount_platform(app, session: InteractiveSession):
-    """Run the ``mount platform`` operation.
+    """Register interactive workbench API routes (data preparation, task setup, evaluator, workspace, and search control) on ``app``.
 
     Args:
-        app: The app value.
-        session: The session value.
+        app: FastAPI application instance.
+        session: Active :class:`InteractiveSession` (or request-scoped session proxy).
     """
     app.state.session = session
 

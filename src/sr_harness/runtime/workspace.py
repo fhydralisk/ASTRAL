@@ -102,7 +102,14 @@ class Workspace:
         return any(self._lock_rules.values())
 
     def is_locked(self, path: str | Path) -> bool:
-        """Return the effective lock state after applying the nearest override."""
+        """Return whether ``path`` is protected by a user lock rule or a read-only mount.
+
+        Args:
+            path: Absolute or workspace-relative path to check.
+
+        Returns:
+            bool: ``True`` if writing or deleting ``path`` is blocked by a lock rule.
+        """
         logical = Path(path)
         if not logical.is_absolute():
             logical = self._path / logical
@@ -120,7 +127,14 @@ class Workspace:
         return False
 
     def contains_locked_paths(self, path: str | Path) -> bool:
-        """Return whether a path is or contains an explicitly locked subtree."""
+        """Return whether ``path`` or any descendant inside its directory tree is explicitly locked.
+
+        Args:
+            path: Workspace-relative or absolute path to inspect.
+
+        Returns:
+            bool: ``True`` if ``path`` or any nested entry is locked.
+        """
         logical = Path(path)
         if not logical.is_absolute():
             logical = self._path / logical
@@ -322,7 +336,17 @@ class Workspace:
         encoding: str | None = None,
         errors: str | None = None,
     ) -> IO:
-        """Open a readable file atomically within an authorized workspace root."""
+        """Atomically open a file for reading inside the workspace or an authorized mount without escaping via symlinks.
+
+        Args:
+            path: Workspace-relative or mounted path to open.
+            mode: Read mode (``"r"`` for text or ``"rb"`` for binary).
+            encoding: Text encoding when ``mode == "r"``.
+            errors: Encoding error handling strategy when ``mode == "r"``.
+
+        Returns:
+            IO: Open read-only file stream.
+        """
         if mode not in {"r", "rb"}:
             raise ValueError("safe_open only supports 'r' and 'rb'")
         if mode == "rb" and (encoding is not None or errors is not None):
@@ -455,7 +479,15 @@ class Workspace:
         return io.TextIOWrapper(binary, encoding=encoding, errors=errors)
 
     def replace_file(self, source: str | Path, destination: str) -> Path:
-        """Atomically replace a workspace file with a caller-owned staging file."""
+        """Atomically replace a writable workspace file with a staged temporary file.
+
+        Args:
+            source: Path to the caller-owned staging file.
+            destination: Workspace-relative target file path.
+
+        Returns:
+            Path: Logical workspace path of the replaced file.
+        """
         existing = self.resolve(destination)
         access = "write" if existing is not None and existing.exists() else "create"
         _, parent_fd, name, logical = self._open_mutation_parent(destination, access=access)
@@ -466,7 +498,15 @@ class Workspace:
         return logical
 
     def install(self, source: str | Path, destination: str) -> Path:
-        """Atomically install a caller-owned file or directory without overwriting."""
+        """Atomically move a staged file or directory into the workspace without overwriting existing entries.
+
+        Args:
+            source: Path to the caller-owned staging file or directory.
+            destination: Workspace-relative destination path.
+
+        Returns:
+            Path: Logical workspace path of the installed entry.
+        """
         source = Path(source)
         if not source.is_absolute():
             source = Path.cwd() / source
@@ -486,7 +526,16 @@ class Workspace:
         return logical
 
     def move(self, source: str, destination: str, *, overwrite: bool = False) -> Path:
-        """Move a workspace entry using stable source and destination parents."""
+        """Move or rename a writable workspace entry while enforcing lock and mount boundaries.
+
+        Args:
+            source: Workspace-relative source path.
+            destination: Workspace-relative destination path.
+            overwrite: Whether to allow replacing an existing unlocked file at ``destination``.
+
+        Returns:
+            Path: Logical workspace path of the moved entry.
+        """
         source_relative = self._relative_mutation_path(source)
         destination_relative = self._relative_mutation_path(destination)
         if source_relative == Path(".") or destination_relative == Path("."):
@@ -525,7 +574,13 @@ class Workspace:
         return destination_logical
 
     def remove(self, relative_path: str, *, recursive: bool = False, missing_ok: bool = False) -> None:
-        """Remove a workspace entry without following symbolic links."""
+        """Delete a writable file or directory tree inside the workspace without following symlinks.
+
+        Args:
+            relative_path: Workspace-relative path to remove.
+            recursive: Whether to recursively delete non-empty directories.
+            missing_ok: If ``True``, do not raise when ``relative_path`` does not exist.
+        """
         _, parent_fd, name, _ = self._open_mutation_parent(relative_path, access="remove")
         try:
             try:

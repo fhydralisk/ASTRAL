@@ -11,34 +11,39 @@ from .default_evaluator import ContextSplits, DefaultEvaluator, MetricDict
 
 
 class GraphEvaluator(DefaultEvaluator):
-    """Evaluate variables with ``(..., N/E/H)`` graph-aligned dimensions."""
+    """Evaluator for graph and hypergraph datasets with node ``(..., N)``, edge ``(..., E)``, and hyperedge ``(..., H)`` arrays.
+
+    Passes ``context.num_nodes`` to the symbolic engine during fitting and
+    evaluation, and slices only sample-aligned leading dimensions during
+    :meth:`split` so shared edge and hyperedge coordinate tables remain intact.
+    """
 
     @classmethod
     def fit(cls, f: engine.Expression, y: engine.Expression, context: AgentContext) -> engine.Expression:
-        """Fit an equality using graph-aware broadcast evaluation.
+        """Fit parameters in ``f`` to approximate ``y`` using graph-aware broadcast evaluation.
 
         Args:
-            f: Expression whose parameters will be fitted.
-            y: Expression providing graph-aligned target values.
-            context: Training context containing relation metadata.
+            f: Symbolic expression whose parameters will be fitted.
+            y: Target symbolic expression.
+            context: Training context containing node/edge arrays and ``num_nodes``.
 
         Returns:
-            A copy of ``f`` with fitted parameter values.
+            engine.Expression: Copy of ``f`` with fitted parameter values bound.
         """
         target = engine.evaluate(y, context.data, num_nodes=context.num_nodes)
         return engine.fit(f, context.data, target, num_nodes=context.num_nodes).expression
 
     @classmethod
     def evaluate(cls, f: engine.Expression, y: engine.Expression, context: AgentContext) -> MetricDict:
-        """Evaluate an equality using graph-aware broadcast evaluation.
+        """Evaluate ``y = f`` on graph or hypergraph data using ``context.num_nodes``.
 
         Args:
-            f: Fitted expression to evaluate.
-            y: Expression providing graph-aligned target values.
-            context: Context containing relation metadata.
+            f: Parameter-bound expression to evaluate.
+            y: Target symbolic expression.
+            context: Training or validation context containing graph metadata.
 
         Returns:
-            Numeric regression and complexity metrics.
+            MetricDict: Dictionary of numeric regression and complexity metrics.
         """
         target = engine.evaluate(y, context.data, num_nodes=context.num_nodes)
         prediction = engine.evaluate(f, context.data, num_nodes=context.num_nodes)
@@ -46,13 +51,13 @@ class GraphEvaluator(DefaultEvaluator):
 
     @classmethod
     def split(cls, context: AgentContext) -> ContextSplits:
-        """Split sample-aligned graph data without slicing relation arrays.
+        """Split sample-aligned leading axes into train and validation views while preserving shared relation tables.
 
         Args:
-            context: Complete graph or hypergraph context.
+            context: Unsplit graph or hypergraph :class:`~sr_harness.core.AgentContext`.
 
         Returns:
-            Training and validation context views.
+            ContextSplits: Dictionary ``{"train": train_context, "validation": validation_context}``.
         """
         data = context.data
         target = np.asarray(data[context.target])

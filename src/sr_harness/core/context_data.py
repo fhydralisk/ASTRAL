@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 
 class ContextManifestError(ValueError):
-    """Raised when a context-data manifest cannot be validated."""
+    """Exception raised when ``context.data/manifest.json`` or its referenced ``.npy`` files fail validation."""
 
 
 class _ContextDataReader:
@@ -399,27 +399,33 @@ class _ContextDataReader:
 
 
 def load_context_data(directory: str | Path, *, workspace: Workspace | None = None) -> dict[str, Any]:
-    """Validate and load one manifest-backed ``context.data`` directory.
+    """Validate and load a ``context.data/`` directory into arrays and metadata for :class:`AgentContext`.
 
     Args:
-        directory: Directory containing ``manifest.json`` and array files.
-        workspace: Workspace enforcing safe reads, when available.
+        directory: Path to the ``context.data/`` directory containing ``manifest.json`` and ``.npy`` files.
+        workspace: Optional :class:`~sr_harness.runtime.Workspace` used to enforce safe file reads.
 
     Returns:
-        An AgentContext-ready mapping containing arrays and metadata.
+        dict[str, Any]: Dictionary containing ``data``, ``variable_descriptions``,
+            ``variable_axes``, ``variable_structures``, ``relation_names``,
+            ``num_nodes``, ``manifest``, and ``warnings``.
+
+    Raises:
+        ContextManifestError: If ``manifest.json`` or any referenced ``.npy`` array violates the format rules.
     """
     return _ContextDataReader(directory, workspace=workspace).load()
 
 
 def inspect_context_data(directory: str | Path, *, workspace: Workspace | None = None) -> dict[str, Any]:
-    """Return validation diagnostics without raising for manifest errors.
+    """Validate a ``context.data/`` directory and return structured errors and warnings without raising.
 
     Args:
-        directory: Directory containing ``manifest.json`` and array files.
-        workspace: Workspace enforcing safe reads, when available.
+        directory: Path to the ``context.data/`` directory to inspect.
+        workspace: Optional :class:`~sr_harness.runtime.Workspace` used to enforce safe file reads.
 
     Returns:
-        A serializable validation report.
+        dict[str, Any]: Diagnostic report with ``valid``, ``errors``, ``warnings``,
+            ``variables``, ``axes``, ``relations``, and ``num_nodes``.
     """
     return _ContextDataReader(directory, workspace=workspace).inspect()
 
@@ -430,14 +436,19 @@ def update_context_data_descriptions(
     *,
     workspace: Workspace | None = None,
 ) -> dict[str, Any]:
-    """Update variable and axis descriptions in ``manifest.json``.
+    """Update variable and axis descriptions in ``context.data/manifest.json`` and reload the dataset.
 
-    The complete store is validated before the edit. An atomic replacement is
-    used when the directory permits creating entries. If the directory is
-    read-only but ``manifest.json`` itself is writable, the existing file is
-    updated in place, matching normal POSIX file-permission semantics. Because
-    only existing string-valued description fields are changed, structural
-    validity is preserved. The returned mapping matches :func:`load_context_data`.
+    Validates the entire ``context.data/`` directory first, then writes updated
+    non-empty description strings atomically (or in place when the parent directory
+    is read-only but ``manifest.json`` is writable).
+
+    Args:
+        directory: Path to the ``context.data/`` directory.
+        descriptions: Mapping of variable or axis names to updated description strings.
+        workspace: Optional :class:`~sr_harness.runtime.Workspace` enforcing write permissions.
+
+    Returns:
+        dict[str, Any]: Reloaded dataset dictionary matching :func:`load_context_data`.
     """
     directory = Path(directory).resolve()
     manifest_path = directory / _ContextDataReader.MANIFEST_NAME

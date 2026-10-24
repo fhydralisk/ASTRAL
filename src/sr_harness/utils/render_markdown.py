@@ -6,6 +6,16 @@ from rich.syntax import Syntax
 
 
 def render_markdown(text: str, width=120, theme="staroffice") -> str:
+    """Render Markdown text to an ANSI-styled terminal string using Rich.
+
+    Args:
+        text: Markdown source string.
+        width: Terminal wrapping width in columns.
+        theme: Syntax highlighting color theme for fenced code blocks.
+
+    Returns:
+        str: ANSI-formatted string ready for terminal display.
+    """
     console = Console(record=True, width=width)
     with console.capture() as capture:
         matches = list(re.finditer(r"```(\w+)?\n(.*?)\n```", text, re.DOTALL))

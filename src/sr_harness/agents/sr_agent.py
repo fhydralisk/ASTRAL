@@ -30,7 +30,13 @@ Usage: TypeAlias = dict[str, Any]
 
 
 class SRAgent(Agent):
-    """Agent that performs an R-C-L-K symbolic-regression search."""
+    """Symbolic-regression agent that coordinates an R-C-L-K search tree.
+
+    Drives language models and scientific tools across restarts (``R``),
+    independent parallel conversation branches (``C``), iterative refinement
+    steps (``L``), and local response samples (``K``), tracking all evaluated
+    formulas and maintaining a global Pareto front.
+    """
 
     DEFAULT_TOOLS = (
         "statistics_analysis",
@@ -85,38 +91,39 @@ class SRAgent(Agent):
         context: AgentContext | None = None,
         skill_manager: SkillManager | None = None,
     ) -> None:
-        """初始化 Agent。
+        """Initialize the symbolic-regression agent and its R-C-L-K search configuration.
 
         Args:
-            llm_provider: LLM 提供商名称（如 "openai", "siliconflow"）。
-            llm_model: 模型名称（如 "gpt-4o-mini"）。
-            tools: 可用工具列表。None 表示使用 ``DEFAULT_TOOLS``。
-            skills: 可供 Agent 读取的 skill 名称。None 表示使用全部 skill。
-            verbose: 是否启用详细日志（DEBUG 级别）。
-            tool_parser: 工具解析器，可以是字符串（'text', 'json'）或 BaseParser 实例。
-            save_path: 日志文件保存路径。None 表示不保存到文件。
-            run_id: 本次运行的全局唯一标识。None 表示自动生成。
-            local_sample_size: 每轮生成的候选解数量。
-            max_refinement_depth: 最大迭代次数。
-            global_width: 每个 restart turn 中独立对话分支数量。
-            max_restart_loop: best-solution restarts 次数
-            restart_top_k: 下一轮 restart prompt 中保留的历史最佳结果数量。
-            llm_max_tokens: 每次 LLM 响应的最大 token 数。
-            max_workers: 并行执行工具调用的最大工作进程数。0 表示不使用并行。
-            validation_fraction: 验证集比例；验证集结果会展示给 Agent。设为 0 可关闭。
-            split_by: 验证集划分方式。"random" 表示随机划分；"ood" 要求通过
-                split_ood_variable 显式指定排序变量。
-            split_ood_variable: OOD 划分使用的变量名；随机划分时可留空。
-            split_random_state: 数据划分的随机种子。
-            ranking_metric: 候选公式排序所用的指标键；默认使用 mse。
-            larger_is_better: 排序指标是否越大越好；默认按越小越好排序。
-            force_initial_diagnostics: 是否在每个对话分支的 L=1 请求 LLM 前，强制执行
-                statistics_analysis、relationship_analysis 和读取 discover-symbolic-laws skill。
-            auto_routing: 是否根据任务复杂度在基础与强模型后端之间自动路由。
-            strong_llm_provider: 复杂任务使用的后端；默认沿用 llm_provider。
-            strong_llm_model: 复杂任务使用的模型。None 表示仅使用基础模型。
-            context: 与其它 Agent 共享的数据和工作区上下文。None 表示新建独立上下文。
-            skill_manager: Skill 注册表。None 表示使用临时的自定义 skill 目录。
+            llm_provider: Base LLM provider name (e.g., ``"openrouter"``, ``"deepseek"``).
+            llm_model: Base model identifier (e.g., ``"deepseek/deepseek-v4-flash-0731"``).
+            tools: Enabled tool names, or ``None`` to use ``DEFAULT_TOOLS``.
+            skills: Enabled skill names, or ``None`` to expose all available skills.
+            verbose: Whether to emit debug-level runtime logs.
+            tool_parser: Tool-call parser mode (``"openai"``, ``"text"``, ``"json"``,
+                ``"xml"``) or a :class:`~sr_harness.parser.BaseParser` instance.
+            save_path: Directory where run logs and search records are written, or
+                ``None`` to disable file persistence.
+            run_id: Explicit unique run identifier, or ``None`` to generate one.
+            local_sample_size: Number of model responses sampled per step (``K``).
+            max_refinement_depth: Maximum iterative steps per conversation branch (``L``).
+            global_width: Number of parallel conversation branches per restart (``C``).
+            max_restart_loop: Number of outer restart loops (``R``).
+            restart_top_k: Number of top historical formulas injected into each new restart.
+            llm_max_tokens: Optional maximum output tokens per model response.
+            max_workers: Worker processes for parallel tool calls (``0`` runs serially).
+            validation_fraction: Fraction of samples reserved for validation (``0`` disables splitting).
+            split_by: Validation split strategy (``"random"`` or ``"ood"``).
+            split_ood_variable: Variable name used to sort samples when ``split_by="ood"``.
+            split_random_state: Random seed for reproducible train/validation splitting.
+            ranking_metric: Metric name used to rank candidate formulas (defaults to ``"mse"``).
+            larger_is_better: Whether higher values of ``ranking_metric`` rank better.
+            force_initial_diagnostics: Whether to automatically run statistical and
+                relationship diagnostics before the first model call of each branch.
+            auto_routing: Whether to dynamically route between base and strong models.
+            strong_llm_provider: Provider for the strong model (defaults to ``llm_provider``).
+            strong_llm_model: Optional stronger model identifier for complex steps.
+            context: Optional shared :class:`~sr_harness.core.AgentContext` instance.
+            skill_manager: Optional :class:`~sr_harness.skills.SkillManager` instance.
         """
         # 配置日志：如果用户尚未配置，则根据 verbose 和 save_path 自动配置
         log_path = Path(save_path) / "info.log" if save_path is not None else None
@@ -264,15 +271,16 @@ class SRAgent(Agent):
         _logger.info(f"Initialized {self.__class__.__name__}")
 
     def run(self, X: Dict[str, np.ndarray], y: Dict[str, np.ndarray] | np.ndarray, problem_description: str) -> Dict[str, Any]:
-        """Run the configured operation.
+        """Initialize the runtime context and execute a complete symbolic-regression search.
 
         Args:
             X: Input feature arrays keyed by variable name.
-            y: Target data or target expression.
-            problem_description: Natural-language description of the discovery task.
+            y: Target variable array or single-entry mapping ``{target_name: array}``.
+            problem_description: Natural-language description of the scientific discovery problem.
 
         Returns:
-            Dict[str, Any]: The operation result.
+            Dict[str, Any]: Serializable search summary containing the best formula,
+                Pareto front, all evaluated candidates, and resource usage statistics.
         """
         if not isinstance(y, dict):
             y = {"target": y}
@@ -340,32 +348,33 @@ class SRAgent(Agent):
 
     @contextmanager
     def prepare_tool_context(self, tool_context: AgentContext) -> Iterator[AgentContext]:
-        """Prepare resources and context shared by initialized tools.
+        """Context manager that binds per-run resources to the shared tool context.
 
         Args:
-            tool_context: Shared context used to initialize tools.
+            tool_context: Shared context passed to initialized tools.
 
         Yields:
-            The context to bind to initialized tools.
+            AgentContext: The active context ready for tool initialization.
         """
         yield tool_context
 
     # Search orchestration
 
     def search(self, X: Dict[str, np.ndarray], y: Dict[str, np.ndarray], problem_description: str) -> Dict[str, Any]:
-        """Run the R-C-L search after data, tools, parser, and API are initialized.
+        """Execute the R-C-L-K search loop over an already initialized context.
 
-                Each refinement step builds the prompt, requests the model, executes tools,
-                records the search node, collects candidates, updates the conversation, and
-                evaluates the termination hook.
+        At each refinement step, builds the prompt, queries the language model for
+        ``K`` samples, executes tool calls, records search-tree nodes, extracts
+        candidate formulas, updates the branch conversation buffer, and checks
+        termination conditions.
 
         Args:
             X: Input feature arrays keyed by variable name.
-            y: Target data or target expression.
+            y: Target variable mapping ``{target_name: array}``.
             problem_description: Natural-language description of the discovery task.
 
         Returns:
-            Dict[str, Any]: The operation result.
+            Dict[str, Any]: Final search result dictionary for the completed or stopped run.
         """
         ## 开始迭代
         self.total_timer.clear(reset_last_add_time=True)
@@ -499,16 +508,16 @@ class SRAgent(Agent):
     # Prompt and conversation-buffer lifecycle
 
     def create_initial_buffer(self, problem_description: str, X: dict[str, np.ndarray], y: dict[str, np.ndarray], restart_records: list[CandidateRecord]) -> list[Message]:
-        """Combine initial prompts with the first progress message for a branch.
+        """Build the initial conversation buffer for a new branch, including the opening progress summary.
 
         Args:
             problem_description: Natural-language description of the discovery task.
             X: Input feature arrays keyed by variable name.
-            y: Target data or target expression.
-            restart_records: Ranked candidates used to seed a restart.
+            y: Target variable mapping ``{target_name: array}``.
+            restart_records: Top historical candidates from prior restarts used to seed the prompt.
 
         Returns:
-            Initial branch buffer including the first progress message.
+            list[Message]: Initial message list ready to start a conversation branch.
         """
         self._task_route_score, self._task_route_reasons = self.model_router.assess(
             problem_description,
@@ -524,16 +533,16 @@ class SRAgent(Agent):
         return initial_buffer
 
     def create_initial_prompt_messages(self, problem_description: str, X: dict[str, np.ndarray], y: dict[str, np.ndarray], restart_records: list[CandidateRecord]) -> list[Message]:
-        """Create finalized system and user messages without buffer metadata.
+        """Assemble the initial system and user messages before branch buffer metadata is attached.
 
         Args:
-            problem_description: Natural-language discovery task.
-            X: Feature arrays keyed by variable name.
-            y: Target arrays keyed by variable name.
-            restart_records: Ranked candidates used to seed a restart.
+            problem_description: Natural-language description of the discovery task.
+            X: Input feature arrays keyed by variable name.
+            y: Target variable mapping ``{target_name: array}``.
+            restart_records: Top historical candidates from prior restarts.
 
         Returns:
-            Finalized system and user messages.
+            list[Message]: Two-element list containing the finalized system and user messages.
         """
         messages = [{
             "role": "system",
@@ -563,13 +572,13 @@ class SRAgent(Agent):
         )
 
     def create_initial_system_prompt(self, restart_records: list[CandidateRecord]) -> str:
-        """Create the initial system prompt independently of the branch buffer.
+        """Render the system prompt defining the agent's role, workflow, and tool instructions.
 
         Args:
-            restart_records: Ranked candidates used to set the next objective.
+            restart_records: Historical candidates from prior restarts (used to adjust guidance).
 
         Returns:
-            System-prompt text.
+            str: Formatted system prompt text.
         """
         mse_goal = self._build_mse_goal(restart_records)
         return (
@@ -584,16 +593,16 @@ class SRAgent(Agent):
         )
 
     def create_initial_user_prompt(self, problem_description: str, X: dict[str, np.ndarray], y: dict[str, np.ndarray], restart_records: list[CandidateRecord]) -> str:
-        """Create the initial user prompt independently of the branch buffer.
+        """Render the initial user prompt describing the problem, variables, and prior restart results.
 
         Args:
-            problem_description: Natural-language discovery task.
-            X: Feature arrays keyed by variable name.
-            y: Target arrays keyed by variable name.
-            restart_records: Ranked candidates included as restart evidence.
+            problem_description: Natural-language description of the discovery task.
+            X: Input feature arrays keyed by variable name.
+            y: Target variable mapping ``{target_name: array}``.
+            restart_records: Top historical candidates seeded from earlier restarts.
 
         Returns:
-            User-prompt text.
+            str: Formatted user prompt text.
         """
         content = (
             f"{problem_description}\n\n"
@@ -624,24 +633,24 @@ class SRAgent(Agent):
         )
 
     def customize_initial_prompts(self, messages: list[Message], *, X: dict[str, np.ndarray], y: dict[str, np.ndarray]) -> list[Message]:
-        """Customize finalized initial prompts before buffer insertion.
+        """Hook for subclasses to modify initial system and user messages before they enter the buffer.
 
         Args:
-            messages: Initial system and user messages.
-            X: Feature arrays keyed by variable name.
-            y: Target arrays keyed by variable name.
+            messages: Initial system and user message dictionaries.
+            X: Input feature arrays keyed by variable name.
+            y: Target variable mapping ``{target_name: array}``.
 
         Returns:
-            Messages to insert into the branch buffer.
+            list[Message]: Customized message list to insert into the branch buffer.
         """
         return messages
 
     def on_buffer_messages_added(self, messages: list[Message], **coordinate: int) -> None:
-        """Observe messages after they enter a conversation buffer.
+        """Hook invoked whenever new messages are appended to a branch conversation buffer.
 
         Args:
-            messages: Newly appended messages.
-            **coordinate: Optional R/C/L search coordinate.
+            messages: Messages that were just appended to the buffer.
+            **coordinate: Optional ``R``, ``C``, and ``L`` coordinates for the active step.
         """
 
     def _append_buffer_messages(self, buffer, messages, **coordinate: int) -> None:
@@ -651,16 +660,19 @@ class SRAgent(Agent):
         self.on_buffer_messages_added(messages, **coordinate)
 
     def prepare_model_messages(self, buffer: List[Dict[str, Any]], R: int, L: int, C: int) -> List[Dict[str, Any]]:
-        """Prepare the messages sent to the model for one iteration.
+        """Build the full message list sent to the language model for step ``(R, C, L)``.
+
+        Runs initial diagnostics on ``L=1`` when ``force_initial_diagnostics`` is
+        enabled and strips internal buffer metadata keys before sending.
 
         Args:
-            buffer: Conversation history buffer.
+            buffer: Current branch conversation buffer.
             R: One-based restart index.
             L: One-based refinement-step index.
             C: One-based conversation-branch index.
 
         Returns:
-            List[Dict[str, Any]]: The operation result.
+            List[Dict[str, Any]]: Provider-ready conversation messages.
         """
         if self.force_initial_diagnostics and L == 1:
             # Persist the evidence in the branch buffer so later refinement
@@ -695,21 +707,27 @@ class SRAgent(Agent):
         return prompt
 
     def prepare_iteration(self, buffer: List[Dict[str, Any]], R: int, L: int, C: int) -> str | None:
-        """Apply mode-specific control changes before constructing this iteration's prompt.
+        """Apply any pending runtime updates or control commands before step ``(R, C, L)`` begins.
 
         Args:
-            buffer: Conversation history buffer.
+            buffer: Current branch conversation buffer.
             R: One-based restart index.
             L: One-based refinement-step index.
             C: One-based conversation-branch index.
 
         Returns:
-            str | None: The operation result.
+            str | None: Control transition token (``"stop"``, ``"next_c"``, ``"next_r"``),
+                or ``None`` to proceed with the step.
         """
         return None
 
     def refresh_data(self) -> dict[str, Any] | None:
-        """Apply a newly committed shared-data revision and describe the change."""
+        """Synchronize the agent's feature and target views if the shared ``context.data`` revision changed.
+
+        Returns:
+            dict[str, Any] | None: Summary of variable or role changes when a new
+                data revision was applied, or ``None`` if the dataset is unchanged.
+        """
         revision = int(self.context.args.data_revision)
         if revision == self._data_revision:
             return None
@@ -744,16 +762,17 @@ class SRAgent(Agent):
         }
 
     def finish_iteration(self, buffer: List[Dict[str, Any]], R: int, L: int, C: int) -> str | None:
-        """Return a terminal status when the current search should stop.
+        """Check whether the search should terminate at the end of step ``(R, C, L)``.
 
         Args:
-            buffer: Conversation history buffer.
+            buffer: Current branch conversation buffer.
             R: One-based restart index.
             L: One-based refinement-step index.
             C: One-based conversation-branch index.
 
         Returns:
-            str | None: The operation result.
+            str | None: Terminal status string (such as ``"early_stopped"``) when
+                stopping criteria are met, or ``None`` to continue searching.
         """
         best_candidate = self.best_candidate()
         if (
@@ -763,7 +782,7 @@ class SRAgent(Agent):
         return None
 
     def run_initial_diagnostics(self, R: int, L: int, C: int) -> Dict[str, str]:
-        """Run the mandatory branch-opening diagnostics and format them for the LLM.
+        """Execute opening statistical, relationship, and skill diagnostics for the start of a branch.
 
         Args:
             R: One-based restart index.
@@ -771,7 +790,7 @@ class SRAgent(Agent):
             C: One-based conversation-branch index.
 
         Returns:
-            Dict[str, str]: The operation result.
+            Dict[str, str]: Formatted user-role message containing the diagnostic outputs.
         """
         calls = [
             ToolCall(name="statistics_analysis", params={}),
@@ -806,17 +825,18 @@ class SRAgent(Agent):
     # Model and tool execution
 
     def request_llm(self, prompt: List[Dict[str, Any]], R: int, L: int, C: int, callback: Callable[[dict[str, Any]], None] | None = None) -> tuple[list[APICallSample], Usage | None]:
-        """Run the ``request llm`` operation.
+        """Route the request to the appropriate model tier and sample ``K`` responses for step ``(R, C, L)``.
 
         Args:
-            prompt: Prompt messages sent to the model.
+            prompt: Provider-ready conversation messages.
             R: One-based restart index.
             L: One-based refinement-step index.
             C: One-based conversation-branch index.
-            callback: Optional callback invoked for model-call progress updates.
+            callback: Optional callback receiving live streaming progress updates.
 
         Returns:
-            Parsed model responses and recorded usage data.
+            tuple[list[APICallSample], Usage | None]: Sampled assistant responses
+                and aggregated token/cost usage.
         """
         response_list = []
         route = self.model_router.route(
@@ -867,16 +887,16 @@ class SRAgent(Agent):
         return response_list, usage
 
     def execute_tool_calls(self, response_list: list[APICallSample], R: int, L: int, C: int) -> list[list[ToolCallResult]]:
-        """Execute tool calls from model responses and preserve sample grouping.
+        """Execute all tool calls across the ``K`` sampled model responses for step ``(R, C, L)``.
 
         Args:
-            response_list: Model responses for the current step.
+            response_list: Sampled model responses for the current step.
             R: One-based restart index.
             L: One-based refinement-step index.
             C: One-based conversation-branch index.
 
         Returns:
-            Tool results grouped by local model sample.
+            list[list[ToolCallResult]]: Tool execution results grouped by sample index.
         """
         # 合并 - 调用 - 分割
         all_tool_calls = []
@@ -902,15 +922,16 @@ class SRAgent(Agent):
         results: List[ToolCallResult],
         R: int, L: int, C: int, forced: bool = False
     ) -> None:
-        """Persist tool calls from either the LLM or framework-enforced diagnostics.
+        """Append tool call inputs and outputs to ``tool_calls.jsonl`` and update usage counters.
 
         Args:
-            tool_calls: Tool calls returned by the model.
-            results: Result records to process.
+            tool_calls: Tool calls executed in the current batch.
+            results: Corresponding tool execution results.
             R: One-based restart index.
             L: One-based refinement-step index.
             C: One-based conversation-branch index.
-            forced: The forced value.
+            forced: Whether the calls were triggered by automatic initial diagnostics
+                rather than emitted by the model.
         """
         if self.save_path is None:
             return
@@ -935,19 +956,20 @@ class SRAgent(Agent):
         results_list: List[List[ToolCallResult]],
         node_parents: Dict[str, str], R: int, L: int, C: int
     ) -> tuple[list[Message], dict[str, str]]:
-        """Update buffer.
+        """Select the best-performing ``K`` sample to continue the branch and fold in sibling analysis results.
 
         Args:
-            buffer: Conversation history buffer.
-            response_list: Model responses for the current step.
-            results_list: Tool results aligned with model responses.
-            node_parents: The node parents value.
+            buffer: Current branch conversation buffer.
+            response_list: Sampled model responses for the current step.
+            results_list: Tool results aligned with ``response_list``.
+            node_parents: Mapping of parent node IDs by link relation (``"strong"`` / ``"weak"``).
             R: One-based restart index.
             L: One-based refinement-step index.
             C: One-based conversation-branch index.
 
         Returns:
-            Updated conversation buffer and parent-link mapping.
+            tuple[list[Message], dict[str, str]]: Updated conversation buffer and
+                the parent-node mapping for the next refinement step.
         """
         # 如果没有成功的回复，跳过本轮更新
         if len(response_list) == 0:
@@ -1023,17 +1045,17 @@ class SRAgent(Agent):
         L: int,
         C: int,
     ) -> list[Message]:
-        """Return framework messages to append after one model response.
+        """Build any framework follow-up messages to append after processing model responses.
 
         Args:
-            response_list: Model responses for the current iteration.
-            results_list: Tool results aligned with the model responses.
+            response_list: Sampled model responses for the current step.
+            results_list: Tool results aligned with ``response_list``.
             R: One-based restart index.
             L: One-based refinement-step index.
             C: One-based conversation-branch index.
 
         Returns:
-            Additional conversation messages, empty for the base agent.
+            list[Message]: Follow-up messages to append (empty in non-interactive mode).
         """
         return []
 
@@ -1041,13 +1063,13 @@ class SRAgent(Agent):
 
     def build_progress_message(self, L: int) -> dict[str, str]:
         # 将当前搜索进度加入 buffer
-        """Build process message.
+        """Format a user-role message summarizing remaining step budget and the current Pareto front.
 
         Args:
-            L: One-based refinement-step index.
+            L: Next one-based refinement-step index.
 
         Returns:
-            User-role message describing iteration state and the Pareto front.
+            dict[str, str]: User-role message injected before the next model request.
         """
         remaining_rounds = self.max_refinement_depth - L - 1
         progress_line = (
@@ -1132,10 +1154,10 @@ class SRAgent(Agent):
         )}
 
     def push_candidate(self, record: CandidateRecord) -> None:
-        """Run the ``push candidate`` operation.
+        """Add or update a candidate formula record in the run state.
 
         Args:
-            record: Search or candidate record.
+            record: Evaluated candidate formula record.
         """
         if not self.run_state.push_candidate(record):
             _logger.warning(
@@ -1144,17 +1166,17 @@ class SRAgent(Agent):
             )
 
     def collect_candidates(self, response_list: list[APICallSample], results_list: list[list[ToolCallResult]], R: int, L: int, C: int) -> list[CandidateRecord]:
-        """Validate candidate tool results and add them to the run state.
+        """Extract valid candidate formulas from tool results and update the global leaderboard.
 
         Args:
-            response_list: Model responses for the current step.
-            results_list: Tool results aligned with model responses.
+            response_list: Sampled model responses for the current step.
+            results_list: Tool results aligned with ``response_list``.
             R: One-based restart index.
             L: One-based refinement-step index.
             C: One-based conversation-branch index.
 
         Returns:
-            Candidates ranked under the configured metric.
+            list[CandidateRecord]: All candidate records ranked under the active metric.
         """
         loader = []
         for K in range(1, len(response_list) + 1):
@@ -1194,10 +1216,10 @@ class SRAgent(Agent):
         return self.run_state.ranked_candidates()
 
     def log_info(self, response_list: list[APICallSample], R: int, L: int, C: int) -> None:
-        """Run the ``log info`` operation.
+        """Log step timing, token/cost usage, best candidate score, and tool-call counts.
 
         Args:
-            response_list: Model responses for the current step.
+            response_list: Sampled model responses for the current step.
             R: One-based restart index.
             L: One-based refinement-step index.
             C: One-based conversation-branch index.
@@ -1230,16 +1252,17 @@ class SRAgent(Agent):
     # Persistence and result projection
 
     def record_llm_result(self, llm_result: Any, R: int, L: int, C: int) -> Dict[str, Any] | None:
-        """Record llm result.
+        """Update cumulative token and cost counters and append raw responses to ``response.jsonl``.
 
         Args:
-            llm_result: The llm result value.
+            llm_result: Completed :class:`~sr_harness.core.APICallSummary` from the provider.
             R: One-based restart index.
             L: One-based refinement-step index.
             C: One-based conversation-branch index.
 
         Returns:
-            Dict[str, Any] | None: The operation result.
+            Dict[str, Any] | None: Step and cumulative token/price usage dictionary,
+                or ``None`` if usage data is unavailable.
         """
         usage = {
             "token": llm_result.token_usage,
@@ -1266,14 +1289,14 @@ class SRAgent(Agent):
         parent_nodes: dict[str, str], prompt: list[Message], usage: Usage | None,
         R: int, L: int, C: int,
     ) -> None:
-        """Record one visualization node for each local sample.
+        """Register search-tree nodes for all ``K`` samples in step ``(R, C, L)``.
 
         Args:
-            response_list: Model responses for the current step.
-            results_list: Tool results aligned with model responses.
-            parent_nodes: Parent search nodes by response.
-            prompt: Prompt messages sent to the model.
-            usage: Token and price usage information.
+            response_list: Sampled model responses for the current step.
+            results_list: Tool results aligned with ``response_list``.
+            parent_nodes: Mapping of parent node IDs by relation type.
+            prompt: Prompt messages sent to the model for this step.
+            usage: Step and cumulative token/cost usage dictionary.
             R: One-based restart index.
             L: One-based refinement-step index.
             C: One-based conversation-branch index.
@@ -1288,15 +1311,15 @@ class SRAgent(Agent):
         self.run_state.register_iteration(response_list, results_list, tuple(parents), prompt, usage, R, L, C)
 
     def format_progress(self, R: int | None, L: int | None, C: int | None) -> str:
-        """Format progress.
+        """Format the current ``(R, C, L, K)`` search coordinates as a human-readable string.
 
         Args:
-            R: One-based restart index.
-            L: One-based refinement-step index.
-            C: One-based conversation-branch index.
+            R: Current one-based restart index, or ``None`` before starting.
+            L: Current one-based refinement-step index, or ``None``.
+            C: Current one-based conversation-branch index, or ``None``.
 
         Returns:
-            Human-readable R/C/L/K progress text.
+            str: Formatted coordinate string such as ``"(R=1/1) × (C=1/1) × (L=2/20) × (K=1)"``.
         """
         return (
             f"(R={R}/{self.max_restart_loop}) × "
@@ -1306,13 +1329,14 @@ class SRAgent(Agent):
         )
 
     def get_ranking_metric(self, record: CandidateRecord | dict[str, Any]) -> tuple[str | None, float | int | None]:
-        """Return the configured ranking metric and its display label.
+        """Extract the configured ranking metric value and its display label from a candidate record.
 
         Args:
-            record: Search or candidate record.
+            record: :class:`~sr_harness.core.CandidateRecord` or candidate dictionary.
 
         Returns:
-            Display label and metric value, or two ``None`` values when absent.
+            tuple[str | None, float | int | None]: Pair of ``(display_label, metric_value)``,
+                or ``(None, None)`` if the metric is missing.
         """
         metric_label = self.ranking_metric.replace('_', ' ').upper()
         if isinstance(record, CandidateRecord):
@@ -1332,13 +1356,14 @@ class SRAgent(Agent):
         return None, None
 
     def candidate_sort_key(self, record: CandidateRecord | dict[str, Any]) -> tuple[float, float] | None:
-        """Return the ranking key for a candidate-like record.
+        """Compute a ``(metric_key, complexity_key)`` tuple for sorting candidates (smaller sorts first).
 
         Args:
-            record: Search or candidate record.
+            record: :class:`~sr_harness.core.CandidateRecord` or candidate dictionary.
 
         Returns:
-            Metric and complexity sorting key, or ``None`` for invalid metrics.
+            tuple[float, float] | None: Sort key tuple where lower values indicate higher
+                rank, or ``None`` if the candidate lacks a finite ranking metric.
         """
         _, metric_value = self.get_ranking_metric(record)
         if metric_value is None:
@@ -1370,13 +1395,13 @@ class SRAgent(Agent):
 
     @staticmethod
     def candidate_to_dict(record: CandidateRecord) -> dict[str, Any]:
-        """Adapt a candidate to utilities that consume split results at top level.
+        """Convert a :class:`~sr_harness.core.CandidateRecord` into a flat dictionary for formatting utilities.
 
         Args:
-            record: Search or candidate record.
+            record: Candidate record to convert.
 
         Returns:
-            dict[str, Any]: The operation result.
+            dict[str, Any]: Flattened candidate dictionary with top-level split results.
         """
         return {
             "formula": record.formula,
@@ -1385,34 +1410,36 @@ class SRAgent(Agent):
         }
 
     def best_candidate(self) -> CandidateRecord | None:
-        """Run the ``best candidate`` operation.
+        """Return the highest-ranked candidate formula discovered so far.
 
         Returns:
-            CandidateRecord | None: The operation result.
+            CandidateRecord | None: Top-ranked candidate record, or ``None`` if no valid
+                candidate has been evaluated yet.
         """
         candidates = self.run_state.ranked_candidates()
         return candidates[0] if candidates else None
 
     def get_pareto_front(self) -> list[CandidateRecord]:
-        """Return candidates on the metric-complexity Pareto front.
+        """Return candidate formulas on the accuracy-versus-complexity Pareto front.
 
         Returns:
-            list[CandidateRecord]: The operation result.
+            list[CandidateRecord]: Pareto-optimal candidates ordered from simplest to most accurate.
         """
         candidates = self.run_state.ranked_candidates()
         return [candidates[index] for index in self.run_state.pareto_indices(candidates)]
 
     def build_search_result(self, status: str, R: int | None, L: int | None, C: int | None) -> dict[str, Any]:
-        """Build a serializable search result for the current run state.
+        """Assemble a serializable final result dictionary for the run.
 
         Args:
-            status: Run completion status.
-            R: One-based restart index.
-            L: One-based refinement-step index.
-            C: One-based conversation-branch index.
+            status: Terminal run status (``"completed"``, ``"early_stopped"``,
+                ``"interrupted"``, or ``"failed"``).
+            R: Final one-based restart index, or ``None``.
+            L: Final one-based refinement-step index, or ``None``.
+            C: Final one-based conversation-branch index, or ``None``.
 
         Returns:
-            Serializable run result including progress and ranked candidates.
+            dict[str, Any]: Complete search result dictionary ready for JSON serialization.
         """
         progress = self.format_progress(R, L, C)
         return self.run_state.result(status=status, progress=progress).to_dict()

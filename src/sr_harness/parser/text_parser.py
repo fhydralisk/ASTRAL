@@ -14,13 +14,13 @@ _logger = getLogger(f'sr_harness.{__name__}')
 
 @BaseParser.register('text')
 class TextParser(BaseParser):
-    """Parser for tagged text tool calls."""
+    """Tool-call parser that uses tagged plain-text blocks to declare and extract tool calls."""
 
     def format_tools(self) -> str:
-        """Format tool list into a description string for LLM.
+        """Render enabled tool descriptions and tagged-text call instructions for the prompt.
 
         Returns:
-            Formatted tool description string.
+            str: Formatted tool documentation string for the language model.
         """
         lines = ["## Available Tools:", ""]
 
@@ -77,13 +77,13 @@ class TextParser(BaseParser):
         return "\n".join(lines)
 
     def parse_response(self, response: str) -> List[ToolCall]:
-        """Parse response.
+        """Parse tagged tool calls embedded in a plain-text model response.
 
         Args:
-            response: Provider response object.
+            response: Raw assistant text output.
 
         Returns:
-            List[ToolCall]: The operation result.
+            List[ToolCall]: Normalized tool calls extracted from ``response``.
         """
         tool_calls = []
         for line in response.strip().splitlines():

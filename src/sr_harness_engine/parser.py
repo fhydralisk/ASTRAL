@@ -42,9 +42,15 @@ BINARY_FUNCTIONS = {"max", "min"}
 
 
 class ExpressionParser(ast.NodeVisitor):
-    """Convert a restricted Python expression AST into engine nodes."""
+    """Restricted AST visitor that parses symbolic math strings into :class:`Expression` trees without ``eval()``."""
 
     def __init__(self, symbols: Mapping[str, Any] | None = None):
+        """Initialize the restricted expression parser.
+
+        Args:
+            symbols: Optional mapping of predefined symbol names to :class:`Expression`
+                nodes or numeric constants.
+        """
         self.symbols = {}
         for name, value in (symbols or {}).items():
             if isinstance(value, Expression):

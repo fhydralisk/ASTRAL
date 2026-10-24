@@ -25,7 +25,12 @@ _logger = logging.getLogger(f"sr_harness.{__name__}")
 
 
 class SRAgentInteractive(SRAgent):
-    """Interactive symbolic-regression agent controlled by an interaction manager."""
+    """Interactive symbolic-regression agent with live timeline events and human-in-the-loop controls.
+
+    Extends :class:`~sr_harness.agents.SRAgent` with real-time event publishing,
+    safe pause and force-interrupt boundaries, live settings and data refresh
+    between turns, configurable stop guards, and user guidance injection.
+    """
 
     DEFAULT_TOOLS = (*SRAgent.DEFAULT_TOOLS, "finish_search")
 
@@ -82,47 +87,51 @@ class SRAgentInteractive(SRAgent):
         context: AgentContext | None = None,
         skill_manager: SkillManager | None = None,
     ) -> None:
-        """初始化 SRAgentInteractive。
+        """Initialize the interactive symbolic-regression agent.
 
         Args:
-            llm_provider: LLM 提供商名称。
-            llm_model: 模型名称。
-            tools: 可用工具名列表。None 表示使用 ``SRAgent.DEFAULT_TOOLS``。
-            skills: 可供 Agent 读取的 skill 名称。None 表示使用全部 skill。
-            verbose: 是否启用详细日志。
-            tool_parser: 工具解析器类型。
-            save_path: 日志保存路径。
-            run_id: 本次运行的全局唯一标识。None 表示自动生成。
-            local_sample_size: 每轮 LLM 采样数量（K）。
-            max_refinement_depth: 最大对话轮次（L），也是搜索深度上限。
-            global_width: 独立分支数量（C）。
-            max_restart_loop: 重启次数（R）。
-            restart_top_k: 重启时注入历史最佳结果数量。
-            llm_max_tokens: 每次模型响应允许生成的最大 token 数。
-            max_workers: 并行工作进程数（0 表示不并行）。
-            validation_fraction: 验证集比例。
-            split_by: 验证集划分方式，可选 "random" 或 "ood"。
-            split_ood_variable: OOD 划分使用的变量名；随机划分时可留空。
-            split_random_state: 数据划分随机种子。
-            ranking_metric: 候选公式排序所用的指标键；默认使用 mse。
-            larger_is_better: 排序指标是否越大越好；默认按越小越好排序。
-            use_workspace: 是否使用工作区。
-            workspace_files: 初始化到工作区的文件/目录路径列表。
-            interaction_manager: 连接 Agent 与 Web、终端等交互界面的管理器。
-            force_initial_diagnostics: 是否在每个分支开始时强制执行初始诊断。
-            pause_on_truncated_response: 模型输出因长度限制截断后是否在安全边界暂停。
-            tool_free_stop_review_rounds: 无工具回复触发停机复核时发送的最近轮数；0 表示禁用。
-            stop_guard_mode: 停止许可模式：none、best_in_topk、
-                metric_threshold 或 budget_exhausted。
-            stop_guard_metric: 停止检查使用的指标；None 表示使用 ranking_metric。
-            stop_guard_threshold: metric_threshold 模式的目标指标阈值。
-            stop_guard_split: 停止检查读取的指标分割，train 或 validation。
-            stop_guard_larger_is_better: metric_threshold 模式下指标是否越大越好。
-            auto_routing: 是否根据任务复杂度在基础与强模型后端之间自动路由。
-            strong_llm_provider: 复杂任务使用的后端；默认沿用 llm_provider。
-            strong_llm_model: 复杂任务使用的模型。None 表示仅使用基础模型。
-            context: 与数据准备 Agent 共享的数据和工作区上下文。
-            skill_manager: Skill 注册表。交互式会话应将其自定义目录放在工作区中。
+            llm_provider: Base LLM provider name.
+            llm_model: Base model identifier.
+            interaction_manager: Manager coordinating pause/resume commands, branch
+                transitions, and live timeline events.
+            tools: Enabled tool names, or ``None`` to use ``DEFAULT_TOOLS``.
+            skills: Enabled skill names, or ``None`` to expose all available skills.
+            verbose: Whether to emit debug-level runtime logs.
+            tool_parser: Tool-call parser mode or :class:`~sr_harness.parser.BaseParser` instance.
+            save_path: Directory where run logs are persisted, or ``None``.
+            run_id: Explicit unique run identifier, or ``None`` to generate one.
+            local_sample_size: Number of model responses sampled per step (``K``).
+            max_refinement_depth: Maximum iterative steps per branch (``L``).
+            global_width: Number of parallel conversation branches per restart (``C``).
+            max_restart_loop: Number of outer restart loops (``R``).
+            restart_top_k: Number of top historical formulas injected into each new restart.
+            llm_max_tokens: Optional maximum output tokens per model response.
+            max_workers: Worker processes for parallel tool calls (``0`` runs serially).
+            validation_fraction: Fraction of samples reserved for validation.
+            split_by: Validation split strategy (``"random"`` or ``"ood"``).
+            split_ood_variable: Variable name used to order OOD splits.
+            split_random_state: Random seed for train/validation splitting.
+            ranking_metric: Metric name used to rank candidate formulas.
+            larger_is_better: Whether higher values of ``ranking_metric`` are better.
+            use_workspace: Whether to create a managed workspace when none is supplied.
+            workspace_files: Optional host files or directories to mount read-only.
+            force_initial_diagnostics: Whether to run opening diagnostics at ``L=1``.
+            pause_on_truncated_response: Whether to pause at the end of a turn if a
+                model response hits its output token limit.
+            tool_free_stop_review_rounds: Number of recent turns sent to a separate
+                tool-free check when the model emits no tool calls (``0`` disables).
+            stop_guard_mode: Stop-permission condition (``"none"``, ``"best_in_topk"``,
+                ``"metric_threshold"``, or ``"budget_exhausted"``).
+            stop_guard_metric: Metric inspected when ``stop_guard_mode="metric_threshold"``.
+            stop_guard_threshold: Target metric threshold for ``metric_threshold`` mode.
+            stop_guard_split: Dataset split (``"validation"`` or ``"train"``) checked by
+                the metric threshold guard.
+            stop_guard_larger_is_better: Whether the stop-guard metric is larger-is-better.
+            auto_routing: Whether to dynamically route between base and strong models.
+            strong_llm_provider: Provider for the strong model.
+            strong_llm_model: Optional stronger model identifier.
+            context: Optional shared :class:`~sr_harness.core.AgentContext`.
+            skill_manager: Optional :class:`~sr_harness.skills.SkillManager`.
         """
         super().__init__(
             llm_provider=llm_provider,
@@ -185,11 +194,11 @@ class SRAgentInteractive(SRAgent):
         self._bind_tool_cancellation()
 
     def on_buffer_messages_added(self, messages: list[Message], **coordinate: int) -> None:
-        """Publish each system or user message when it enters the buffer.
+        """Publish ``prompt_added`` timeline events whenever system or user messages enter the buffer.
 
         Args:
-            messages: Newly appended messages.
-            **coordinate: Optional R/C/L search coordinate.
+            messages: Newly appended conversation messages.
+            **coordinate: Active ``R``, ``C``, and ``L`` search coordinates.
         """
         for message in messages:
             if message.get("role") not in {"system", "user"}:
@@ -240,20 +249,24 @@ class SRAgentInteractive(SRAgent):
             raise ValueError(f"{self.stop_guard_mode} requires stop_guard_threshold")
 
     def initialize_with_context(self, context: AgentContext) -> None:
-        """Initialize from context and attach the active hard-interrupt event."""
+        """Bind tools and API to the shared context and attach the cancellation signal.
+
+        Args:
+            context: Shared runtime context for the interactive session.
+        """
         super().initialize_with_context(context)
         if hasattr(self, "interaction_manager"):
             self._bind_tool_cancellation()
 
     @contextmanager
     def prepare_tool_context(self, tool_context: AgentContext) -> Iterator[AgentContext]:
-        """Add interaction resources to the tool context for the duration of a run.
+        """Bind interactive workspace and stop-check hooks to the tool context for the duration of a run.
 
         Args:
             tool_context: Shared context used to initialize tools.
 
         Yields:
-            Context enriched with a temporary workspace manager when enabled.
+            AgentContext: Context configured with workspace access and finish-search hooks.
         """
         if not self.use_workspace:
             yield tool_context
@@ -275,16 +288,17 @@ class SRAgentInteractive(SRAgent):
     # Interactive search-boundary hooks
 
     def prepare_iteration(self, buffer: list[Message], R: int, L: int, C: int) -> str | None:
-        """Apply queued human guidance before the prompt is constructed.
+        """Handle pause requests, queued user messages, setting updates, and data refreshes before a turn.
 
         Args:
-            buffer: Conversation history buffer.
+            buffer: Current branch conversation buffer.
             R: One-based restart index.
             L: One-based refinement-step index.
             C: One-based conversation-branch index.
 
         Returns:
-            str | None: The operation result.
+            str | None: Branch transition command (``"next_c"`` or ``"next_r"``), or
+                ``None`` to continue the current branch.
         """
         self.interaction_manager.publish_event("search_position_changed", {"R": R, "C": C, "L": L})
         with self.interaction_manager.wait() as boundary_messages:
@@ -310,7 +324,14 @@ class SRAgentInteractive(SRAgent):
 
     @staticmethod
     def build_data_refresh_message(change: dict[str, Any]) -> dict[str, str]:
-        """Turn a structured data revision into guidance for the next model turn."""
+        """Format a user-role notification describing variable or role updates in ``context.data``.
+
+        Args:
+            change: Revision change dictionary returned by :meth:`refresh_data`.
+
+        Returns:
+            dict[str, str]: User-role message informing the model of the updated dataset.
+        """
         descriptions = change["variable_descriptions"]
         description_text = (
             "\nVariable descriptions:\n"
@@ -431,16 +452,21 @@ class SRAgentInteractive(SRAgent):
             self.interaction_manager.publish_event("settings_failed", {"error": str(exc)})
 
     def finish_iteration(self, buffer: list[Message], R: int, L: int, C: int) -> str | None:
-        """Keep interactive runs open and yield tool-free responses to the human.
+        """Check explicit ``finish_search`` requests or tool-free stop reviews at the end of a turn.
+
+        Unlike non-interactive runs, satisfying a stop condition pauses the agent at
+        a safe boundary rather than terminating the session thread, allowing the user
+        to inspect results and resume exploration if desired.
 
         Args:
-            buffer: Conversation history buffer.
+            buffer: Current branch conversation buffer.
             R: One-based restart index.
             L: One-based refinement-step index.
             C: One-based conversation-branch index.
 
         Returns:
-            str | None: The operation result.
+            str | None: Always ``None`` so the interactive session remains resumable;
+                pauses are coordinated through ``self.interaction_manager``.
         """
         if self._forced_interruption_pending or self.interaction_manager.is_interrupting:
             prompt = {"role": "user", "content": "用户强制中止"}
@@ -711,7 +737,18 @@ class SRAgentInteractive(SRAgent):
         L: int,
         C: int,
     ) -> list[Message]:
-        """Consume notices generated while receiving the current response."""
+        """Drain and return any follow-up user prompts generated during the current step (such as rejected stop reasons).
+
+        Args:
+            response_list: Sampled model responses for the current step.
+            results_list: Tool results aligned with ``response_list``.
+            R: One-based restart index.
+            L: One-based refinement-step index.
+            C: One-based conversation-branch index.
+
+        Returns:
+            list[Message]: Follow-up messages to append to the conversation buffer.
+        """
         messages = self._response_followup_messages
         self._response_followup_messages = []
         return messages
@@ -719,13 +756,13 @@ class SRAgentInteractive(SRAgent):
     # Initial-prompt customization hooks
 
     def create_initial_system_prompt(self, restart_records: list[CandidateRecord]) -> str:
-        """Create the interactive system prompt with capability-safe tool guidance.
+        """Create the interactive system prompt without advertising workspace-mutation tools.
 
         Args:
-            restart_records: Ranked candidates used to set the next objective.
+            restart_records: Top historical candidates from prior restarts.
 
         Returns:
-            Interactive system-prompt text.
+            str: System prompt tailored for interactive symbolic regression.
         """
         mse_goal = self._build_mse_goal(restart_records)
         return (
@@ -741,14 +778,13 @@ class SRAgentInteractive(SRAgent):
 
     @classmethod
     def normalize_system_prompt(cls, prompt: str) -> str:
-        """Remove obsolete generated guidance that advertises workspace-only tools.
+        """Strip legacy workspace-tool instructions from a saved or user-submitted system prompt.
 
         Args:
-            prompt: Stored or newly submitted system prompt.
+            prompt: Raw system prompt string.
 
         Returns:
-            System prompt without legacy workspace guidance. Capability-neutral guidance is
-            appended when the removed paragraph came from an older generated prompt.
+            str: Cleaned system prompt with capability-neutral guidance.
         """
         marker = cls._LEGACY_WORKSPACE_GUIDANCE
         start = prompt.find(marker)
@@ -769,15 +805,15 @@ class SRAgentInteractive(SRAgent):
         return "\n".join(part for part in (before, replacement, after) if part)
 
     def customize_initial_prompts(self, messages: list[Message], *, X: dict[str, Any], y: dict[str, Any]) -> list[Message]:
-        """Apply UI-provided descriptions and prompt overrides.
+        """Apply variable descriptions and user/system prompt overrides from the WebUI.
 
         Args:
-            messages: Initial system and user messages.
-            X: Feature arrays keyed by variable name.
-            y: Target arrays keyed by variable name.
+            messages: Generated initial system and user messages.
+            X: Input feature arrays keyed by variable name.
+            y: Target variable mapping ``{target_name: array}``.
 
         Returns:
-            Customized initial messages.
+            list[Message]: Messages incorporating any active UI overrides.
         """
         descriptions = getattr(self, "variable_descriptions", {})
         rows = [f"- {name}: {descriptions[name]}" for name in [*X, *y] if descriptions.get(name)]
@@ -795,16 +831,19 @@ class SRAgentInteractive(SRAgent):
     # Streaming model and tool events
 
     def request_llm(self, prompt: list[Message], R: int, L: int, C: int) -> tuple[list[APICallSample], Usage]:
-        """Request the model while publishing frontend-neutral progress events.
+        """Sample model responses while streaming live delta events to the WebUI timeline.
+
+        Handles mid-stream force-interruptions and optional pause-on-truncation policies.
 
         Args:
-            prompt: Prompt messages sent to the model.
+            prompt: Provider-ready conversation messages.
             R: One-based restart index.
             L: One-based refinement-step index.
             C: One-based conversation-branch index.
 
         Returns:
-            Parsed responses and usage, including partial responses after interruption.
+            tuple[list[APICallSample], Usage]: Completed or partially recovered
+                model responses and token/cost usage.
         """
         coord = {"R": R, "C": C, "L": L}
         self.interaction_manager.publish_event("context", {"messages": prompt, "coord": coord})
@@ -929,13 +968,13 @@ class SRAgentInteractive(SRAgent):
         return responses, usage
 
     def tool_schema(self, name: str) -> dict[str, Any]:
-        """Return the schema exposed by one initialized tool.
+        """Return the JSON parameter schema for an initialized tool by name.
 
         Args:
-            name: Registered name.
+            name: Registered tool name.
 
         Returns:
-            dict[str, Any]: The operation result.
+            dict[str, Any]: Tool parameter JSON schema, or an empty dict if not found.
         """
         return next(
             (
@@ -950,13 +989,13 @@ class SRAgentInteractive(SRAgent):
         )
 
     def execute_action(self, actions: list[ToolCall]) -> list[ToolCallResult]:
-        """Execute tools serially with safe control boundaries and UI events.
+        """Execute tool calls sequentially while publishing start/completion events and honoring force-pause.
 
         Args:
-            actions: Tool calls to execute.
+            actions: Normalized tool calls to execute.
 
         Returns:
-            Tool results in call order.
+            list[ToolCallResult]: Tool execution results in call order.
         """
         results: list[ToolCallResult | None] = [None] * len(actions)
         finish_indices = []
@@ -1031,7 +1070,17 @@ class SRAgentInteractive(SRAgent):
     def execute_tool_calls(
         self, response_list: list[APICallSample], R: int, L: int, C: int,
     ) -> list[list[ToolCallResult]]:
-        """Expose the current refinement round to the finish-search stop check."""
+        """Bind the current refinement step ``L`` and execute tool calls for all ``K`` samples.
+
+        Args:
+            response_list: Sampled model responses for the current step.
+            R: One-based restart index.
+            L: One-based refinement-step index.
+            C: One-based conversation-branch index.
+
+        Returns:
+            list[list[ToolCallResult]]: Tool results grouped by sample index.
+        """
         self._stop_check_L = L
         try:
             return super().execute_tool_calls(response_list, R=R, L=L, C=C)
@@ -1039,14 +1088,14 @@ class SRAgentInteractive(SRAgent):
             self._stop_check_L = None
 
     def collect_candidates(self, *args: Any, **kwargs: Any) -> list[CandidateRecord]:
-        """Update scientific state and publish its current ranked view.
+        """Collect candidate formulas and publish a ``topk_updated`` event to the WebUI.
 
         Args:
-            *args: Arguments forwarded to the base candidate collector.
-            **kwargs: Keyword arguments forwarded to the base candidate collector.
+            *args: Positional arguments forwarded to :meth:`SRAgent.collect_candidates`.
+            **kwargs: Keyword arguments forwarded to :meth:`SRAgent.collect_candidates`.
 
         Returns:
-            Candidates ranked under the configured metric.
+            list[CandidateRecord]: Ranked candidate records.
         """
         records = super().collect_candidates(*args, **kwargs)
         self.interaction_manager.publish_event("topk_updated", {"records": [record.display_dict() for record in records]})
@@ -1061,15 +1110,15 @@ class SRAgentInteractive(SRAgent):
         C: int,
         forced: bool = False,
     ) -> None:
-        """Persist tool calls and expose framework-enforced calls to the UI.
+        """Persist tool calls and publish timeline cards for framework-initiated diagnostics.
 
         Args:
-            tool_calls: Tool calls returned by the model.
-            results: Result records to process.
+            tool_calls: Executed tool calls.
+            results: Corresponding tool execution results.
             R: One-based restart index.
             L: One-based refinement-step index.
             C: One-based conversation-branch index.
-            forced: Whether the framework, rather than the model, initiated the call.
+            forced: Whether the calls were triggered automatically by initial diagnostics.
         """
         super().record_tool_calls(tool_calls, results, R=R, L=L, C=C, forced=forced)
         if forced:
@@ -1082,15 +1131,15 @@ class SRAgentInteractive(SRAgent):
                 })
 
     def execute_action_parallel(self, actions: list[ToolCall], max_workers: int) -> list[ToolCallResult]:
-        """Reject parallel execution in interactive mode.
+        """Disallow parallel tool execution in interactive mode.
 
         Args:
             actions: Tool calls to execute.
-            max_workers: Maximum number of parallel workers.
+            max_workers: Requested worker count.
 
         Raises:
-            NotImplementedError: Always, because interactive workspace tools are not
-                guaranteed to be read-only.
+            NotImplementedError: Always raised because interactive tool events and
+                cancellation hooks are managed serially.
         """
         raise NotImplementedError(
             "Parallel execution is not supported in interactive mode, "

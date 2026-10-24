@@ -44,13 +44,13 @@ AGENT_OPTION_NAMES = (
 
 
 def setup_parser(parser: argparse.ArgumentParser | None = None) -> argparse.ArgumentParser:
-    """Configure the command-line argument parser.
+    """Configure CLI arguments for ``sr-harness synthetic`` (synthetic equation recovery experiments).
 
     Args:
-        parser: Argument parser to configure.
+        parser: Optional existing :class:`argparse.ArgumentParser` to populate.
 
     Returns:
-        argparse.ArgumentParser: The operation result.
+        argparse.ArgumentParser: Parser configured with equation, sampling, model, and R-C-L-K flags.
     """
     if parser is None:
         parser = argparse.ArgumentParser(
@@ -165,10 +165,15 @@ def setup_parser(parser: argparse.ArgumentParser | None = None) -> argparse.Argu
 
 
 def make_dataset(args):
-    """Run the ``make dataset`` operation.
+    """Synthesize input feature arrays ``X`` and target ``y`` from ``args.equation`` with optional Gaussian noise.
 
     Args:
-        args: Parsed command-line arguments.
+        args: Parsed CLI arguments specifying ``equation``, ``features``, ``n_samples``,
+            ``x_low``, ``x_high``, ``noise_std_ratio``, and ``seed``.
+
+    Returns:
+        tuple[dict[str, np.ndarray], dict[str, np.ndarray], str]: Tuple of
+            ``(X_dict, y_dict, problem_description)``.
     """
     if '=' in args.equation:
         pass
@@ -212,13 +217,13 @@ def make_dataset(args):
 
 
 def build_agent_options(args: argparse.Namespace) -> dict:
-    """Build the validated SRAgent configuration for this run.
+    """Extract validated :class:`~sr_harness.agents.SRAgent` keyword arguments from parsed CLI flags.
 
     Args:
         args: Parsed command-line arguments.
 
     Returns:
-        dict: The operation result.
+        dict: Keyword arguments ready to initialize :class:`~sr_harness.agents.SRAgent`.
     """
     options = {name: getattr(args, name) for name in AGENT_OPTION_NAMES}
     selected_tools = SRAgent.DEFAULT_TOOLS if options["tools"] is None else options["tools"]
@@ -231,13 +236,13 @@ def build_agent_options(args: argparse.Namespace) -> dict:
 
 
 def run_experiment(args: argparse.Namespace) -> dict:
-    """Run the ``run experiment`` operation.
+    """Generate the synthetic dataset, run :class:`~sr_harness.agents.SRAgent`, and save ``result.jsonl``.
 
     Args:
         args: Parsed command-line arguments.
 
     Returns:
-        dict: The operation result.
+        dict: Complete experiment record including the search result and Pareto front.
     """
     features, target, formula, data = make_dataset(args)
 
@@ -321,13 +326,13 @@ def run_experiment(args: argparse.Namespace) -> dict:
 
 
 def main(args: argparse.Namespace) -> int:
-    """Run a synthetic SRAgent experiment from CLI arguments.
+    """Entry point for the ``sr-harness synthetic`` subcommand.
 
     Args:
         args: Parsed command-line arguments.
 
     Returns:
-        int: The operation result.
+        int: Process exit code (``0`` on success).
     """
     if args.exp_name is None:
         now = datetime.now()

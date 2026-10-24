@@ -29,13 +29,13 @@ class _CommandParser(argparse.ArgumentParser):
 
 
 def setup_parser(parser: argparse.ArgumentParser | None = None) -> argparse.ArgumentParser:
-    """Configure the command-line argument parser.
+    """Build the top-level ``sr-harness`` CLI argument parser and register all subcommands.
 
     Args:
-        parser: Argument parser to configure.
+        parser: Optional existing :class:`argparse.ArgumentParser` to populate.
 
     Returns:
-        argparse.ArgumentParser: The operation result.
+        argparse.ArgumentParser: Configured top-level argument parser.
     """
     if parser is None:
         parser = argparse.ArgumentParser(prog="sr-harness", description="SRHarness command-line interface.")
@@ -51,13 +51,13 @@ def setup_parser(parser: argparse.ArgumentParser | None = None) -> argparse.Argu
 
 
 def main(args: argparse.Namespace) -> int:
-    """Run the command and return its process exit code.
+    """Dispatch parsed CLI arguments to the selected subcommand handler.
 
     Args:
-        args: Parsed command-line arguments.
+        args: Parsed command-line arguments from :func:`setup_parser`.
 
     Returns:
-        int: The operation result.
+        int: Process exit code (``0`` on success, non-zero on failure).
     """
     module_name = COMMANDS[args.command][0]
     module = importlib.import_module(f"{__package__}.{module_name}")
@@ -65,10 +65,10 @@ def main(args: argparse.Namespace) -> int:
 
 
 def entrypoint() -> int:
-    """Run the installed command-line entry point.
+    """Parse ``sys.argv`` and execute the ``sr-harness`` command-line entry point.
 
     Returns:
-        int: The operation result.
+        int: Process exit code returned by the active subcommand.
     """
     parser = setup_parser()
     args = parser.parse_args()

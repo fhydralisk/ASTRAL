@@ -47,16 +47,16 @@ BUILTIN_EVALUATOR_CLASS_NAMES = {DefaultEvaluator.__name__, GraphEvaluator.__nam
 
 
 def evaluator_source(evaluator_id: str) -> str:
-    """Read the source of a built-in evaluator.
+    """Return the UTF-8 Python source code of a built-in evaluator by ID.
 
     Args:
-        evaluator_id: Built-in evaluator identifier.
+        evaluator_id: Built-in evaluator key (``"default"`` or ``"graph"``).
 
     Returns:
-        UTF-8 Python source for the evaluator.
+        str: Full Python source code of the built-in evaluator module.
 
     Raises:
-        ValueError: If ``evaluator_id`` is unknown.
+        ValueError: If ``evaluator_id`` is not a recognized built-in evaluator.
     """
     try:
         filename = BUILTIN_EVALUATORS[evaluator_id]["filename"]
@@ -66,7 +66,12 @@ def evaluator_source(evaluator_id: str) -> str:
 
 
 def evaluator_catalog() -> list[dict[str, str]]:
-    """Return serializable metadata and source for built-in evaluators."""
+    """Return metadata and Python source code for all built-in evaluators exposed in the WebUI.
+
+    Returns:
+        list[dict[str, str]]: Catalog entries containing ``id``, ``name``,
+            localized labels, and ``source``.
+    """
     return [
         {
             "id": evaluator_id,
@@ -80,13 +85,13 @@ def evaluator_catalog() -> list[dict[str, str]]:
 
 
 def create_builtin_evaluator(evaluator_id: str) -> DefaultEvaluator:
-    """Instantiate a built-in evaluator.
+    """Instantiate a built-in evaluator by its catalog identifier.
 
     Args:
-        evaluator_id: Built-in evaluator identifier.
+        evaluator_id: Built-in evaluator key (``"default"`` or ``"graph"``).
 
     Returns:
-        A new evaluator instance.
+        DefaultEvaluator: Fresh built-in evaluator instance.
 
     Raises:
         ValueError: If ``evaluator_id`` is unknown.
@@ -98,13 +103,13 @@ def create_builtin_evaluator(evaluator_id: str) -> DefaultEvaluator:
 
 
 def evaluator_filename(class_name: str) -> str:
-    """Convert an evaluator class name to a snake-case Python filename.
+    """Convert a ``CamelCase`` evaluator class name into a safe ``snake_case.py`` filename.
 
     Args:
-        class_name: Evaluator class name.
+        class_name: Python class name of the custom evaluator.
 
     Returns:
-        Filename ending in ``.py``.
+        str: Normalized ``snake_case.py`` filename.
     """
     stem = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", class_name)
     stem = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", stem).lower()
@@ -117,20 +122,21 @@ def load_custom_evaluator(
     *,
     workspace: Workspace | None = None,
 ) -> DefaultEvaluator:
-    """Load exactly one evaluator subclass as a virtual package module.
+    """Validate and load a custom ``DefaultEvaluator`` subclass inside a sandboxed worker process.
 
     Args:
-        source: Python source defining one ``DefaultEvaluator`` subclass.
-        file: Optional source file. Its contents are used when ``source`` is
-            omitted and its path is retained for provenance.
-        workspace: Workspace enforcing safe reads, when available.
+        source: Python source code defining exactly one ``DefaultEvaluator`` subclass.
+        file: Optional path to the ``.py`` file (read when ``source`` is omitted and
+            recorded in provenance metadata).
+        workspace: Optional :class:`~sr_harness.runtime.Workspace` enforcing safe file reads.
 
     Returns:
-        An instantiated custom evaluator with ``CUSTOM_EVALUATOR`` provenance.
+        DefaultEvaluator: Sandboxed evaluator proxy exposing the custom subclass's name
+            and provenance metadata.
 
     Raises:
-        ValueError: If the source is unsafe, invalid, or does not define exactly
-            one loadable evaluator subclass.
+        ValueError: If the source has syntax errors, defines zero or multiple
+            ``DefaultEvaluator`` subclasses, or fails sandbox validation.
     """
     origin = Path(file).expanduser() if file is not None else None
     if source is None:

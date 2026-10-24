@@ -52,7 +52,12 @@ InteractionEventKind: TypeAlias = Literal[
 
 @dataclass(frozen=True)
 class PendingMessage:
-    """A user message waiting to be inserted at an agent boundary."""
+    """Queued user guidance message waiting to be injected at the next safe agent boundary.
+
+    Attributes:
+        content: Non-empty user message text.
+        created_at: Unix timestamp when the message was queued.
+    """
 
     content: str
     created_at: float
@@ -69,10 +74,10 @@ class _CancellationSignal:
 
 
 class InteractionManager:
-    """Own the controls and observable event stream of exactly one agent.
+    """Thread-safe controller managing execution state, pause/stop commands, and timeline events for one agent.
 
     Args:
-        event_capacity: Maximum number of retained timeline events.
+        event_capacity: Maximum number of recent timeline events retained in memory.
     """
 
     _DELTA_KIND = "assistant_delta"
@@ -107,6 +112,11 @@ class InteractionManager:
     }
 
     def __init__(self, *, event_capacity: int = 1000) -> None:
+        """Initialize the interaction manager with an empty event ring buffer.
+
+        Args:
+            event_capacity: Maximum number of timeline events to keep in memory (defaults to ``1000``).
+        """
         if event_capacity < 1:
             raise ValueError("event_capacity must be positive")
         self._condition = threading.Condition(threading.RLock())
@@ -537,6 +547,11 @@ class SRInteractionManager(InteractionManager):
     _STATE_FIELDS = InteractionManager._STATE_FIELDS | {"search_transitions"}
 
     def __init__(self, *, event_capacity: int = 1000) -> None:
+        """Initialize the symbolic-regression interaction manager.
+
+        Args:
+            event_capacity: Maximum number of timeline events retained in memory (defaults to ``1000``).
+        """
         super().__init__(event_capacity=event_capacity)
         self._search_transitions: deque[Literal["next_c", "next_r"]] = deque()
 

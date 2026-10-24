@@ -7,6 +7,12 @@ from typing import TYPE_CHECKING, Dict, Tuple
 __all__ = ["setup_lazy_imports", "TYPE_CHECKING"]
 
 def setup_lazy_imports(module_name: str, import_mapping: Dict[str, Tuple[str, str]]):
+    """Install a PEP 562 ``__getattr__`` hook on ``module_name`` to defer importing heavy submodules until first access.
+
+    Args:
+        module_name: Fully qualified package name (usually ``__name__``).
+        import_mapping: Mapping from exported attribute name to ``(relative_module, attribute_name)``.
+    """
     def __getattr__(name: str):
         if name in import_mapping:
             module_path, requires = import_mapping[name]

@@ -6,6 +6,15 @@ __all__ = ["format_confusion_matrix"]
 
 
 def color_by_error_rate(text: str, error_rate: float) -> str:
+    """Wrap ``text`` in an ANSI color tag ranging from green (low error) to red (high error).
+
+    Args:
+        text: String to colorize.
+        error_rate: Error rate in ``[0.0, 1.0]``.
+
+    Returns:
+        str: Tagged string ready for :func:`tag2ansi`.
+    """
     if error_rate >= 0.30:
         return f"[red]{text}[reset]"
     if error_rate >= 0.10:
@@ -21,6 +30,16 @@ def format_confusion_matrix(
     max_size: int = 12,
     topk: int = 10,
 ) -> Optional[str]:
+    """Format a nested confusion or co-occurrence count mapping as an aligned ASCII table.
+
+    Args:
+        matrix: Nested mapping ``{row_label: {col_label: count}}``.
+        max_size: Maximum number of rows/columns to display.
+        topk: Number of top off-diagonal pairs to highlight.
+
+    Returns:
+        Optional[str]: Formatted table string, or ``None`` if ``matrix`` is empty.
+    """
     if not matrix:
         return "(no confusion matrix data)"
 

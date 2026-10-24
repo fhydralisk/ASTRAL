@@ -11,14 +11,25 @@ _logger = logging.getLogger(f"sr_harness.{__name__}")
 
 @BaseAPI.register("manual")
 class ManualAPI(BaseAPI):
-    """Interactive manual-response provider adapter."""
+    """Interactive terminal adapter that prints prompts to stdout and reads human-typed responses from stdin."""
 
     def __init__(self, model="manual", save_path=None, **kwargs):
+        """Initialize the manual terminal provider adapter.
+
+        Args:
+            model: Placeholder model name (defaults to ``"manual"``).
+            save_path: Optional directory path for saving transcripts.
+            **kwargs: Additional arguments forwarded to :class:`BaseAPI`.
+        """
         super().__init__(model=model, **kwargs)
         self.save_path = Path(save_path or tempfile.gettempdir())
 
     def cancel(self) -> str:
-        """Report that terminal input cannot be preempted through the web control."""
+        """Report that interactive stdin reads in the terminal cannot be preempted remotely from the WebUI.
+
+        Returns:
+            str: Notice explaining that terminal input must complete first.
+        """
         return (
             "ManualAPI does not support force-interrupting terminal input. "
             "The Agent will pause at its next safe boundary."
@@ -27,12 +38,25 @@ class ManualAPI(BaseAPI):
     def format_response(
         self, message: dict[str, Any], tool_calls: list[ToolCall], content: str | None = None
     ) -> APICallSample:
-        """Convert one manually entered message into one API-call sample."""
+        """Wrap manually entered terminal text and parsed tool calls into an :class:`~sr_harness.core.APICallSample`.
+
+        Args:
+            message: Dictionary containing the manually entered response content.
+            tool_calls: Tool calls parsed from the manual text.
+            content: Optional explicit text content override.
+
+        Returns:
+            APICallSample: Normalized response sample.
+        """
         return self._build_response(message, tool_calls, content)
 
     @property
     def model_list(self) -> list[str]:
-        """Return the synthetic model identifier used by the manual provider."""
+        """Return the synthetic ``["manual"]`` model list for the terminal provider.
+
+        Returns:
+            list[str]: ``["manual"]``.
+        """
         return ["manual"]
 
     def _request_samples(

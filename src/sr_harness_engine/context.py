@@ -11,11 +11,16 @@ def resolve_context(
     target: Any = None,
     num_nodes: int | None = None,
 ) -> tuple[Mapping[str, Any], Any, int | None]:
-    """Resolve values, target observations, and node metadata from a context.
+    """Extract the variable dictionary, target values, and node count from a mapping or ``AgentContext``.
 
-    A mapping is always interpreted directly as symbol values. Context objects
-    must expose a mapping-valued ``data`` field and may expose ``target`` and
-    ``num_nodes`` metadata.
+    Args:
+        context: Variable mapping ``{name: array}`` or an ``AgentContext`` object exposing ``.data``.
+        target: Optional explicit target variable name or target array.
+        num_nodes: Optional explicit node count for graph/hypergraph expressions.
+
+    Returns:
+        tuple[Mapping[str, Any], Any, int | None]: Tuple of
+            ``(variable_mapping, resolved_target_array, resolved_num_nodes)``.
     """
     if context is None:
         values: Mapping[str, Any] = {}

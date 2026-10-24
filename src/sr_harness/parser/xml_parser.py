@@ -18,10 +18,14 @@ _TOOL_CALL_PATTERN = re.compile(
 
 @BaseParser.register('xml')
 class XMLParser(BaseParser):
-    """Parser for XML-formatted tool calls."""
+    """Tool-call parser that formats tool instructions and extracts ``<tool_call>`` XML blocks from model text."""
 
     def format_tools(self) -> str:
-        """Return tool metadata and the required XML call syntax."""
+        """Render tool schemas and ``<tool_call>`` XML syntax instructions for the prompt.
+
+        Returns:
+            str: Prompt section describing enabled tools and XML invocation syntax.
+        """
         lines = ["## Available Tools:", "", "<tools>"]
         for tool in self.tools:
             metadata = tool.metadata
@@ -52,7 +56,14 @@ class XMLParser(BaseParser):
         return "\n".join(lines)
 
     def parse_response(self, response: str) -> list[ToolCall]:
-        """Parse independent ``tool_call`` elements embedded in model text."""
+        """Extract :class:`~sr_harness.core.ToolCall` objects from ``<tool_call>`` elements in ``response``.
+
+        Args:
+            response: Raw assistant text output containing zero or more ``<tool_call>`` blocks.
+
+        Returns:
+            list[ToolCall]: Normalized tool calls parsed from ``response``.
+        """
         tool_calls = []
         for raw in _TOOL_CALL_PATTERN.findall(response):
             try:

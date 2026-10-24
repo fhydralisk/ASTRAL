@@ -17,7 +17,14 @@ Mode = Literal["time", "count", "pace", "speed"]
 
 
 def humanize_time(time):
-    """Convert time in seconds to a human-readable string."""
+    """Format a duration in seconds with human-readable units (``ns``, ``μs``, ``ms``, ``s``, ``min``, ``h``, ``d``).
+
+    Args:
+        time: Duration in seconds.
+
+    Returns:
+        str: Human-readable duration string.
+    """
     if time == 0: return "0 s"
     unit_scale = pd.Series({ # 需要保证从小到大排列
         'μs': 1e-6, 'ms': 1e-3, 's': 1e0, 'min': 60, 'h': 3600, 'day': 86400
@@ -28,7 +35,15 @@ def humanize_time(time):
 
 
 def humanize_count(count, unit="iter"):
-    """Convert count to a human-readable string."""
+    """Format a numeric count with SI prefixes (``k``, ``M``, ``G``, ``T``) and unit label.
+
+    Args:
+        count: Numeric count value.
+        unit: Unit suffix appended to the formatted number.
+
+    Returns:
+        str: Formatted count string.
+    """
     if count == 0: return f"0 {unit}"
     unit_scale = pd.Series({ # 需要保证从小到大排列
         f'n{unit}': 1e-9, f'μ{unit}': 1e-6, f'm{unit}': 1e-3, 
@@ -40,7 +55,15 @@ def humanize_count(count, unit="iter"):
 
 
 def humanize_pace(pace, unit="iter"):
-    """Convert pace (second/iter) to a human-readable string."""
+    """Format an average pace (seconds per unit) with human-readable time units.
+
+    Args:
+        pace: Duration in seconds per unit.
+        unit: Unit denominator label (e.g., ``"iter"``).
+
+    Returns:
+        str: Formatted pace string such as ``"12.3 ms/iter"``.
+    """
     if pace == 0: return f"0 s/{unit}"
     unit_scale = pd.Series({ # 需要保证从小到大排列
         f'μs/{unit}': 1e-6, f'ms/{unit}': 1e-3, f's/{unit}': 1e0, 
@@ -52,7 +75,15 @@ def humanize_pace(pace, unit="iter"):
 
 
 def humanize_speed(speed, unit="iter"):
-    """Convert speed (iter/second) to a human-readable string."""
+    """Format a throughput rate (units per second) with SI prefixes.
+
+    Args:
+        speed: Rate in units per second.
+        unit: Unit numerator label (e.g., ``"iter"``).
+
+    Returns:
+        str: Formatted speed string such as ``"81.3 iter/s"``.
+    """
     if speed == 0: return f"0 {unit}/s"
     unit_scale = pd.Series({ # 需要保证从小到大排列
         f'{unit}/day': 1/86400, f'{unit}/h': 1/3600, f'{unit}/min': 1/60, f'{unit}/s': 1,
@@ -64,26 +95,50 @@ def humanize_speed(speed, unit="iter"):
 
 
 class Timer:
+    """Accumulator that tracks elapsed wall-clock time and iteration counts to report pace or throughput."""
     def __init__(self, unit="iter"):
-        """ 计时器 """
+        """Initialize the timer with zero elapsed time and zero count.
+
+        Args:
+            unit: Name of the counted item (defaults to ``"iter"``).
+        """
         self._count = 0
         self._time = 0
         self.unit = unit
         self.last_add_time = time.time()
 
     def add(self, n=1, by: Literal["increment", "absolute"]="increment"):
+        """Record elapsed time since the previous ``add`` call and update the item counter.
+
+        Args:
+            n: Count increment (when ``by="increment"``) or new total count (when ``by="absolute"``).
+            by: Whether ``n`` is an incremental delta (``"increment"``) or an absolute total (``"absolute"``).
+        """
         if by == "increment": self._count += n
         elif by == "absolute": self._count = n
         self._time += (now := time.time()) - self.last_add_time
         self.last_add_time = now
 
     def clear(self, reset_last_add_time=False):
+        """Reset accumulated time and count to zero.
+
+        Args:
+            reset_last_add_time: If ``True``, also reset the reference timestamp to ``time.time()``.
+        """
         self._count = 0
         self._time = 0
         if reset_last_add_time:
             self.last_add_time = time.time()
     
     def to_str(self, mode: Mode = 'pace'):
+        """Format the accumulated time and count/pace/speed as a human-readable string.
+
+        Args:
+            mode: Metric to display alongside total time (``"pace"``, ``"speed"``, ``"count"``, or ``None``).
+
+        Returns:
+            str: Formatted timing summary.
+        """
         if mode == 'pace': return humanize_pace(self.pace, unit=self.unit)
         elif mode == "speed": return humanize_speed(self.speed, unit=self.unit)
         elif mode == "count": return humanize_count(self.count, unit=self.unit)
@@ -101,19 +156,40 @@ class Timer:
         return self.__str__()
     
     @property
-    def time(self): return self._time
+    def time(self):
+        """Return total accumulated time in seconds."""
+        return self._time
     @property
-    def count(self): return self._count
+    def count(self):
+        """Return total accumulated item count."""
+        return self._count
     @property
-    def pace(self): return self.time / self.count if self.count != 0 else 0
+    def pace(self):
+        """Return average seconds per item (``time / count``)."""
+        return self.time / self.count if self.count != 0 else 0
     @property
-    def speed(self): return self.count / self.time if self.time != 0 else 0
-    def time_str(self): return humanize_time(self.time)
-    def count_str(self): return humanize_count(self.count, unit=self.unit)
-    def pace_str(self): return humanize_pace(self.pace, unit=self.unit)
-    def speed_str(self): return humanize_speed(self.speed, unit=self.unit)
+    def speed(self):
+        """Return average items per second (``count / time``)."""
+        return self.count / self.time if self.time != 0 else 0
+    def time_str(self):
+        """Return total accumulated time formatted with human-readable units."""
+        return humanize_time(self.time)
+    def count_str(self):
+        """Return total accumulated count formatted with SI prefixes."""
+        return humanize_count(self.count, unit=self.unit)
+    def pace_str(self):
+        """Return average pace formatted with human-readable time units per item."""
+        return humanize_pace(self.pace, unit=self.unit)
+    def speed_str(self):
+        """Return average throughput formatted with SI prefixes per second."""
+        return humanize_speed(self.speed, unit=self.unit)
 
     def to_dict(self):
+        """Serialize the timer state to a dictionary.
+
+        Returns:
+            dict[str, Any]: Dictionary containing ``unit``, ``time``, and ``count``.
+        """
         return {
             '_count': self._count,
             '_time': self._time,
@@ -122,6 +198,14 @@ class Timer:
 
     @classmethod
     def from_dict(cls, dict):
+        """Restore a :class:`Timer` instance from a dictionary produced by :meth:`to_dict`.
+
+        Args:
+            dict: Serialized timer dictionary.
+
+        Returns:
+            Timer: Reconstructed timer instance.
+        """
         timer = cls(unit=dict['unit'])
         timer._count = dict['_count']
         timer._time = dict['_time']
@@ -129,13 +213,25 @@ class Timer:
 
 
 class NamedTimer(Timer):
+    """Multi-category timer that attributes elapsed time and counts to named sub-operations."""
     def __init__(self, unit="iter"):
-        """ 对 Timer 的扩展, 支持将 count 和 time 统计到不同的名称下 """
+        """Initialize the named timer with empty per-category counters.
+
+        Args:
+            unit: Name of the counted item (defaults to ``"iter"``).
+        """
         super().__init__(unit=unit)
         self._count = {}
         self._time = {}
 
     def add(self, name, n=1, by: Literal["increment", "absolute"]="increment"):
+        """Record elapsed time and count under category ``name``.
+
+        Args:
+            name: Sub-operation category label.
+            n: Count increment or absolute count value.
+            by: Whether ``n`` is an ``"increment"`` or ``"absolute"`` count.
+        """
         if name and name not in self.names:
             self._time[name] = self._count[name] = 0
         if name is None: pass
@@ -145,6 +241,11 @@ class NamedTimer(Timer):
         self.last_add_time = now
 
     def clear(self, reset_last_add_time=False):
+        """Reset all recorded category times and counts.
+
+        Args:
+            reset_last_add_time: If ``True``, reset the reference timestamp to ``time.time()``.
+        """
         self._count = {}
         self._time = {}
         if reset_last_add_time:
@@ -156,6 +257,16 @@ class NamedTimer(Timer):
             mode_of_detail: Mode|None='pace', 
             mode_of_percent: Literal['by_time', 'by_count']|None='by_time',
         ):
+        """Format total time and a breakdown of per-category times/percentages sorted by share.
+
+        Args:
+            mode: Summary mode for the total timer (``"pace"``, ``"speed"``, ``"count"``, or ``None``).
+            mode_of_detail: Summary mode for each category entry.
+            mode_of_percent: Whether category percentages are computed ``"by_time"`` or ``"by_count"``.
+
+        Returns:
+            str: Formatted timing breakdown string.
+        """
         if mode == "time": total = humanize_time(self.time)
         elif mode == "count": total = humanize_count(self.count, unit=self.unit)
         elif mode == "pace": total = humanize_pace(self.pace, unit=self.unit)
@@ -188,32 +299,94 @@ class NamedTimer(Timer):
         return f'{total}{detail_str}'
 
     @property
-    def names(self): return list(self._time.keys())
+    def names(self):
+        """Return the list of recorded category names."""
+        return list(self._time.keys())
     @property
-    def time(self): return sum(self._time.values())
+    def time(self):
+        """Return total elapsed time summed across all categories."""
+        return sum(self._time.values())
     @property
-    def count(self): return sum(self._count.values())
-    def get_named_time(self, name): return self._time[name]
-    def get_named_count(self, name): return self._count[name]
-    def get_named_pace(self, name): return self._time[name] / self._count[name] if self._count[name] != 0 else 0
-    def get_named_speed(self, name): return self._count[name] / self._time[name] if self._time[name] != 0 else 0
+    def count(self):
+        """Return total count summed across all categories."""
+        return sum(self._count.values())
+    def get_named_time(self, name):
+        """Return elapsed seconds recorded for category ``name``.
+
+        Args:
+            name: Category name to query.
+
+        Returns:
+            float: Accumulated time in seconds for ``name``.
+        """
+        return self._time[name]
+    def get_named_count(self, name):
+        """Return the accumulated item count for category ``name``.
+
+        Args:
+            name: Category name to query.
+
+        Returns:
+            float: Accumulated count for ``name``.
+        """
+        return self._count[name]
+    def get_named_pace(self, name):
+        """Return average seconds per item for category ``name``.
+
+        Args:
+            name: Category name to query.
+
+        Returns:
+            float: Pace in seconds per item for ``name``.
+        """
+        return self._time[name] / self._count[name] if self._count[name] != 0 else 0
+    def get_named_speed(self, name):
+        """Return average items per second for category ``name``.
+
+        Args:
+            name: Category name to query.
+
+        Returns:
+            float: Throughput in items per second for ``name``.
+        """
+        return self._count[name] / self._time[name] if self._time[name] != 0 else 0
     @property
-    def named_time(self): return {k: self.get_named_time(k) for k in self.names}
+    def named_time(self):
+        """Return a dictionary mapping each category name to its accumulated seconds."""
+        return {k: self.get_named_time(k) for k in self.names}
     @property
-    def named_count(self): return {k: self.get_named_count(k) for k in self.names}
+    def named_count(self):
+        """Return a dictionary mapping each category name to its accumulated count."""
+        return {k: self.get_named_count(k) for k in self.names}
     @property
-    def named_pace(self): return {k: self.get_named_pace(k) for k in self.names}
+    def named_pace(self):
+        """Return a dictionary mapping each category name to its average pace."""
+        return {k: self.get_named_pace(k) for k in self.names}
     @property
-    def named_speed(self): return {k: self.get_named_speed(k) for k in self.names}
+    def named_speed(self):
+        """Return a dictionary mapping each category name to its average throughput."""
+        return {k: self.get_named_speed(k) for k in self.names}
 
 
 class ParallelTimer(Timer):
+    """Timer that tracks separate counts per named category against a single shared wall-clock duration."""
     def __init__(self, unit="iter"):
-        """ 对 Timer 的扩展, 支持将 count 统计到不同的名称下, 但 time 在各名称间共享 """
+        """Initialize the parallel counter timer.
+
+        Args:
+            unit: Name of the counted item (defaults to ``"iter"``).
+        """
         super().__init__(unit=unit)
         self._count = {}
 
     def add(self, name, n=1, by: Literal["increment", "absolute"]="increment"):
+        """Update the shared wall-clock time and record ``n`` items under category ``name``.
+
+        Args:
+            name: Category label.
+            n: Count increment or absolute count value.
+            by: Whether ``n`` is an ``"increment"`` or ``"absolute"`` count.
+        """
         if name and name not in self.names:
             self._count[name] = 0
         if name is None: pass
@@ -223,6 +396,11 @@ class ParallelTimer(Timer):
         self.last_add_time = now
 
     def clear(self, reset_last_add_time=False):
+        """Reset shared elapsed time and all per-category counts.
+
+        Args:
+            reset_last_add_time: If ``True``, reset the reference timestamp to ``time.time()``.
+        """
         self._count = {}
         self._time = 0
         if reset_last_add_time:
@@ -234,6 +412,16 @@ class ParallelTimer(Timer):
             mode_of_detail: Mode|None='pace', 
             mode_of_percent: Literal['by_time', 'by_count']|None='by_time'
         ):
+        """Format total count/rate and a per-category breakdown.
+
+        Args:
+            mode: Summary mode for the overall total.
+            mode_of_detail: Summary mode for each category entry.
+            mode_of_percent: Whether percentages are computed ``"by_time"`` or ``"by_count"``.
+
+        Returns:
+            str: Formatted breakdown string.
+        """
         if mode == "time": total = humanize_time(self.time)
         elif mode == "count": total = humanize_count(self.count, unit=self.unit)
         elif mode == "pace": total = humanize_pace(self.pace, unit=self.unit)
@@ -266,18 +454,66 @@ class ParallelTimer(Timer):
         return f'{total}{detail_str}'
 
     @property
-    def names(self): return list(self._count.keys())
+    def names(self):
+        """Return the list of recorded category names."""
+        return list(self._count.keys())
     @property
-    def count(self): return sum(self._count.values())
-    def get_named_time(self, name): return self._time
-    def get_named_count(self, name): return self._count[name]
-    def get_named_pace(self, name): return self._time / self._count[name] if self._count[name] != 0 else 0
-    def get_named_speed(self, name): return self._count[name] / self._time if self._time != 0 else 0
+    def count(self):
+        """Return the total count summed across all categories."""
+        return sum(self._count.values())
+    def get_named_time(self, name):
+        """Return the shared elapsed wall-clock time for category ``name``.
+
+        Args:
+            name: Category name to query.
+
+        Returns:
+            float: Shared elapsed time in seconds.
+        """
+        return self._time
+    def get_named_count(self, name):
+        """Return the accumulated count for category ``name``.
+
+        Args:
+            name: Category name to query.
+
+        Returns:
+            float: Count recorded for ``name``.
+        """
+        return self._count[name]
+    def get_named_pace(self, name):
+        """Return shared elapsed time divided by the count for category ``name``.
+
+        Args:
+            name: Category name to query.
+
+        Returns:
+            float: Effective pace for ``name``.
+        """
+        return self._time / self._count[name] if self._count[name] != 0 else 0
+    def get_named_speed(self, name):
+        """Return the count for category ``name`` divided by shared elapsed time.
+
+        Args:
+            name: Category name to query.
+
+        Returns:
+            float: Effective throughput for ``name``.
+        """
+        return self._count[name] / self._time if self._time != 0 else 0
     @property
-    def named_time(self): return {k: self.get_named_time(k) for k in self.names}
+    def named_time(self):
+        """Return a dictionary mapping each category name to the shared elapsed time."""
+        return {k: self.get_named_time(k) for k in self.names}
     @property
-    def named_count(self): return {k: self.get_named_count(k) for k in self.names}
+    def named_count(self):
+        """Return a dictionary mapping each category name to its count."""
+        return {k: self.get_named_count(k) for k in self.names}
     @property
-    def named_pace(self): return {k: self.get_named_pace(k) for k in self.names}
+    def named_pace(self):
+        """Return a dictionary mapping each category name to its effective pace."""
+        return {k: self.get_named_pace(k) for k in self.names}
     @property
-    def named_speed(self): return {k: self.get_named_speed(k) for k in self.names}
+    def named_speed(self):
+        """Return a dictionary mapping each category name to its effective throughput."""
+        return {k: self.get_named_speed(k) for k in self.names}

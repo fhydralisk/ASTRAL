@@ -13,13 +13,16 @@ from sr_harness.tools import BaseTool
 
 
 def load_json_text(text: str) -> dict[str, Any]:
-    """Load json text.
+    """Parse a JSON object string from the CLI and verify that the root value is a ``dict``.
 
     Args:
-        text: Text to process.
+        text: Raw JSON string representing tool parameters.
 
     Returns:
-        dict[str, Any]: The operation result.
+        dict[str, Any]: Parsed parameter dictionary.
+
+    Raises:
+        ValueError: If ``text`` is not valid JSON or does not decode to a dictionary.
     """
     value = json.loads(text)
     if not isinstance(value, dict):
@@ -28,14 +31,17 @@ def load_json_text(text: str) -> dict[str, Any]:
 
 
 def load_params(params: str | None = None, params_file: str | None = None) -> dict[str, Any]:
-    """Load params.
+    """Load and merge tool invocation parameters from ``--params-file`` and/or ``--params``.
+
+    When both are provided, ``--params-file`` is loaded first and keys in ``--params``
+    override matching keys from the file.
 
     Args:
-        params: The params value.
-        params_file: The params file value.
+        params: Optional inline JSON object string.
+        params_file: Optional path to a JSON file containing tool parameters.
 
     Returns:
-        dict[str, Any]: The operation result.
+        dict[str, Any]: Merged tool parameter dictionary.
     """
     loaded: dict[str, Any] = {}
     if params_file:
@@ -46,13 +52,13 @@ def load_params(params: str | None = None, params_file: str | None = None) -> di
 
 
 def decode_npz_value(value: np.ndarray) -> Any:
-    """Run the ``decode npz value`` operation.
+    """Unpack a scalar or array entry loaded from a ``.npz`` archive into a native Python or NumPy value.
 
     Args:
-        value: Input value.
+        value: Array entry read from :func:`numpy.load`.
 
     Returns:
-        Any: The operation result.
+        Any: Unwrapped Python scalar, dictionary, or NumPy array.
     """
     if value.shape == ():
         return value.item()
@@ -60,14 +66,14 @@ def decode_npz_value(value: np.ndarray) -> Any:
 
 
 def load_context(path: str | Path, target: str | None = None) -> AgentContext:
-    """Load a BaseTool context from context.npz.
+    """Construct an :class:`~sr_harness.core.AgentContext` from a ``context.npz`` archive for standalone tool execution.
 
     Args:
-        path: Filesystem path.
-        target: Target name or target values.
+        path: Path to the ``.npz`` archive containing dataset arrays and optional metadata.
+        target: Optional target variable name overriding the archive's stored target.
 
     Returns:
-        dict[str, Any]: The operation result.
+        AgentContext: Populated context ready for tool initialization.
     """
     path = Path(path)
     if not path.exists():
@@ -108,13 +114,13 @@ def load_context(path: str | Path, target: str | None = None) -> AgentContext:
 
 
 def setup_parser(parser: argparse.ArgumentParser | None = None) -> argparse.ArgumentParser:
-    """Configure the command-line argument parser.
+    """Configure CLI arguments for ``sr-harness tool`` (``list``, ``schema``, and ``call``).
 
     Args:
-        parser: Argument parser to configure.
+        parser: Optional existing :class:`argparse.ArgumentParser` to populate.
 
     Returns:
-        argparse.ArgumentParser: The operation result.
+        argparse.ArgumentParser: Configured argument parser.
     """
     if parser is None:
         parser = argparse.ArgumentParser(
@@ -147,25 +153,28 @@ def setup_parser(parser: argparse.ArgumentParser | None = None) -> argparse.Argu
 
 
 def tool_class(name: str) -> type[BaseTool]:
-    """Run the ``tool class`` operation.
+    """Look up a registered :class:`~sr_harness.tools.BaseTool` subclass by name.
 
     Args:
-        name: Registered name.
+        name: Registered tool name.
 
     Returns:
-        type[BaseTool]: The operation result.
+        type[BaseTool]: Matching tool class.
+
+    Raises:
+        ValueError: If ``name`` is not registered.
     """
     return BaseTool.create(name, create_instance=False)
 
 
 def main(args: argparse.Namespace) -> int:
-    """Run the command and return its process exit code.
+    """Execute the ``sr-harness tool`` subcommand (``list``, ``schema``, or ``call``).
 
     Args:
         args: Parsed command-line arguments.
 
     Returns:
-        int: The operation result.
+        int: Process exit code (``0`` on success, ``1`` when a called tool returns ``ok=False``).
     """
     if args.tool_command == "list":
         if args.json:

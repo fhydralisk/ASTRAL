@@ -11,9 +11,10 @@ _logger = logging.getLogger(f"sr_harness.{__name__}")
 
 
 class AutoGPU:
-    """Automatically choose a GPU with enough free memory"""
+    """Helper that queries ``nvidia-smi`` to select a GPU with sufficient free VRAM."""
 
     def __init__(self):
+        """Initialize the GPU memory monitor and query initial free VRAM across available GPUs."""
         visible_devices = os.getenv("CUDA_VISIBLE_DEVICES")
         if visible_devices:
             self.gpu_list = list(map(int, visible_devices.split(",")))
@@ -24,15 +25,20 @@ class AutoGPU:
         }  # cuda:i -> memory of j-th GPU
 
     def update_free_memory(self):
+        """Query ``nvidia-smi`` and refresh the cached free memory (in MiB) for each GPU."""
         for i, j in enumerate(self.gpu_list):
             self.free_memory[i] = self.query_free_memory(j)
 
     def choice_gpu(self, memory_MB, interval=600, force=True):
-        """Choose a GPU with enough free memory
-        Arguments:
-        - memory_MB: int, the required memory in MB
-        - interval: int, the interval (in second) to check free memory
-        - force: bool, whether to wait until a GPU is available
+        """Select a GPU with at least ``memory_MB`` MiB of free VRAM, optionally polling until one becomes available.
+
+        Args:
+            memory_MB: Required free GPU memory in MiB.
+            interval: Polling interval in seconds when waiting for a GPU to free up.
+            force: Whether to fall back to CPU or wait when ``nvidia-smi`` is unavailable.
+
+        Returns:
+            int: Selected CUDA device index.
         """
         waiting = False
         while True:
@@ -71,6 +77,14 @@ class AutoGPU:
                     return "cpu"
 
     def query_free_memory(self, gpu_id):
+        """Return the currently cached free memory (in MiB) for ``gpu_id``.
+
+        Args:
+            gpu_id: Zero-based GPU index.
+
+        Returns:
+            int: Free memory in MiB.
+        """
         try:
             cmd = f"nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits -i {gpu_id}"
             return int(

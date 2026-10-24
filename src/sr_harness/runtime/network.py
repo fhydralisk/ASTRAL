@@ -7,16 +7,15 @@ from urllib.parse import quote, urlsplit, urlunsplit
 
 
 def routed_proxy(user_proxy: str, egress_proxy: str) -> str:
-    """Route an optional user proxy through the deployment egress gateway.
+    """Combine a user-configured upstream proxy with an optional deployment egress gateway.
 
     Args:
-        user_proxy: User-selected upstream HTTP, HTTPS, or SOCKS proxy.
-        egress_proxy: Deployment-managed HTTP egress gateway.
+        user_proxy: User-specified HTTP, HTTPS, or SOCKS proxy URL (or empty string).
+        egress_proxy: Deployment-managed HTTP egress gateway URL (or empty string).
 
     Returns:
-        A proxy URL suitable for ordinary HTTP clients. When both values are
-        present, the upstream URL is encoded as gateway credentials so the
-        gateway can establish the second proxy hop.
+        str: Effective proxy URL for HTTP clients (encoding ``user_proxy`` in
+            gateway credentials when both are active).
     """
     user_proxy = user_proxy.strip()
     egress_proxy = egress_proxy.strip()
@@ -42,7 +41,16 @@ def routed_proxy(user_proxy: str, egress_proxy: str) -> str:
 def proxy_environment(
     environment: Mapping[str, str], *, user_proxy: str, egress_proxy: str,
 ) -> dict[str, str]:
-    """Return a session environment containing the effective outbound proxy."""
+    """Build a copy of ``environment`` with ``HTTP_PROXY`` and ``HTTPS_PROXY`` set to the effective outbound proxy.
+
+    Args:
+        environment: Base environment variable mapping.
+        user_proxy: User-configured proxy URL (or empty string).
+        egress_proxy: Deployment egress gateway URL (or empty string).
+
+    Returns:
+        dict[str, str]: Updated environment dictionary.
+    """
     result = dict(environment)
     for name in ("http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY"):
         result.pop(name, None)

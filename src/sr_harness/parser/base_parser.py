@@ -16,16 +16,22 @@ _logger = getLogger(f'sr_harness.{__name__}')
 
 
 class BaseParser(ABC, FactoryMixin):
-    """Base class for model tool-call parsers."""
+    """Abstract base class that translates tool declarations, calls, and results between models and tools.
+
+    Normalizes provider-specific tool calling formats (native OpenAI function
+    calling, JSON blocks, XML tags, or tagged text) into uniform
+    :class:`~sr_harness.core.ToolCall` and :class:`~sr_harness.core.ToolCallResult`
+    objects for the agent loop.
+    """
 
     native_tool_calls = False
 
     def __init__(self, tool_list: list[BaseTool] | None = None) -> None:
-        """初始化工具解析器。
+        """Initialize the tool-call parser with the active tool instances for the run.
 
         Args:
-            tool_list: Bound tool instances. ``None`` and an empty list both
-                expose no tools.
+            tool_list: Initialized :class:`~sr_harness.tools.BaseTool` instances to expose,
+                or ``None`` / ``[]`` when no tools are enabled.
         """
         self.tools = list(tool_list or [])
         if invalid := [tool for tool in self.tools if not isinstance(tool, BaseTool)]:
@@ -44,34 +50,34 @@ class BaseParser(ABC, FactoryMixin):
 
     @abstractmethod
     def format_tools(self) -> str | List[Dict[str, Any]]:
-        """Format tools.
+        """Format enabled tool names, descriptions, and parameter schemas for the model.
 
         Returns:
-            str: The operation result.
+            str | List[Dict[str, Any]]: Prompt text block or list of native function-calling schemas.
         """
         pass
 
     @abstractmethod
     def parse_response(self, response: Any) -> List[ToolCall]:
-        """Parse response.
+        """Extract zero or more normalized :class:`~sr_harness.core.ToolCall` objects from a model response.
 
         Args:
-            response: Provider response object.
+            response: Raw model output text or provider message structure.
 
         Returns:
-            List[ToolCall]: The operation result.
+            List[ToolCall]: Parsed tool calls in emission order (empty when no tool was called).
         """
         pass
 
     def format_tool_result_messages(self, tool_calls: List[ToolCall], results: List[ToolCallResult]) -> List[Dict[str, Any]]:
-        """Format tool result messages.
+        """Format tool execution results as conversation messages for the next model turn.
 
         Args:
-            tool_calls: Tool calls returned by the model.
-            results: Result records to process.
+            tool_calls: Tool calls that were executed.
+            results: Corresponding :class:`~sr_harness.core.ToolCallResult` objects.
 
         Returns:
-            List[Dict[str, Any]]: The operation result.
+            List[Dict[str, Any]]: Conversation messages ready to append to the prompt buffer.
         """
         lines = []
         for tool_call, result in zip(tool_calls, results):

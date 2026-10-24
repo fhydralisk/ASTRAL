@@ -21,10 +21,18 @@ GITHUB_HEADER = {
 
 
 class ModelStoreError(RuntimeError):
-    """Raised when a model store operation fails."""
+    """Exception raised when downloading or uploading a model artifact from GitHub Releases fails."""
 
 
 def get_default(key: Literal["repo", "release_tag", "token"]) -> Optional[str]:
+    """Read a default GitHub Releases repository, tag, or token from environment variables.
+
+    Args:
+        key: Configuration key to look up (``"repo"``, ``"release_tag"``, or ``"token"``).
+
+    Returns:
+        Optional[str]: Resolved value, or ``None`` if unset.
+    """
     if key == "repo":
         return os.getenv("SR_AGENT_GITHUB_REPO", DEFAULT_GITHUB_REPO)
     elif key == "release_tag":
@@ -36,7 +44,18 @@ def get_default(key: Literal["repo", "release_tag", "token"]) -> Optional[str]:
 
 
 def download_model(name: str, checkpoint: str, repo: str = None, release_tag: str = None, token: str = None) -> Path:
-    """ 从 Github 的 {repo} 仓库的 {release_tag} 版本中下载名为 {name} 的模型文件，并保存到本地路径 {checkpoint}。 """
+    """Download a named model checkpoint asset from a GitHub Release to ``checkpoint``.
+
+    Args:
+        name: Asset filename in the GitHub Release.
+        checkpoint: Local destination file path.
+        repo: GitHub ``owner/repo`` slug (defaults to ``SR_HARNESS_MODEL_REPO``).
+        release_tag: GitHub Release tag (defaults to ``SR_HARNESS_MODEL_TAG``).
+        token: Optional GitHub personal access token for private repositories.
+
+    Returns:
+        Path: Local path to the downloaded checkpoint file.
+    """
     if repo is None: repo = get_default("repo")
     if release_tag is None: release_tag = get_default("release_tag")
     if token is None: token = get_default("token")
@@ -63,7 +82,18 @@ def download_model(name: str, checkpoint: str, repo: str = None, release_tag: st
 
 
 def upload_model(name: str, checkpoint: str, repo: str = None, release_tag: str = None, token: str = None) -> dict:
-    """ 从本地路径 {checkpoint} 上传模型文件到 Github 的 {repo} 仓库的 {release_tag} 版本，命名为 {name}。 """
+    """Upload a local checkpoint file as a release asset to a GitHub Release.
+
+    Args:
+        name: Target asset filename in the GitHub Release.
+        checkpoint: Local file path to upload.
+        repo: GitHub ``owner/repo`` slug.
+        release_tag: GitHub Release tag.
+        token: GitHub personal access token with release write permissions.
+
+    Returns:
+        dict: GitHub API JSON response describing the uploaded asset.
+    """
     if repo is None: repo = get_default("repo")
     if release_tag is None: release_tag = get_default("release_tag")
     if token is None: token = get_default("token")
@@ -86,6 +116,17 @@ def upload_model(name: str, checkpoint: str, repo: str = None, release_tag: str 
 
 
 def get_download_url(repo: str, release_tag: str, name: str, token: str = None) -> str:
+    """Look up the download URL for asset ``name`` in a GitHub Release.
+
+    Args:
+        repo: GitHub ``owner/repo`` slug.
+        release_tag: GitHub Release tag.
+        name: Asset filename to locate.
+        token: Optional GitHub token for private repositories.
+
+    Returns:
+        str: Direct download URL for the asset.
+    """
     url = f"https://api.github.com/repos/{repo}/releases/tags/{release_tag}"
     headers = GITHUB_HEADER | {"Authorization": f"Bearer {token}"}
     with requests.get(url, headers=headers, timeout=60) as response:
@@ -99,6 +140,17 @@ def get_download_url(repo: str, release_tag: str, name: str, token: str = None) 
 
 
 def get_upload_url(repo: str, release_tag: str, name: str, token: str) -> str:
+    """Resolve the asset upload URL for a GitHub Release, deleting any existing asset with the same ``name``.
+
+    Args:
+        repo: GitHub ``owner/repo`` slug.
+        release_tag: GitHub Release tag.
+        name: Asset filename to upload.
+        token: GitHub personal access token.
+
+    Returns:
+        str: Upload endpoint URL for the release.
+    """
     release = None
     headers = GITHUB_HEADER | {"Authorization": f"Bearer {token}"}
 
@@ -136,6 +188,12 @@ def get_upload_url(repo: str, release_tag: str, name: str, token: str) -> str:
 
 
 def raise_for_status(response: requests.Response, action: str) -> None:
+    """Raise :class:`ModelStoreError` with response details if ``response`` indicates an HTTP error.
+
+    Args:
+        response: :class:`requests.Response` returned by the GitHub API.
+        action: Short description of the attempted operation for error reporting.
+    """
     if response.ok:
         return
     try:

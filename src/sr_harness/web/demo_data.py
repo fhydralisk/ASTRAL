@@ -78,7 +78,19 @@ def _kuramoto_sample(rng: np.random.Generator) -> tuple[dict[str, np.ndarray], d
 
 
 def build_demo(kind: str) -> tuple[dict[str, np.ndarray], dict[str, Any], str]:
-    """Return arrays, a context.data manifest, and the suggested target variable."""
+    """Generate one of the four built-in sample datasets for the WebUI workbench.
+
+    Args:
+        kind: Sample dataset identifier (``"polynomial"``, ``"grouped_parameters"``,
+            ``"driven_ode"``, or ``"kuramoto_ba"``).
+
+    Returns:
+        tuple[dict[str, np.ndarray], dict[str, Any], str]: Tuple of
+            ``(arrays_by_name, manifest_dict, suggested_target_name)``.
+
+    Raises:
+        ValueError: If ``kind`` is not a supported sample dataset identifier.
+    """
     if kind not in DEMO_KINDS:
         raise ValueError(f"Unknown sample dataset: {kind}")
     rng = np.random.default_rng(42)

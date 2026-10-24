@@ -8,7 +8,7 @@ from typing import Any, Callable, Mapping
 
 
 class RemoteModelCatalog:
-    """Fetch and briefly cache one provider's remote model catalog."""
+    """Thread-safe helper that fetches and caches a provider's remote model list for a short TTL."""
 
     def __init__(
         self,
@@ -16,6 +16,12 @@ class RemoteModelCatalog:
         *,
         cache_seconds: float = 300.0,
     ) -> None:
+        """Initialize the remote model catalog cache.
+
+        Args:
+            http_client: Callable accepting a proxy URL and returning an HTTP client context manager.
+            cache_seconds: Cache time-to-live in seconds (defaults to ``300.0``).
+        """
         self._http_client = http_client
         self._cache_seconds = cache_seconds
         self._models: list[str] | None = None
@@ -30,7 +36,20 @@ class RemoteModelCatalog:
         params: Mapping[str, str] | None = None,
         include: Callable[[dict[str, Any]], bool] | None = None,
     ) -> list[str]:
-        """Return a model list, propagating failures without caching them."""
+        """Return the provider's model list from cache or fetch it from ``url``.
+
+        Failed requests raise immediately without poisoning the cache.
+
+        Args:
+            url: Provider models endpoint URL.
+            description: Human-readable provider name used in error messages.
+            api_key: Optional Bearer API key header value.
+            params: Optional query string parameters.
+            include: Optional predicate filtering raw model entry dictionaries.
+
+        Returns:
+            list[str]: Deduplicated list of model identifiers.
+        """
         now = time.monotonic()
         if self._models is not None and now - self._cached_at < self._cache_seconds:
             return list(self._models)
