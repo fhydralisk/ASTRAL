@@ -15,7 +15,7 @@ from .code_executor import CodeExecutorTool
 
 @BaseTool.register("evaluate_code")
 class EvaluateCodeTool(BaseTool):
-    """Implementation of the evaluate code tool."""
+    """Tool for evaluating Python-defined candidate models inside an isolated OS sandbox."""
 
     metadata = ToolMetadata(name="evaluate_code")
     DEFAULT_TIMEOUT_SECONDS = CodeExecutorTool.DEFAULT_TIMEOUT_SECONDS
@@ -35,37 +35,26 @@ class EvaluateCodeTool(BaseTool):
         output_limit_bytes: int = DEFAULT_OUTPUT_LIMIT_BYTES,
         show_diagnostics: bool = True,
     ) -> Dict[str, Any]:
-        """Evaluate a Python-defined candidate model on the current dataset.
+        """Evaluate a Python-defined candidate model on the train and validation splits.
 
-        If possible, first use ``read_skill`` to review ``sr-harness-engine-syntax`` and any
-        relevant companion documentation, such as ``sr-harness-engine-graph-syntax`` for graph
-        or hypergraph models. Prefer a structured SRHarness Engine formula when it can express
-        the candidate, and use this tool when it cannot do so conveniently. The code runs in a
-        restricted sandbox, then the tool computes metrics against the target and returns the
-        formatted model under the ``formula`` key.
-
-        This tool can return candidate formulas for submission when `y` is the target
-        variable and `predict_code` does not depend on the target variable.
+        Before using this tool, call ``read_skill`` to check ``sr-harness-engine-syntax`` (and
+        ``sr-harness-engine-graph-syntax`` for graph/hypergraph problems). Prefer symbolic formulas
+        in ``evaluate_formula`` whenever SRHarness Engine syntax can express the model; use
+        ``evaluate_code`` only when custom Python logic is genuinely required. Returns a
+        submission-eligible candidate when ``y`` is the default target variable and ``predict_code``
+        does not depend on ``y``.
 
         Args:
-            model_code: Code containing exactly one function with signature
-                `def func(data)` plus optional top-level imports. `data` is a dictionary
-                mapping variable names to numeric arrays, including the target variable.
-                This function should return a Python dict as the fitted `model`, which
-                will be passed to `predict_code` and `format_code`. The returned model
-                should contain a `description` field that identifies the model with a
-                concise mathematical formula (e.g., y = aₖx² + bₖx + cₖ,
-                yᵢ = MLP1(xᵢ) + Σ Aᵢⱼ MLP2(xᵢ, xⱼ)).
-            predict_code: Code containing exactly one function with signature
-                `def func(data, model)` plus optional top-level imports.
-                The function should return the predicted value for the target `y`,
-                which must be array-like and compatible with the target shape.
-            y: Target variable name. Use target variable by default.
-                Expressions are also supported, e.g., "log(y)", "y - x1"
-            timeout_seconds: Wall-clock timeout in seconds. The effective value is capped.
-            memory_limit_mb: Address-space memory limit in MB. The effective value is capped.
-            output_limit_bytes: Limit on the amount of output (in bytes) that can be produced.
-            show_diagnostics: Whether metrics should include compact residual diagnostics.
+            model_code: Python source defining ``def func(data) -> dict`` (plus optional imports) that fits parameters on ``data`` and returns a model dict containing a concise mathematical ``description`` string.
+            predict_code: Python source defining ``def func(data, model)`` (plus optional imports) that computes predicted target values without reading the target variable from ``data``.
+            y: Target variable name or expression, e.g., ``"y"`` or ``"log(y)"``. Defaults to ``context.target``.
+            timeout_seconds: Sandbox execution timeout in seconds (1-120, default 30).
+            memory_limit_mb: Sandbox memory limit in MB (64-4096, default 1024).
+            output_limit_bytes: Maximum captured output in bytes (1024-1048576, default 65536).
+            show_diagnostics: Whether to include residual diagnostics in the evaluation result.
+
+        Returns:
+            Dict[str, Any]: Model description, candidate eligibility, and per-split fit metrics.
         """
         train_data = self.context.train_split.data
         validation_data = self.context.validation_split.data
@@ -127,13 +116,13 @@ class EvaluateCodeTool(BaseTool):
 
     @classmethod
     def format_result_dict(cls, result: Dict[str, Any]) -> str:
-        """Format a tool result for the language model.
+        """Format the code-model evaluation report with character-based code complexity notes.
 
         Args:
-            result: Result mapping to format or update.
+            result: Result dictionary returned by :meth:`execute`.
 
         Returns:
-            str: The operation result.
+            str: Formatted evaluation summary for the code-defined model.
         """
         text = cls.format_evaluation_result(result, title="Evaluated code-defined model")
         marker = "Formula Complexity="

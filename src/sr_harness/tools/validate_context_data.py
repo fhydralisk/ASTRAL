@@ -99,23 +99,22 @@ def _repair_hint(error: str) -> str:
 
 @BaseTool.register("validate_context_data")
 class ValidateContextDataTool(BaseTool):
-    """Validate context.data without mutating the live AgentContext."""
+    """Tool for validating a workspace ``context.data`` manifest and NPY array collection."""
 
     metadata = ToolMetadata(name="validate_context_data")
 
     def execute(self, path: str = "context.data") -> dict[str, Any]:
-        """Validate a manifest-backed context-data directory and explain every repair.
+        """Validate a workspace ``context.data`` directory and return actionable repair instructions for any errors.
 
-        This calls the production ``load_context_data`` loader, so a successful
-        result guarantees that InteractiveSession can load the same collection.
-        On failure it returns all detectable errors together with specific repair
-        suggestions instead of stopping at an opaque exception.
+        Runs both ``load_context_data`` and ``inspect_context_data`` without mutating the live
+        :class:`AgentContext`. A passing check guarantees that ``InteractiveSession`` can load the
+        dataset cleanly after the current Agent turn.
 
         Args:
-            path: Workspace-relative directory containing manifest.json and flat NPY files.
+            path: Workspace-relative path to the context-data directory (default ``"context.data"``).
 
         Returns:
-            Validation status, complete diagnostics, array summaries, and repair actions.
+            dict[str, Any]: Validation status, variable/axis summaries, warnings, and specific repair actions.
         """
         workspace = self.context.workspace
         if workspace is None:
@@ -138,7 +137,14 @@ class ValidateContextDataTool(BaseTool):
 
     @classmethod
     def format_result_dict(cls, result: dict[str, Any]) -> str:
-        """Format complete, actionable diagnostics for the data-preparation Agent."""
+        """Format validation diagnostics, variable summaries, and repair steps for the Agent.
+
+        Args:
+            result: Validation report dictionary returned by :meth:`execute`.
+
+        Returns:
+            str: Human- and LLM-readable validation report.
+        """
         if not result.get("valid"):
             lines = [f"INVALID context.data: {result['path']}", "Required repairs:"]
             for index, repair in enumerate(result.get("repairs", []), 1):

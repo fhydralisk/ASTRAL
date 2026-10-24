@@ -14,7 +14,7 @@ from .base_tool import BaseTool, ToolMetadata
 
 @BaseTool.register("evaluate_eic")
 class EICTool(BaseTool):
-    """Diagnose numerical information loss throughout an expression tree."""
+    """Tool for computing Effective Information Criterion (EIC) numerical-stability diagnostics across expression subtrees."""
 
     metadata = ToolMetadata(name="evaluate_eic")
 
@@ -26,18 +26,22 @@ class EICTool(BaseTool):
         random_state: int = 0,
         zero_epsilon: float = 1e-6,
     ) -> Dict[str, Any]:
-        """Evaluate whole-formula and per-subtree EIC diagnostics.
+        """Evaluate whole-formula and per-subtree Effective Information Criterion (EIC) stability diagnostics.
 
-        Relative Gaussian noise is injected after every non-leaf operation, following the EIC
-        paper's recursive algorithm. The formula EIC is the maximum over all subtree EIC values,
-        which exposes unstable internal structures even when an outer operation masks them.
+        Injects relative Gaussian noise after each non-leaf operator to measure noise amplification
+        and numerical information loss across all subtrees. Lower EIC indicates better numerical
+        stability; high subtree EIC paired with near-zero output impact reveals masked or redundant
+        subtrees.
 
         Args:
-            f: Formula to assess.
-            noise_level: Relative Gaussian noise injected after each operation.
-            repeats: Independent perturbation runs to average, between 1 and 100.
-            random_state: Random seed for reproducibility.
-            zero_epsilon: Denominator fallback used only where a clean subtree output is zero.
+            f: Symbolic formula string to diagnose.
+            noise_level: Relative Gaussian noise standard deviation injected after each operator (0 < noise_level < 1, default 0.001).
+            repeats: Number of Monte Carlo perturbation runs to average (1-100, default 8).
+            random_state: Random seed for reproducible noise injection.
+            zero_epsilon: Positive fallback denominator when a clean subtree output equals zero (default 1e-6).
+
+        Returns:
+            Dict[str, Any]: Formula EIC, root-output EIC, worst subtree path, per-subtree stats, and an annotated expression tree.
         """
         if not 0 < noise_level < 1:
             raise ValueError("noise_level must be between 0 and 1")
@@ -266,13 +270,13 @@ class EICTool(BaseTool):
 
     @classmethod
     def format_result_dict(cls, result: Dict[str, Any]) -> str:
-        """Format a tool result for the language model.
+        """Format EIC stability scores and the annotated expression tree for the Agent.
 
         Args:
-            result: Result mapping to format or update.
+            result: Result dictionary returned by :meth:`execute`.
 
         Returns:
-            str: The operation result.
+            str: Formatted EIC summary and annotated tree.
         """
         return (
             f"Formula EIC (maximum over all subtrees): {result['eic']:.6g} "
@@ -285,10 +289,10 @@ class EICTool(BaseTool):
 
     @classmethod
     def get_doc(cls) -> dict[str, str]:
-        """Return documentation exposed as a runtime skill.
+        """Return runtime skill documentation for ``eic-structural-stability``.
 
         Returns:
-            dict[str, str]: The operation result.
+            dict[str, str]: Skill metadata and usage instructions for EIC diagnostics.
         """
         return {
             "name": "eic-structural-stability",

@@ -14,7 +14,7 @@ from .base_tool import BaseTool, ToolMetadata
 
 @BaseTool.register("nd2")
 class ND2Tool(BaseTool):
-    """Implementation of the n d2 tool."""
+    """Tool for discovering graph and network-dynamics formulas via ND2 (NDformer + MCTS)."""
     metadata = ToolMetadata(name="nd2")
     REPOSITORY = "https://github.com/tsinghua-fib-lab/ND2"
     DEFAULT_BINARY = ["add", "sub", "mul", "div", "pow", "regular"]
@@ -37,24 +37,26 @@ class ND2Tool(BaseTool):
         beam_size: int = 10,
         max_coeff_num: int = 5,
     ) -> Dict[str, Any]:
-        """Run NDformer-guided MCTS on node or edge dynamics in the current data.
+        """Run NDformer-guided Monte Carlo Tree Search (ND2) to discover node or edge dynamics on a network.
 
-        The context must contain adjacency `A` and/or edge list `G`, a target shaped
-        `(time, node)` or `(time, edge)`, and node/edge variables with matching final axes.
-        `ND2_HOME` must point to the official repository; `ND2_CHECKPOINT` defaults to
-        `$ND2_HOME/weights/checkpoint.pth`.
+        Requires adjacency matrix ``A`` and/or edge list ``G`` in ``context.data``, a 2D target of
+        shape ``(time, node)`` or ``(time, edge)``, and matching node/edge features. ``ND2_HOME``
+        must point to the ND2 repository and ``ND2_CHECKPOINT`` to ``checkpoint.pth``.
 
         Args:
-            vars_node: Node-level variable names. Inferred from the node axis when omitted.
-            vars_edge: Edge-level variable names. Inferred from the edge axis when omitted.
-            y: Target variable name. Defaults to the configured target.
-            root_type: Output expression type, either "node" or "edge".
-            binary_operators: ND2 binary tokens. Defaults to its standard binary vocabulary.
-            unary_operators: ND2 unary tokens. Defaults to its standard unary vocabulary.
-            timeout: Wall-time search limit in seconds, between 10 and 3600.
-            episode_limit: Maximum MCTS episodes, between 1 and 1000000.
-            beam_size: Number of expansions retained per MCTS step, between 1 and 100.
-            max_coeff_num: Maximum fitted scalar coefficients, between 0 and 20.
+            vars_node: Node-level feature names. Inferred from arrays ending in the node dimension when omitted.
+            vars_edge: Edge-level feature names. Inferred from arrays ending in the edge dimension when omitted.
+            y: Target variable name. Defaults to ``context.target``.
+            root_type: Target level to predict, either ``"node"`` or ``"edge"``.
+            binary_operators: Allowed ND2 binary operator tokens. Defaults to ``DEFAULT_BINARY``.
+            unary_operators: Allowed ND2 unary/graph operator tokens. Defaults to ``DEFAULT_UNARY``.
+            timeout: Search wall-time limit in seconds (10-3600, default 60).
+            episode_limit: Maximum MCTS episodes (1-1000000, default 10000).
+            beam_size: Beam width retained per MCTS expansion (1-100, default 10).
+            max_coeff_num: Maximum number of fitted scalar coefficients (0-20, default 5).
+
+        Returns:
+            Dict[str, Any]: Discovered graph-dynamics formula, train/validation metrics, and ND2 config.
         """
         status = self.backend_status()
         if not status["installed"]:
@@ -284,10 +286,10 @@ class ND2Tool(BaseTool):
 
     @classmethod
     def backend_status(cls) -> Dict[str, Any]:
-        """Run the ``backend status`` operation.
+        """Check whether the external ND2 repository and model checkpoint are available.
 
         Returns:
-            Dict[str, Any]: The operation result.
+            Dict[str, Any]: Installation status, repository root, and checkpoint path details.
         """
         configured = os.environ.get("ND2_HOME")
         local_root = Path.cwd() / "third-party" / "ND2"
@@ -315,13 +317,13 @@ class ND2Tool(BaseTool):
 
     @classmethod
     def format_result_dict(cls, result: Dict[str, Any]) -> str:
-        """Format a tool result for the language model.
+        """Format the discovered ND2 formula and train/validation metrics for the Agent.
 
         Args:
-            result: Result mapping to format or update.
+            result: Result dictionary returned by :meth:`execute`.
 
         Returns:
-            str: The operation result.
+            str: Concise summary of the discovered network-dynamics formula and fit metrics.
         """
         split_results = result["data_split_results"]
         train = split_results["train"]["metrics"]
@@ -340,10 +342,10 @@ class ND2Tool(BaseTool):
 
     @classmethod
     def get_doc(cls) -> dict[str, str]:
-        """Return documentation exposed as a runtime skill.
+        """Return runtime skill documentation for ``nd2-network-dynamics``.
 
         Returns:
-            dict[str, str]: The operation result.
+            dict[str, str]: Skill metadata and usage instructions for ND2 network dynamics.
         """
         return {
             "name": "nd2-network-dynamics",

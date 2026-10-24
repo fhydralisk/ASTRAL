@@ -1,10 +1,5 @@
 # Copyright (c) 2026-present, Yumeow. Licensed under the MIT License.
-"""SINDy 符号回归工具。
-
-使用 PySINDy (Sparse Identification of Nonlinear Dynamics) 对数据进行符号回归。
-通过将目标变量 y 视为状态变量 X 的"导数"，利用 SINDy 的稀疏回归框架
-发现 y = f(X) 的简洁数学表达式。
-"""
+"""Sparse symbolic-regression tool backed by PySINDy."""
 import re
 import logging
 import numpy as np
@@ -17,7 +12,7 @@ _logger = logging.getLogger(f'sr_harness.{__name__}')
 
 @BaseTool.register('call_sindy')
 class SINDyTool(BaseTool):
-    """Implementation of the s i n dy tool."""
+    """Sparse regression symbolic-discovery tool powered by PySINDy (STLSQ)."""
     metadata = ToolMetadata(name="call_sindy")
 
     def execute(
@@ -30,23 +25,25 @@ class SINDyTool(BaseTool):
         max_samples: int = 5000,
         show_diagnostics: bool = True,
     ) -> Dict[str, Any]:
-        """Run SINDy (Sparse Identification of Nonlinear Dynamics) to discover symbolic expressions from data.
-        SINDy builds a library of candidate nonlinear functions and uses sparse regression (STLSQ) to find
-        a parsimonious combination that explains the target variable.
-        Best suited for polynomial, interaction, and trigonometric relationships.
+        """Run SINDy sparse regression (STLSQ) over polynomial and optional trigonometric bases.
 
-        This tool can return candidate formulas for submission when `y` is the target variable and `x` does not depend on the target variable.
+        Constructs a library of polynomial/interaction terms (up to ``poly_degree``) and optional
+        Fourier terms (``sin``, ``cos``), then prunes small coefficients using Sequentially
+        Thresholded Least Squares. Fast and well-suited for additive polynomial, interaction, and
+        harmonic laws. Returns a submission-eligible candidate when ``y`` is the default target
+        variable and ``x`` does not depend on ``y``.
 
         Args:
-            x: List of input feature names to use. If not specified, all features except target are used.
-                Expressions are also supported, e.g., ["sin(x1)", "(x1-x2)**2"].
-            y: Target variable name. If not specified, the default target variable is used.
-                Expressions are also supported, e.g., "log(y)", "y - x1"
-            poly_degree: Maximum polynomial degree for the feature library (1-5). Higher values find more complex relationships but are slower.
-            include_trig: Whether to include sin/cos terms in the feature library. Enable this if you suspect trigonometric relationships.
-            threshold: Sparsity threshold for STLSQ optimizer (0.01-1.0). Larger values produce sparser (simpler) formulas.
-            max_samples: Maximum number of data samples to use for fitting (for speed). Data is subsampled if larger.
-            show_diagnostics: Whether final metrics should include compact residual diagnostics.
+            x: Input variable names or expressions, e.g., ``["x1", "x2"]``. Defaults to all numeric non-target variables.
+            y: Target variable name or expression, e.g., ``"y"`` or ``"y - x1"``. Defaults to the discovery target.
+            poly_degree: Maximum polynomial degree in the candidate library (1-5, default 3).
+            include_trig: Whether to append ``sin``/``cos`` Fourier terms to the feature library.
+            threshold: STLSQ coefficient cutoff (0.01-1.0, default 0.1). Larger values yield sparser formulas.
+            max_samples: Maximum number of rows subsampled for fitting (default 5000).
+            show_diagnostics: Whether to include residual diagnostics in the evaluation output.
+
+        Returns:
+            Dict[str, Any]: Fitted formula evaluation, SINDy configuration, and any warnings.
         """
         data = self.context.data
         y = y if y is not None else self.context.target
@@ -252,13 +249,13 @@ class SINDyTool(BaseTool):
 
     @classmethod
     def format_result_dict(cls, result: Dict[str, Any]) -> str:
-        """Format a tool result for the language model.
+        """Format the SINDy evaluation result and library settings for the Agent.
 
         Args:
-            result: Result mapping to format or update.
+            result: Result dictionary returned by :meth:`execute`.
 
         Returns:
-            str: The operation result.
+            str: Formatted SINDy fit summary.
         """
         if result["formula"] == "(None)":
             warnings = "; ".join(result.get("exceptions", [])) or "No further error detail was provided."

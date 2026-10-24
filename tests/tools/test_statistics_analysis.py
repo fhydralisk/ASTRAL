@@ -12,7 +12,10 @@ from sr_harness.tools.statistics_analysis import StatisticsTool
 class TestStatisticsToolMetadata:
     def test_metadata_is_inferred_from_execute_docstring(self):
         assert StatisticsTool.metadata.name == "statistics_analysis"
-        assert StatisticsTool.metadata.description == "Execute statistical analysis."
+        assert StatisticsTool.metadata.description == (
+            "Compute summary statistics, domain/sign fractions, near-zero counts, "
+            "and histograms for variables or expressions."
+        )
 
     def test_parameters_schema_is_inferred_from_execute_signature_and_docstring(self):
         assert StatisticsTool.metadata.parameters == {
@@ -22,22 +25,22 @@ class TestStatisticsToolMetadata:
                     "type": "array",
                     "items": {"type": "string"},
                     "description": (
-                        'List of variable names to analyze, e.g., ["x1", "x2", "y"].\n'
-                        "Use all variables (including the target variable) by default.\n"
-                        'Expressions are also supported, e.g., ["sin(x1)", "(x1-x2)**2", "sin(y+x1)"].'
+                        "List of variable names or expressions to analyze, e.g., "
+                        '``["x1", "x2", "y"]`` or ``["sin(x1)", "(x1-x2)**2"]``. '
+                        "Analyzes all numeric variables (including the target) by default."
                     ),
                     "default": None,
                 },
                 "n_bins": {
                     "type": "integer",
-                    "description": "Number of equal-width histogram bins used to summarize each distribution (1-100).",
+                    "description": "Number of equal-width histogram bins used to summarize each finite distribution (1-100).",
                     "default": 10,
                 },
                 "near_zero_threshold": {
                     "type": "number",
                     "description": (
-                        "First absolute-value threshold used to count near-zero samples.\n"
-                        "The output also reports thresholds 1e-6 and 1e-4."
+                        "Primary absolute-value cutoff ``|x| <= threshold`` for counting "
+                        "near-zero samples (also reports ``1e-6`` and ``1e-4``)."
                     ),
                     "default": 1e-8,
                 },
@@ -50,7 +53,10 @@ class TestStatisticsToolMetadata:
             "type": "function",
             "function": {
                 "name": "statistics_analysis",
-                "description": "Execute statistical analysis.",
+                "description": (
+                    "Compute summary statistics, domain/sign fractions, near-zero counts, "
+                    "and histograms for variables or expressions."
+                ),
                 "parameters": StatisticsTool.metadata.parameters,
             },
         }

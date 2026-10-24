@@ -19,9 +19,9 @@ def _format_description(skills: Dict[str, Skill]) -> str:
             f"  </skill>"
         )
     return (
-        "Read the content of a skill by its name.\n\n"
-        "Skills are reusable human-written instructions. Use this tool when the "
-        "current task matches one of the skill descriptions below.\n\n"
+        "Read a skill's instructions (`SKILL.md`), inspect its files, or search available skills.\n\n"
+        "Skills provide domain workflows, syntax references, and reusable tactics. Call this tool "
+        "whenever your task matches one of the skill descriptions below.\n\n"
         "Available skills:\n\n"
         "<skills>\n" + "\n\n".join(skill_blocks) + "\n</skills>"
     )
@@ -29,7 +29,7 @@ def _format_description(skills: Dict[str, Skill]) -> str:
 
 @BaseTool.register("read_skill")
 class ReadSkill(BaseTool):
-    """Implementation of the read skill."""
+    """Tool for reading skill instructions (``SKILL.md``), auxiliary skill files, or searching skills."""
 
     default_skill_manager = SkillManager()
     metadata = ToolMetadata(
@@ -38,6 +38,11 @@ class ReadSkill(BaseTool):
     )
 
     def __init__(self, context: AgentContext | None = None) -> None:
+        """Initialize the tool and filter advertised skills to those enabled in ``context.args``.
+
+        Args:
+            context: Runtime :class:`AgentContext` supplying ``skill_manager`` and ``enabled_skills``.
+        """
         super().__init__(context=context)
         if hasattr(self.context.args, "skill_manager"):
             self.skill_manager = self.context.args.skill_manager
@@ -60,14 +65,16 @@ class ReadSkill(BaseTool):
         show_tree: bool = False,
         query: str = "",
     ) -> Dict[str, Any]:
-        """Inspect a skill's instructions, directory structure, or a file.
+        """Read a skill's ``SKILL.md``, read a specific file inside a skill, or search skills by query.
 
         Args:
-            name: The exact skill name to inspect. Leave empty to search by query.
-            file_path: Optional path relative to the skill directory, such as
-                ``tool.py`` or ``references/example.md``. Empty reads SKILL.md.
-            show_tree: Whether to include all files and subdirectories in the skill.
-            query: Task description used to recommend skills when name is empty.
+            name: Exact skill name to read. Leave empty when searching with ``query``.
+            file_path: Optional path relative to the skill directory (e.g., ``"tool.py"`` or ``"references/guide.md"``). Reads ``SKILL.md`` when empty.
+            show_tree: Whether to include a listing of all files in the skill directory.
+            query: Keyword or task description used to rank matching skills when ``name`` is empty.
+
+        Returns:
+            Dict[str, Any]: XML-wrapped skill content, optional directory tree, or ranked skill matches.
         """
         if not name.strip():
             if not query.strip():
@@ -105,13 +112,13 @@ class ReadSkill(BaseTool):
 
     @classmethod
     def format_result_dict(cls, result: Dict[str, Any]) -> str:
-        """Format a tool result for the language model.
+        """Format the skill content and optional directory tree for the Agent.
 
         Args:
-            result: Result mapping to format or update.
+            result: Result dictionary returned by :meth:`execute`.
 
         Returns:
-            str: The operation result.
+            str: Skill content followed by optional directory tree entries.
         """
         text = [result["content"]]
         if "tree" in result:

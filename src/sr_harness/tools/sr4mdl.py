@@ -17,7 +17,7 @@ from .base_tool import BaseTool, ToolMetadata, is_numeric_array
 
 @BaseTool.register("sr4mdl")
 class SR4MDLTool(BaseTool):
-    """Implementation of the s r4 m d l tool."""
+    """Symbolic-regression tool using MDLformer-guided Monte Carlo Tree Search (SR4MDL)."""
     metadata = ToolMetadata(name="sr4mdl")
     REPOSITORY = "https://github.com/tsinghua-fib-lab/SR4MDL"
     BINARY_OPERATORS = {
@@ -50,24 +50,25 @@ class SR4MDLTool(BaseTool):
         n_iter: int = 100,
         show_diagnostics: bool = True,
     ) -> Dict[str, Any]:
-        """Run MDLformer-guided Monte Carlo tree search on the current data.
+        """Run MDLformer-guided Monte Carlo Tree Search (SR4MDL) for minimum-description-length symbolic discovery.
 
-        Like `call_pysr`, this tool constructs a regression dataset from agent-visible
-        expressions and returns an evaluated candidate formula. SR4MDL must be cloned into an
-        isolated directory, `SR4MDL_HOME` must point to it, and `SR4MDL_CHECKPOINT` must point
-        to its trained checkpoint (default: `$SR4MDL_HOME/weights/checkpoint.pth`).
+        Evaluates input expressions ``x`` and target ``y``, runs MCTS guided by a pretrained
+        MDLformer network, and evaluates the discovered formula on train/validation splits.
+        Requires ``SR4MDL_HOME`` and ``SR4MDL_CHECKPOINT`` to be configured.
 
         Args:
-            binary_operators: Binary search operators chosen from "+", "-", "*", "/".
-            unary_operators: Unary operators chosen from "sqrt", "sin", "cos", "neg",
-                "inv", "log", "exp", "square", "cube".
-            x: Input feature names or expressions. Defaults to numeric non-target columns.
-            y: Target name or expression. Defaults to the configured target.
-            timeout: Soft wall-time budget in seconds, checked whenever a new best tree appears.
-            maxsize: Maximum expression-tree length, between 5 and 100.
-            max_samples: Maximum fitting samples, between 20 and 5000.
-            n_iter: Maximum MCTS iterations, between 1 and 10000.
-            show_diagnostics: Whether final metrics include compact residual diagnostics.
+            binary_operators: Binary operators to search over, chosen from ``["+", "-", "*", "/"]``.
+            unary_operators: Unary operators to search over, chosen from ``["sqrt", "sin", "cos", "neg", "inv", "log", "exp", "square", "cube"]``.
+            x: Input variable names or expressions. Defaults to all numeric non-target variables.
+            y: Target variable name or expression. Defaults to ``context.target``.
+            timeout: Soft wall-time budget in seconds (10-600, default 60).
+            maxsize: Maximum expression tree length (5-100, default 30).
+            max_samples: Maximum number of samples subsampled for fitting (20-5000, default 500).
+            n_iter: Maximum MCTS iterations (1-10000, default 100).
+            show_diagnostics: Whether to include residual diagnostics in the evaluation output.
+
+        Returns:
+            Dict[str, Any]: Discovered formula evaluation, backend status, and search configuration.
         """
         status = self.backend_status()
         if not status["installed"]:
@@ -257,10 +258,10 @@ class SR4MDLTool(BaseTool):
 
     @classmethod
     def backend_status(cls) -> Dict[str, Any]:
-        """Run the ``backend status`` operation.
+        """Check whether the external SR4MDL repository and checkpoint are installed.
 
         Returns:
-            Dict[str, Any]: The operation result.
+            Dict[str, Any]: Installation status, repository path, and checkpoint availability.
         """
         configured = os.environ.get("SR4MDL_HOME")
         local_root = Path.cwd() / "third-party" / "SR4MDL"
@@ -291,22 +292,22 @@ class SR4MDLTool(BaseTool):
 
     @classmethod
     def format_result_dict(cls, result: Dict[str, Any]) -> str:
-        """Format a tool result for the language model.
+        """Format the SR4MDL evaluation result for the Agent.
 
         Args:
-            result: Result mapping to format or update.
+            result: Result dictionary returned by :meth:`execute`.
 
         Returns:
-            str: The operation result.
+            str: Formatted SR4MDL evaluation output.
         """
         return BaseTool.format_result_dict(result)
 
     @classmethod
     def get_doc(cls) -> dict[str, str]:
-        """Return documentation exposed as a runtime skill.
+        """Return runtime skill documentation for ``sr4mdl-search``.
 
         Returns:
-            dict[str, str]: The operation result.
+            dict[str, str]: Skill metadata and usage instructions for SR4MDL search.
         """
         return {
             "name": "sr4mdl-search",

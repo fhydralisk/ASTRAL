@@ -1,9 +1,5 @@
 # Copyright (c) 2026-present, Yumeow. Licensed under the MIT License.
-"""工作区 Shell 工具。
-
-提供一个隔离的工作区目录，允许 Agent 通过受限的 shell 风格命令操作
-文件。
-"""
+"""Restricted shell-like command execution tool confined to the active workspace."""
 
 from __future__ import annotations
 
@@ -35,42 +31,47 @@ ALLOWED_COMMANDS = {
 
 
 class CommandParseError(ValueError):
-    """Raised when the restricted command language cannot parse an invocation."""
+    """Exception raised when a workspace shell command violates syntax or argument rules."""
 
 
 class CommandArgumentParser(argparse.ArgumentParser):
-    """An ``argparse`` parser that reports errors instead of exiting the process."""
+    """Non-exiting :class:`argparse.ArgumentParser` subclass that raises :class:`CommandParseError` on invalid flags."""
 
     def __init__(self, command: str):
+        """Initialize the parser for a single restricted shell command.
+
+        Args:
+            command: Command name used in error messages.
+        """
         super().__init__(prog=command, add_help=False, allow_abbrev=False, exit_on_error=False)
 
     def error(self, message: str) -> Never:
-        """Run the ``error`` operation.
+        """Raise :class:`CommandParseError` instead of printing to stderr and exiting.
 
         Args:
-            message: Message text or provider message payload.
+            message: Error message produced by :mod:`argparse`.
 
-        Returns:
-            Never: The operation result.
+        Raises:
+            CommandParseError: Always raised with ``"<command>: <message>"``.
         """
         raise CommandParseError(f"{self.prog}: {message}")
 
     def exit(self, status: int = 0, message: str | None = None) -> Never:
-        """Run the ``exit`` operation.
+        """Raise :class:`CommandParseError` instead of terminating the Python process.
 
         Args:
-            status: Run completion status.
-            message: Message text or provider message payload.
+            status: Exit status code.
+            message: Optional error message.
 
-        Returns:
-            Never: The operation result.
+        Raises:
+            CommandParseError: Always raised when :mod:`argparse` attempts to exit.
         """
         raise CommandParseError(message or f"{self.prog}: invalid arguments")
 
 
 @BaseTool.register("workspace_shell")
 class WorkspaceShellTool(BaseTool):
-    """Implementation of the workspace shell tool."""
+    """Tool for inspecting and manipulating workspace files with a safe, restricted POSIX-like command subset."""
 
     metadata = ToolMetadata(name="workspace_shell")
 
@@ -79,10 +80,10 @@ class WorkspaceShellTool(BaseTool):
 
     @classmethod
     def get_doc(cls) -> dict[str, str]:
-        """Return documentation exposed as a runtime skill.
+        """Return runtime skill documentation for ``workspace-shell``.
 
         Returns:
-            dict[str, str]: The operation result.
+            dict[str, str]: Skill metadata, supported command syntax, and pipeline examples.
         """
         return {
             "name": "workspace-shell",
@@ -153,16 +154,20 @@ class WorkspaceShellTool(BaseTool):
         command: str,
         output_limit_bytes: int = DEFAULT_OUTPUT_LIMIT_BYTES,
     ) -> Dict[str, Any]:
-        """Execute a restricted shell command in the workspace directory.
-        Supported commands: ls, cat, head, tail, wc, grep, sort, cut, cp, mv, rm, mkdir,
-        gunzip, gzip, unzip, tar.
-        All file paths are relative to the workspace root. Absolute paths and path traversal
-        (e.g., ../) are forbidden.
+        """Run a restricted shell command or ``|`` pipeline inside the workspace directory.
+
+        Supports ``ls``, ``cat``, ``head``, ``tail``, ``wc``, ``grep``, ``sort``, ``cut``, ``cp``,
+        ``mv``, ``rm``, ``mkdir``, ``gunzip``, ``gzip``, ``unzip``, and ``tar`` (extract only).
+        All paths must stay within the workspace root; shell redirection (``>``, ``<``), chaining
+        (``;``, ``&&``, ``||``), globbing, and unlisted commands are rejected. Call ``read_skill``
+        with ``"workspace-shell"`` for full flag syntax.
 
         Args:
-            command: A shell command string.
-                Examples: "ls", "cat data.csv | head -5", "gunzip data.csv.gz".
-            output_limit_bytes: Maximum stdout size returned by each command segment.
+            command: Command or ``|``-connected pipeline string, e.g., ``"ls -la"``, ``"cat data.csv | head -n 5"``, or ``"unzip archive.zip -d raw"``.
+            output_limit_bytes: Maximum stdout size in bytes retained per pipeline stage (1024-1048576, default 65536).
+
+        Returns:
+            Dict[str, Any]: Command execution status, ``stdout``, ``stderr``, and ``exit_code``.
         """
         if self.context.workspace is None:
             return self._error("Workspace not initialized.")
@@ -191,13 +196,13 @@ class WorkspaceShellTool(BaseTool):
 
     @classmethod
     def format_result_dict(cls, result: Dict[str, Any]) -> str:
-        """Format a tool result for the language model.
+        """Format workspace command stdout, stderr, or failure details for the Agent.
 
         Args:
-            result: Result mapping to format or update.
+            result: Result dictionary returned by :meth:`execute`.
 
         Returns:
-            str: The operation result.
+            str: Command output or error message.
         """
         if not result.get("success", False):
             detail = result.get("error") or result.get("stderr") or "No error detail was provided."
@@ -212,14 +217,14 @@ class WorkspaceShellTool(BaseTool):
         )
 
     def execute_single(self, command: str, stdin_text: str = "") -> Dict[str, Any]:
-        """Execute one command segment after pipeline parsing.
+        """Execute a single command segment (without pipes) given optional stdin text.
 
         Args:
-            command: Parsed command and arguments.
-            stdin_text: Text received from the previous pipeline segment.
+            command: Single command string without ``|`` operators.
+            stdin_text: Input text piped from a preceding command segment.
 
         Returns:
-            Structured command output and status.
+            Dict[str, Any]: Command execution status, ``stdout``, ``stderr``, and ``exit_code``.
         """
         if self.context.workspace is None:
             return self._error("Workspace not initialized.")

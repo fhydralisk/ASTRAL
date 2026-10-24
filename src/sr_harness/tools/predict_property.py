@@ -1,15 +1,5 @@
 # Copyright (c) 2026-present, Yumeow. Licensed under the MIT License.
-"""数据性质预测工具。
-
-使用预训练的 Transformer 模型从数据样本中预测公式的数学性质
-（单调性、凹凸性、周期性、乘法可分性），并自动分析变量组合的性质，
-为符号回归搜索提供先验知识指导。
-
-可通过下述指令将模型上传到 Github Release（需要设置 GITHUB_TOKEN 环境变量）
-    python scripts/upload_models.py --checkpoint path/to/model.pth --name property-scratch-v5 --release-tag sr-agent-models-v5
-可通过下述指令从 Github Release 下载模型到本地（或者在首次调用时自动下载）
-    python scripts/download_models.py --checkpoint path/to/save/model.pth --name property-scratch-v5 --release-tag sr-agent-models-v5
-"""
+"""Neural property-prediction tool for estimating monotonicity, convexity, periodicity, and separability."""
 from __future__ import annotations
 
 import logging
@@ -110,7 +100,7 @@ def _decode_per_var(logits: np.ndarray, label_map: dict, n_vars: int) -> list:
 # 此工具尚未处于 Ready 状态
 # @BaseTool.register("predict_property")
 class PropertyPredictorTool(BaseTool):
-    """Implementation of the property predictor tool."""
+    """Neural-network tool for predicting per-variable monotonicity, convexity, periodicity, and multiplicative separability."""
     metadata = ToolMetadata(name="predict_property")
 
     MODEL_TYPE: Literal[
@@ -123,18 +113,17 @@ class PropertyPredictorTool(BaseTool):
     AUTO_DOWNLOAD: bool = True
 
     def execute(self) -> Dict[str, Any]:
-        """Predict mathematical properties of the data using a neural network.
-        This tool analyzes the relationship between input variables and the target to detect:
-        - **Monotonicity**: Whether y is monotonically increasing, decreasing, or constant w.r.t. each variable.
-        - **Convexity**: Whether y is convex, concave, or affine w.r.t. each variable.
-        - **Periodicity**: A heuristic per-variable periodicity prediction. A negative
-          prediction does not rule out a periodic term modulated by another variable
-          (for example x * sin(omega * t)).
-        - **Multiplicative Separability**: Whether y = f(x1) * g(x2) * ...
-        Additionally, this tool automatically tests variable COMBINATIONS (xi*xj, xi+xj, xi-xj, xi/xj)
-        to detect properties that only emerge in combinations (e.g., sin(x1*x2) is periodic in x1*x2
-        but neither x1 nor x2 alone appears periodic).
-        No arguments needed — the tool automatically uses the data provided to the agent.
+        """Predict heuristic mathematical properties of the target with respect to each variable and pairwise combination.
+
+        Uses a pretrained Transformer to estimate:
+        - **Monotonicity**: increasing, decreasing, constant, or non-monotonic per variable.
+        - **Convexity**: convex, concave, affine, or non-convex/concave per variable.
+        - **Periodicity**: heuristic periodicity score per variable (note: modulated terms like ``x * sin(w * t)`` may appear non-periodic marginally).
+        - **Multiplicative Separability**: whether ``y`` factors into ``f(x1) * g(x2) * ...``.
+        Also evaluates pairwise combinations (``xi*xj``, ``xi+xj``, ``xi-xj``, ``xi/xj``) to surface hidden composite symmetries.
+
+        Returns:
+            Dict[str, Any]: Predicted property labels and confidence scores for individual variables and pairwise combinations.
         """
         data = self.context.data
         target_name = self.context.target
@@ -282,13 +271,13 @@ class PropertyPredictorTool(BaseTool):
 
     @classmethod
     def format_result_dict(cls, result: Dict[str, Any]) -> str:
-        """Format a tool result for the language model.
+        """Format neural property predictions and search hints for the Agent.
 
         Args:
-            result: Result mapping to format or update.
+            result: Result dictionary returned by :meth:`execute`.
 
         Returns:
-            str: The operation result.
+            str: Formatted property report with confidence scores and modeling hints.
         """
         if "error" in result:
             return f"Error: {result['error']}"

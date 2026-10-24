@@ -17,7 +17,7 @@ _SKILL_NAME_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
 class AuthoringState(Enum):
-    """Implementation of the authoring state."""
+    """Internal state machine phases for multi-round LLM skill authoring."""
     PREPARE = auto()
     AUTHOR = auto()
     CONTINUE = auto()
@@ -78,7 +78,7 @@ Use status=ready only when the draft is complete and questions is empty.'''
 
 @BaseTool.register("create_skill")
 class CreateSkill(BaseTool):
-    """Implementation of the create skill."""
+    """Tool for distilling reusable tactics or custom tools from the current run into a skill."""
     metadata = ToolMetadata(name="create_skill")
 
     def execute(
@@ -87,18 +87,19 @@ class CreateSkill(BaseTool):
         force: bool = False,
         history_messages: int | None = None,
     ) -> Dict[str, Any]:
-        """Create a reusable skill in one tool call. The tool passes the current Agent 
-        buffer and request to the configured LLM, determines whether the skill is 
-        instruction-only, data-analysis, or formula-proposal, supplies the matching 
-        demo, iterates internally to complete the draft, and then writes the skill.
+        """Create and save a reusable skill (instructions, data-analysis tool, or formula-proposer tool).
+
+        Synthesizes the current Agent conversation and ``request`` using the configured LLM,
+        determines whether the skill should be instruction-only (``SKILL.md``) or include a
+        sandboxed custom tool (``tool.py``), validates the draft, and registers any new tool.
 
         Args:
-            request: Explain the reusable capability or lesson to capture. The current
-                Agent conversation and the tool-call message are supplied automatically.
-            force: Replace an existing editable skill's SKILL.md and tool.py. Other files
-                are preserved; read-only skills cannot be replaced.
-            history_messages: Number of most recent Agent messages to provide to the
-                authoring LLM. Defaults to all available messages.
+            request: Clear description of the reusable tactic, workflow, or custom tool to capture.
+            force: Overwrite an existing editable skill's ``SKILL.md`` and ``tool.py`` if ``True``.
+            history_messages: Optional number of recent conversation messages to include as context.
+
+        Returns:
+            Dict[str, Any]: Creation status, skill name, skill type, and registered custom tool metadata.
         """
         request = request.strip()
         if not request:
@@ -290,13 +291,13 @@ class CreateSkill(BaseTool):
 
     @classmethod
     def format_result_dict(cls, result: Dict[str, Any]) -> str:
-        """Format a tool result for the language model.
+        """Format the skill creation confirmation for the Agent.
 
         Args:
-            result: Result mapping to format or update.
+            result: Result dictionary returned by :meth:`execute`.
 
         Returns:
-            str: The operation result.
+            str: Concise confirmation of the created skill and any registered custom tool.
         """
         text = f"Created {result['skill_type']} skill {result['name']!r}."
         if result.get("tool_name"):

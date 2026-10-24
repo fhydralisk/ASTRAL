@@ -13,15 +13,28 @@ from .base_tool import BaseTool, ToolMetadata
 
 
 class LimitedWriter(io.StringIO):
-    """String buffer retained for bounded-output shell utilities."""
+    """In-memory string buffer that truncates writes beyond a fixed character limit."""
 
     SUFFIX = "...[truncated]"
 
     def __init__(self, limit: int):
+        """Initialize a bounded string buffer.
+
+        Args:
+            limit: Maximum number of characters retained before truncation.
+        """
         super().__init__()
         self.limit = limit
 
     def write(self, text: str) -> int:
+        """Append ``text`` up to the configured buffer limit, adding a truncation suffix if exceeded.
+
+        Args:
+            text: String chunk to append.
+
+        Returns:
+            int: Length of ``text`` passed by the caller.
+        """
         remaining = self.limit - self.tell() - len(self.SUFFIX)
         if remaining <= 0:
             return len(text)
@@ -34,7 +47,7 @@ class LimitedWriter(io.StringIO):
 
 @BaseTool.register("code_executor")
 class CodeExecutorTool(BaseTool):
-    """Implementation of the code executor tool."""
+    """Tool for running isolated, data-only Python analysis scripts in an OS sandbox."""
 
     metadata = ToolMetadata(name="code_executor")
     DEFAULT_TIMEOUT_SECONDS = 30
@@ -51,20 +64,24 @@ class CodeExecutorTool(BaseTool):
         memory_limit_mb: int = DEFAULT_MEMORY_LIMIT_MB,
         output_limit_bytes: int = DEFAULT_OUTPUT_LIMIT_BYTES,
     ) -> Dict[str, Any]:
-        """Execute Python code and return printed output.
-        1) Use `import sys, json; data_dict = json.loads(sys.stdin.read())` to
-           access data mapping variable names to lists.
-        2) Use `print()` to produce output.
-        3) The code is executed in an operating-system sandbox with resource limits.
-        4) Installed scientific Python libraries are available. Files outside the
-           ephemeral sandbox, networking, and child-process creation are unavailable.
+        """Execute a Python snippet in an isolated OS sandbox with the dataset piped via ``stdin``.
+
+        Use this tool for custom statistical tests, transformations, or exploratory checks not
+        covered by built-in analysis tools:
+        1. Load the dataset via ``import sys, json; data_dict = json.loads(sys.stdin.read())``.
+        2. Print concise results with ``print(...)`` (only stdout/stderr are returned).
+        3. Scientific Python packages (``numpy``, ``scipy``, ``scikit-learn``, ``sympy``, ``pandas``)
+           are pre-installed; filesystem writes outside the sandbox, network access, and subprocesses
+           are blocked.
 
         Args:
-            program: Python code string to execute, starting with `import sys, json;
-                data_dict = json.loads(sys.stdin.read())` to access input data.
-            timeout_seconds: Wall-clock timeout in seconds. The effective value is capped.
-            memory_limit_mb: Address-space memory limit in MB. The effective value is capped.
-            output_limit_bytes: Limit on the amount of output (in bytes) that can be produced.
+            program: Python code to run. Read ``sys.stdin`` as JSON to inspect ``context.data``.
+            timeout_seconds: Wall-clock timeout in seconds (1-120, default 30).
+            memory_limit_mb: Maximum address-space memory in MB (64-4096, default 1024).
+            output_limit_bytes: Maximum stdout/stderr capture size in bytes (1024-1048576, default 65536).
+
+        Returns:
+            Dict[str, Any]: Sandbox stdout, stderr, timing, and resource-usage metrics.
         """
         timeout_seconds = self.bounded_int(
             timeout_seconds, self.DEFAULT_TIMEOUT_SECONDS, 1, self.MAX_TIMEOUT_SECONDS
@@ -99,13 +116,13 @@ class CodeExecutorTool(BaseTool):
 
     @classmethod
     def format_result_dict(cls, result: Dict[str, Any]) -> str:
-        """Format a tool result for the language model.
+        """Format sandbox stdout, stderr, and execution duration for the Agent.
 
         Args:
-            result: Result mapping to format or update.
+            result: Result dictionary returned by :meth:`execute`.
 
         Returns:
-            str: The operation result.
+            str: Formatted program output and runtime duration.
         """
         parts = []
         if result["stdout"]:
@@ -119,7 +136,14 @@ class CodeExecutorTool(BaseTool):
 
     @classmethod
     def extract_code(cls, code: str) -> str:
-        """Extract Python source from an optional Markdown fence."""
+        """Strip optional Markdown code fences (e.g. ````python ... ````) from a code string.
+
+        Args:
+            code: Raw code string or Markdown-fenced code block.
+
+        Returns:
+            str: Extracted Python source code.
+        """
         raw_code = str(code).strip()
         if "```python" in raw_code:
             return raw_code.split("```python")[-1].split("```")[0].strip()
@@ -136,7 +160,14 @@ class CodeExecutorTool(BaseTool):
 
     @classmethod
     def serialization(cls, value: Any) -> Any:
-        """Convert context data to JSON-compatible values."""
+        """Recursively convert NumPy arrays, scalars, and containers into JSON-serializable objects.
+
+        Args:
+            value: Arbitrary context data value to serialize.
+
+        Returns:
+            Any: JSON-serializable Python primitive, list, or dict.
+        """
         if value is None or isinstance(value, (str, int, float, bool)):
             return value
         if isinstance(value, dict):
@@ -151,5 +182,15 @@ class CodeExecutorTool(BaseTool):
 
     @classmethod
     def bounded_int(cls, value: Any, default: int, minimum: int, maximum: int) -> int:
-        """Return a bounded integer tool argument."""
+        """Coerce ``value`` to an integer clamped within ``[minimum, maximum]``.
+
+        Args:
+            value: Input value to coerce and clamp.
+            default: Fallback integer used when ``value`` cannot be converted.
+            minimum: Inclusive lower bound.
+            maximum: Inclusive upper bound.
+
+        Returns:
+            int: Clamped integer value.
+        """
         return bounded_value(value, min=minimum, max=maximum, default=default, converter=int)

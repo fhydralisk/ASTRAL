@@ -1,5 +1,5 @@
 # Copyright (c) 2026-present, Yumeow. Licensed under the MIT License.
-"""多项式拟合工具。提供对输入变量或表达式的多项式拟合功能，支持自定义最高阶次数、交叉项控制等。"""
+"""Polynomial regression tool with configurable degree, interactions, and term pruning."""
 
 import numpy as np
 import sr_harness_engine as engine
@@ -11,7 +11,7 @@ from .base_tool import BaseTool, ToolMetadata, is_numeric_array
 
 @BaseTool.register('polynomial_fit')
 class PolynomialFitTool(BaseTool):
-    """Implementation of the polynomial fit tool."""
+    """Tool for fitting multivariate polynomials with interaction filtering and negligible-term pruning."""
     metadata = ToolMetadata(name="polynomial_fit")
 
     def execute(
@@ -26,27 +26,26 @@ class PolynomialFitTool(BaseTool):
         simplify: bool = True,
         show_diagnostics: bool = True,
     ) -> Dict[str, Any]:
-        """Execute polynomial fit.
+        """Fit a multivariate polynomial up to ``max_degree`` using QR least squares and optional term pruning.
 
-        This tool can return candidate formulas for submission when `y` is the target variable and `x` does not depend on the target variable.
+        Supports custom input expressions, interaction whitelists/blacklists, and conservative
+        pruning of monomials whose RMS and peak contributions are negligible on the training set.
+        Returns a submission-eligible candidate when ``y`` is the default target variable and ``x``
+        does not depend on ``y``.
 
         Args:
-            x: List of input feature names, e.g., ["x1", "x2"]. Use all features other than y by default.
-                Expressions are also supported, e.g., ["sin(x1)", "(x1-x2)**2"].
-            y: Target variable name. Use target variable by default.
-                Expressions are also supported, e.g., "log(y)", "y - x1"
-            max_degree: Maximum polynomial degree.
-            include_interactions: Whether to include interaction terms.
-            interaction_blacklist: List of variable pairs that should not interact.
-                E.g., [("x1", "x2")] means no interaction between x1 and x2.
-            interaction_whitelist: Only allow specified variable pairs to interact.
-                By default, all pairs are allowed (unless in blacklist).
-                If specified, only interactions in the whitelist are generated.
-            include_bias: Whether to include bias/intercept term.
-            simplify: Whether to conservatively remove monomials whose fitted
-                contributions are negligible on the training samples, then refit
-                the remaining coefficients. Enabled by default.
-            show_diagnostics: Whether final metrics should include compact residual diagnostics.
+            x: Input variable names or expressions, e.g., ``["x1", "sin(x2)"]``. Defaults to all numeric non-target variables.
+            y: Target variable name or expression, e.g., ``"y"`` or ``"log(y)"``. Defaults to ``context.target``.
+            max_degree: Maximum total degree of polynomial terms (default 2).
+            include_interactions: Whether cross-product terms between distinct features are allowed.
+            interaction_blacklist: Pairs of feature names ``[(u, v), ...]`` excluded from interacting.
+            interaction_whitelist: If provided, only these feature pairs ``[(u, v), ...]`` are allowed to interact.
+            include_bias: Whether to include a constant intercept term.
+            simplify: Whether to prune negligible monomials and refit the remaining coefficients (default ``True``).
+            show_diagnostics: Whether to include residual diagnostics in the evaluation output.
+
+        Returns:
+            Dict[str, Any]: Fitted polynomial evaluation, pruning summary, and any collinearity warnings.
         """
         data = self.context.data
         y = y or self.context.target
@@ -199,13 +198,13 @@ class PolynomialFitTool(BaseTool):
 
     @classmethod
     def format_result_dict(cls, result: Dict[str, Any]) -> str:
-        """Format a tool result for the language model.
+        """Format the fitted polynomial evaluation and any numerical warnings for the Agent.
 
         Args:
-            result: Result mapping to format or update.
+            result: Result dictionary returned by :meth:`execute`.
 
         Returns:
-            str: The operation result.
+            str: Formatted polynomial fit report.
         """
         text = cls.format_evaluation_result(result, title="Best fitted polynomial")
         if result["exceptions"]:
@@ -325,16 +324,17 @@ class PolynomialFitTool(BaseTool):
         allowed_interactions: Set[Tuple[str, str]],
         include_bias: bool,
     ) -> List[engine.Expression]:
-        """Generate symbolic terms up to a total degree.
+        """Generate symbolic monomial expressions up to ``max_degree`` respecting interaction rules.
 
         Args:
-            features: Input feature expressions.
-            max_degree: Maximum total polynomial degree.
-            allowed_interactions: Optional interaction combinations to retain.
-            include_bias: Whether to include the constant term.
+            features: Parsed symbolic feature expressions.
+            max_degree: Maximum total degree per monomial.
+            allowed_interactions: Set of sorted feature-name pairs permitted to co-occur in a monomial.
+            include_bias: Whether to include the degree-0 constant term ``1``.
 
         Returns:
-            Generated polynomial terms."""
+            List[engine.Expression]: Ordered list of symbolic monomials.
+        """
         n_vars = len(features)
         terms = []
         for powers in sorted(product(range(max_degree + 1), repeat=n_vars), key=lambda p: (sum(p), p)):

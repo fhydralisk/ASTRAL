@@ -1,5 +1,5 @@
 # Copyright (c) 2026-present, Yumeow. Licensed under the MIT License.
-"""乘法幂律拟合工具。"""
+"""Multiplicative power-law fitting tool in log space with rational exponent snapping."""
 import numpy as np
 from fractions import Fraction
 from scipy.stats import t as student_t
@@ -9,7 +9,7 @@ from .base_tool import BaseTool, ToolMetadata, is_numeric_array
 
 @BaseTool.register("power_law_fit")
 class PowerLawFitTool(BaseTool):
-    """Implementation of the power law fit tool."""
+    """Tool for fitting multiplicative power laws ``y = c * prod(x_i ** p_i)`` in log space."""
     metadata = ToolMetadata("power_law_fit")
 
     def execute(
@@ -24,18 +24,25 @@ class PowerLawFitTool(BaseTool):
         n_stability_folds: int = 5,
         show_diagnostics: bool = True,
     ) -> Dict[str, Any]:
-        """Fit a multiplicative power law y = c * product(x_i ** p_i) in log space.
+        """Fit a multiplicative power law ``y = c * prod(x_i ** p_i)`` via log-space least squares.
+
+        Requires all supplied ``x`` and ``y`` values to be finite and strictly positive on every
+        training sample. Also computes jackknife 95% confidence intervals for each exponent and can
+        snap exponents to nearby simple fractions ``p/q`` when accuracy loss is within tolerance.
 
         Args:
-            x: Strictly positive input variables or expressions on every training sample. Use all numeric non-target variables by default.
-            y: Strictly positive target variable or expression on every training sample. Use the formula-discovery target by default.
-            include_scale: Whether to fit the multiplicative scale c.
-            snap_exponents: Whether to try nearby simple rational exponents and refit c.
-            max_denominator: Largest denominator considered when snapping exponents (1-32).
-            snap_tolerance: Maximum distance from every fitted exponent to its snapped value.
-            max_snap_rmse_degradation: Maximum normalized RMSE degradation allowed after snapping.
-            n_stability_folds: Number of disjoint folds for leave-one-fold-out exponent confidence intervals (2-20).
-            show_diagnostics: Whether final metrics should include compact residual diagnostics.
+            x: Strictly positive input variable names or expressions. Defaults to all numeric non-target variables.
+            y: Strictly positive target variable name or expression. Defaults to ``context.target``.
+            include_scale: Whether to fit the leading multiplicative constant ``c``.
+            snap_exponents: Whether to snap fitted exponents to nearby simple rationals and refit ``c``.
+            max_denominator: Maximum rational denominator considered when snapping exponents (1-32, default 8).
+            snap_tolerance: Maximum absolute change allowed per snapped exponent (default 0.05).
+            max_snap_rmse_degradation: Maximum normalized RMSE increase allowed after snapping (default 0.01).
+            n_stability_folds: Number of jackknife folds for exponent confidence intervals (2-20, default 5).
+            show_diagnostics: Whether to include residual diagnostics in the evaluation output.
+
+        Returns:
+            Dict[str, Any]: Fitted power-law evaluation, exponent CIs, rational-snapping check, and domain warnings.
         """
         data = self.context.data
         if y is not None and not isinstance(y, str):
@@ -253,13 +260,13 @@ class PowerLawFitTool(BaseTool):
 
     @classmethod
     def format_result_dict(cls, result: Dict[str, Any]) -> str:
-        """Format a tool result for the language model.
+        """Format the fitted power-law formula, exponent confidence intervals, and snapping results.
 
         Args:
-            result: Result mapping to format or update.
+            result: Result dictionary returned by :meth:`execute`.
 
         Returns:
-            str: The operation result.
+            str: Formatted power-law fit report or domain-inapplicability message.
         """
         if "data_split_results" not in result:
             if result.get("domain_inapplicable"):

@@ -58,7 +58,7 @@ def _inspect_source(source: str, filename: str) -> dict[str, Any]:
 
 
 class SandboxedCustomTool(BaseTool):
-    """Proxy a user-authored tool into a fresh confined worker per invocation."""
+    """Sandbox-backed proxy class that executes user-authored ``BaseTool`` subclasses in an isolated worker."""
 
     metadata = ToolMetadata(
         name="_sandboxed_custom_tool_proxy",
@@ -89,11 +89,26 @@ class SandboxedCustomTool(BaseTool):
         return dict(result.payload)
 
     def execute(self, **kwargs: Any) -> dict[str, Any]:
-        """Execute the custom tool in the OS sandbox."""
+        """Execute the custom tool inside a fresh OS sandbox worker.
+
+        Args:
+            **kwargs: Keyword arguments forwarded to the sandboxed tool's ``execute`` method.
+
+        Returns:
+            dict[str, Any]: Result dictionary returned by the sandboxed tool.
+        """
         return dict(self._sandbox_call(kwargs)["result"])
 
     def __call__(self, *args: Any, **kwargs: Any) -> ToolCallResult:
-        """Execute and format the tool without importing its code in this process."""
+        """Run and format the custom tool inside the OS sandbox without importing it in the host process.
+
+        Args:
+            *args: Disallowed positional arguments (raises ``TypeError`` if non-empty).
+            **kwargs: Keyword arguments forwarded to the sandbox worker.
+
+        Returns:
+            ToolCallResult: Execution status, raw dictionary, formatted text, and timing metadata.
+        """
         if args:
             raise TypeError("Sandboxed custom tools accept keyword arguments only")
         started = time.time()
@@ -130,7 +145,15 @@ class SandboxedCustomTool(BaseTool):
 
 
 def create_sandboxed_custom_tool(source: str, file: Path) -> type[BaseTool]:
-    """Validate custom tool source and return a metadata-only proxy class."""
+    """Inspect custom tool source inside the sandbox and construct a host-side proxy class.
+
+    Args:
+        source: Python source code defining a single :class:`BaseTool` subclass.
+        file: Path to the custom tool's ``tool.py`` file.
+
+    Returns:
+        type[BaseTool]: Dynamically generated :class:`SandboxedCustomTool` subclass.
+    """
     try:
         metadata = _inspect_source(source, file.name)
     except SandboxExecutionError as exc:

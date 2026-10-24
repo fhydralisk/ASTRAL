@@ -14,27 +14,27 @@ from .base_tool import BaseTool, ToolMetadata
 
 @BaseTool.register("constant_fit")
 class ConstantFitTool(BaseTool):
-    """Implementation of the constant fit tool."""
+    """Tool for snapping floating-point constants in a formula to nearby exact mathematical constants."""
     metadata = ToolMetadata("constant_fit")
     NEAR_RELATIVE_TOLERANCE = 0.05
     MAX_SIMPLE_CANDIDATES_PER_NUMBER = 4
     MAX_COMBINATIONS = 50000
 
     def execute(self, eq: str, y: str = None, use_eq_as_y: bool = False) -> Dict[str, Any]:
-        """Compare nearby simple constants at each numeric position in eq.
+        """Test nearby integers, simple fractions, and named constants (``pi``, ``e``, ``sqrt(n)``) at each numeric literal in ``eq``.
 
-        Search nearby integers and fractions (denominator <= 12, numerator <= 32),
-        pi, e, sqrt(2)..sqrt(10),
-        and signed half/double multiples of these named constants. Candidates
-        must be within 5% relative distance of the original number. The Pareto
-        front maximizes validation R2 if validation data exist, otherwise train
-        R2, and minimizes the count of original numeric constants left unchanged.
+        Searches within 5% relative distance of each numeric literal in ``eq`` for integers,
+        rationals (numerator <= 32, denominator <= 12), ``pi``, ``e``, ``sqrt(2)..sqrt(10)``,
+        and their ``±0.5x``, ``±1x``, ``±2x`` multiples. Returns the Pareto front trading off the
+        number of simplified constants against validation R2 (or train R2 when no validation split exists).
 
         Args:
-            eq: Required formula containing at least one numeric constant.
-            y: Target variable or expression; overrides use_eq_as_y when supplied.
-            use_eq_as_y: If y is omitted, compare against original eq rather
-                than the tool context's target variable.
+            eq: Formula string containing at least one floating-point or integer literal.
+            y: Target variable or expression to score against. Overrides ``use_eq_as_y`` when set.
+            use_eq_as_y: When ``True`` and ``y`` is omitted, score against the original ``eq`` output instead of ``context.target``.
+
+        Returns:
+            Dict[str, Any]: Nearby constant candidates per literal and the Pareto front of simplified formulas.
         """
         if y is not None and not isinstance(y, str):
             raise TypeError("y must be a string expression or None.")
@@ -179,13 +179,13 @@ class ConstantFitTool(BaseTool):
 
     @classmethod
     def format_result_dict(cls, result: Dict[str, Any]) -> str:
-        """Format a tool result for the language model.
+        """Format candidate constant replacements and the Pareto front for the Agent.
 
         Args:
-            result: Result mapping to format or update.
+            result: Result dictionary returned by :meth:`execute`.
 
         Returns:
-            str: The operation result.
+            str: Formatted summary of constant replacements and Pareto-optimal formulas.
         """
         if "exceptions" in result:
             return "Constant fitting not applicable: " + "; ".join(result["exceptions"])
