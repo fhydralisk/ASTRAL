@@ -1,3 +1,5 @@
+import copy
+
 import pytest
 from fastapi.testclient import TestClient
 from sr_harness.web.app import create_app
@@ -27,6 +29,9 @@ def test_catalog(setup):
 
 def test_readonly_and_prompts(setup):
     client, session, source = setup
+    settings = copy.deepcopy(session.settings)
+    data_settings = copy.deepcopy(session.data_agent_settings)
+    evaluator = session.context.evaluator
     response = client.post('/api/data/discovery-tasks/load', json={'name':'Chen_NatureAstronomy2023'})
     assert response.status_code == 200, response.text
     data = response.json()
@@ -37,6 +42,8 @@ def test_readonly_and_prompts(setup):
     assert source.read_text() == 'source observations'
     assert not (session.workspace/'README.txt').exists()
     assert not (session.workspace/'context.data').exists()
+    assert session.settings == settings and session.data_agent_settings == data_settings
+    assert session.context.evaluator is evaluator
     assert set(data['prompts']) == {'data_agent','problem_description','evaluator_agent','system_prompt','user_prompt'}
     assert all(data['prompts'].values())
     assert '-173' not in str(data['prompts'])
@@ -110,12 +117,14 @@ def test_browser_transient_promotion_preserves_readonly_input(tmp_path, monkeypa
 
 
 def test_case_specific_selection_without_reference_answers():
-    for name in ['Chen_NatureAstronomy2023','Xiang_Nature2022']:
-        case=next(c for c in discovery.CASES if c['name']==name)
+    for case in discovery.CASES:
         drafted=discovery.prompts(case,[], 'Generic system instructions')
         assert case['task'] in drafted['data_agent']
         assert case['task'] not in drafted['system_prompt']
         assert case['relation_zh'] not in str(drafted)
+        assert '审阅观测交接' not in str(drafted)
+        assert '启用观测准备工具' not in str(drafted)
+        assert '可复制' in drafted['data_agent']
     chen=next(c for c in discovery.CASES if c['name']=='Chen_NatureAstronomy2023')['task']
     assert 'SDSS' in chen and 'LAMOST' in chen and '重复' in chen
     xiang=next(c for c in discovery.CASES if c['name']=='Xiang_Nature2022')['task']

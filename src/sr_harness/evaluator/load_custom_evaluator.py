@@ -1,100 +1,23 @@
-"""Load built-in and user-authored evaluator implementations."""
+"""Load user-authored evaluator implementations."""
 
 from __future__ import annotations
 
 import re
-from collections import OrderedDict
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .default_evaluator import DefaultEvaluator
-from .graph_evaluator import GraphEvaluator
 from .sandboxed_evaluator import create_sandboxed_evaluator
 
 if TYPE_CHECKING:
     from ..runtime.workspace import Workspace
 
-EVALUATOR_DIRECTORY = Path(__file__).resolve().parent
 CUSTOM_TEMPLATE = (
     '"""Custom evaluator."""\n'
     "from .default_evaluator import DefaultEvaluator\n\n\n"
     "class CustomEvaluator(DefaultEvaluator):\n"
     "    pass\n"
 )
-BUILTIN_EVALUATORS = OrderedDict(
-    (
-        (
-            "default",
-            {
-                "label": "DefaultEvaluator（默认评测）",
-                "label_en": "DefaultEvaluator (default)",
-                "class": DefaultEvaluator,
-                "filename": "default_evaluator.py",
-            },
-        ),
-        (
-            "graph",
-            {
-                "label": "GraphEvaluator（图与超图）",
-                "label_en": "GraphEvaluator (graph/hypergraph)",
-                "class": GraphEvaluator,
-                "filename": "graph_evaluator.py",
-            },
-        ),
-    )
-)
-BUILTIN_EVALUATOR_CLASS_NAMES = {DefaultEvaluator.__name__, GraphEvaluator.__name__}
-
-
-def evaluator_source(evaluator_id: str) -> str:
-    """Read the source of a built-in evaluator.
-
-    Args:
-        evaluator_id: Built-in evaluator identifier.
-
-    Returns:
-        UTF-8 Python source for the evaluator.
-
-    Raises:
-        ValueError: If ``evaluator_id`` is unknown.
-    """
-    try:
-        filename = BUILTIN_EVALUATORS[evaluator_id]["filename"]
-    except KeyError as exc:
-        raise ValueError(f"Unknown evaluator: {evaluator_id}") from exc
-    return (EVALUATOR_DIRECTORY / filename).read_text(encoding="utf-8")
-
-
-def evaluator_catalog() -> list[dict[str, str]]:
-    """Return serializable metadata and source for built-in evaluators."""
-    return [
-        {
-            "id": evaluator_id,
-            "label": item["label"],
-            "label_en": item["label_en"],
-            "source": evaluator_source(evaluator_id),
-            "abstract": False,
-        }
-        for evaluator_id, item in BUILTIN_EVALUATORS.items()
-    ]
-
-
-def create_builtin_evaluator(evaluator_id: str) -> DefaultEvaluator:
-    """Instantiate a built-in evaluator.
-
-    Args:
-        evaluator_id: Built-in evaluator identifier.
-
-    Returns:
-        A new evaluator instance.
-
-    Raises:
-        ValueError: If ``evaluator_id`` is unknown.
-    """
-    try:
-        return BUILTIN_EVALUATORS[evaluator_id]["class"]()
-    except KeyError as exc:
-        raise ValueError(f"Unknown evaluator: {evaluator_id}") from exc
 
 
 def evaluator_filename(class_name: str) -> str:

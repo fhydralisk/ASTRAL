@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import ast
 import logging
+import inspect
+import re
 import os
 import stat
 import tempfile
@@ -23,14 +25,11 @@ from ..agents.evaluator_construction_agent import EvaluatorConstructionAgent
 from ..agents.sr_agent_interactive import SRAgentInteractive
 from ..api import BaseAPI
 from ..core import AgentContext, SearchRunState, json_value, load_context_data
-from ..evaluator import GraphEvaluator, load_custom_evaluator
+from .. import evaluator as evaluator_types
+from ..evaluator import load_custom_evaluator
 from ..evaluator.load_custom_evaluator import (
-    BUILTIN_EVALUATOR_CLASS_NAMES,
     CUSTOM_TEMPLATE,
-    create_builtin_evaluator,
-    evaluator_catalog,
     evaluator_filename,
-    evaluator_source,
 )
 from ..parser import BaseParser
 from ..runtime import InteractionManager, ModelRouter, SRInteractionManager
@@ -518,8 +517,8 @@ class InteractiveSession:
                     source=custom_source,
                     workspace=self.workspace_manager,
                 )
-            elif selected in {"default", "graph"}:
-                self.context.evaluator = create_builtin_evaluator(selected)
+            elif evaluator_class := self._builtin_evaluator_class(selected):
+                self.context.evaluator = evaluator_class()
             else:
                 raise ValueError(f"Unknown persisted evaluator: {selected!r}")
             self.context.invalidate_splits()
@@ -631,14 +630,52 @@ class InteractiveSession:
             self.variable_descriptions = dict(self.context.variable_descriptions)
             self.context.args.data_revision += 1
 
-    def evaluator_configuration(self):
-        """Return the selected evaluator and every available evaluator."""
+    @staticmethod
+    def _builtin_evaluator_class(evaluator_id):
+        """Resolve an exported evaluator class without a separate registry."""
+        if not isinstance(evaluator_id, str) or not re.fullmatch(r"[a-z][a-z0-9_]*", evaluator_id):
+            return None
+        class_name = "".join(word.title() for word in evaluator_id.split("_")) + "Evaluator"
+        if evaluator_filename(class_name) != f"{evaluator_id}_evaluator.py":
+            return None
+        candidate = getattr(evaluator_types, class_name, None)
+        if (isinstance(candidate, type)
+                and issubclass(candidate, evaluator_types.DefaultEvaluator)
+                and candidate.__module__.rpartition(".")[0] == evaluator_types.__name__
+                and not getattr(candidate, "CUSTOM_EVALUATOR", None)):
+            return candidate
+        return None
+
+    @staticmethod
+    def _evaluator_source(evaluator_class):
+        return Path(inspect.getfile(evaluator_class)).read_text(encoding="utf-8")
+
+    def evaluator_configuration(self, selected: str | None = None):
+        """Return active state, custom files, and optionally preview a class source.
+
+        Built-in menu labels and ordering belong to the frontend. Source previews
+        do not change the active evaluator or save any workspace file.
+        """
         metadata = self._evaluator_metadata()
+        custom_items = self._custom_evaluator_catalog()
+        source_for = metadata["selected"] if selected is None else selected
+        source = metadata["source"]
+        if source_for != metadata["selected"]:
+            if evaluator_class := self._builtin_evaluator_class(source_for):
+                source = self._evaluator_source(evaluator_class)
+            elif source_for == "custom":
+                source = CUSTOM_TEMPLATE
+            else:
+                item = next((item for item in custom_items if item["id"] == source_for), None)
+                if item is None:
+                    raise ValueError(f"Unknown evaluator: {source_for!r}")
+                source = item["source"]
         return {
             "selected": metadata["selected"],
-            "source": metadata["source"],
+            "source": source,
+            "source_for": source_for,
             "custom_template": CUSTOM_TEMPLATE,
-            "evaluators": [*evaluator_catalog(), *self._custom_evaluator_catalog()],
+            "evaluators": custom_items,
             "custom_name": metadata["custom_name"],
             "custom_file": metadata["custom_file"],
         }
@@ -729,10 +766,10 @@ class InteractiveSession:
                 "custom_name": type(evaluator).__name__,
                 "custom_file": str(file) if file is not None else None,
             }
-        selected = "graph" if type(evaluator) is GraphEvaluator else "default"
+        selected = evaluator_filename(type(evaluator).__name__).removesuffix("_evaluator.py")
         return {
             "selected": selected,
-            "source": evaluator_source(selected),
+            "source": self._evaluator_source(type(evaluator)),
             "custom_name": None,
             "custom_file": None,
         }
@@ -753,16 +790,13 @@ class InteractiveSession:
         evaluator_id = str(payload.get("selected", "")).strip()
         source = str(payload.get("source", ""))
         available = {
-            item["id"]: item for item in [*evaluator_catalog(), *self._custom_evaluator_catalog()]
+            item["id"]: item for item in self._custom_evaluator_catalog()
         }
         selected_item = available.get(evaluator_id)
-        builtin_source = (
-            evaluator_source(evaluator_id)
-            if evaluator_id in {item["id"] for item in evaluator_catalog()}
-            else None
-        )
+        builtin_class = self._builtin_evaluator_class(evaluator_id)
+        builtin_source = self._evaluator_source(builtin_class) if builtin_class else None
         if builtin_source is not None and source == builtin_source:
-            evaluator = create_builtin_evaluator(evaluator_id)
+            evaluator = builtin_class()
             source = builtin_source
             custom_name = None
         elif (
@@ -784,7 +818,12 @@ class InteractiveSession:
                 }
             except SyntaxError:
                 declared_names = set()
-            if conflicts := declared_names & BUILTIN_EVALUATOR_CLASS_NAMES:
+            conflicts = {
+                name for name in declared_names
+                if isinstance(candidate := getattr(evaluator_types, name, None), type)
+                and issubclass(candidate, evaluator_types.DefaultEvaluator)
+            }
+            if conflicts:
                 custom_name = sorted(conflicts)[0]
                 raise ValueError(
                     f"Evaluator class name {custom_name!r} conflicts with a built-in evaluator. "
@@ -795,11 +834,6 @@ class InteractiveSession:
                 workspace=self.workspace_manager,
             )
             custom_name = type(evaluator).__name__
-            if custom_name in BUILTIN_EVALUATOR_CLASS_NAMES:
-                raise ValueError(
-                    f"Evaluator class name {custom_name!r} conflicts with a built-in evaluator. "
-                    "Rename the class before saving."
-                )
             filename = evaluator_filename(custom_name)
             save_dir = self.evaluator_workspace
             save_dir_relative = str(save_dir.relative_to(self.workspace))
@@ -837,9 +871,10 @@ class InteractiveSession:
         evaluator_id = str(payload.get("selected", self._evaluator_metadata()["selected"])).strip()
         source = str(payload.get("source", ""))
         available = {
-            item["id"]: item for item in [*evaluator_catalog(), *self._custom_evaluator_catalog()]
+            item["id"]: item for item in self._custom_evaluator_catalog()
         }
         selected_item = available.get(evaluator_id)
+        builtin_class = self._builtin_evaluator_class(evaluator_id)
         if (
             selected_item is not None
             and selected_item.get("custom")
@@ -849,17 +884,15 @@ class InteractiveSession:
                 file=Path(selected_item["file"]),
                 workspace=self.workspace_manager,
             )
-        elif evaluator_id in {
-            item["id"] for item in evaluator_catalog()
-        } and source == evaluator_source(evaluator_id):
-            evaluator = create_builtin_evaluator(evaluator_id)
+        elif builtin_class is not None and source == self._evaluator_source(builtin_class):
+            evaluator = builtin_class()
         else:
             evaluator = load_custom_evaluator(
                 source=source,
                 workspace=self.workspace_manager,
             )
-        if not self.context.data or not self.context.target or not self.context.feature_names():
-            raise ValueError("Prepare data and select a target plus at least one feature first")
+        if not self.context.data or not self.context.target:
+            raise ValueError("Prepare data and select a target first")
         test_context = AgentContext(
             args=self.context.args,
             data=self.context.data,
@@ -1278,7 +1311,7 @@ class InteractiveSession:
             self.variable_descriptions = self.validate_variable_descriptions(payload)
             self._sync_manifest_descriptions(strict=True)
             target = str(payload.get("target") or self.context.target)
-            features = payload.get("features") or list(self.context.feature_names())
+            features = payload.get("features", list(self.context.feature_names()))
             X, y = self._select_context_columns(target, features)
             descriptions = dict(self.context.variable_descriptions)
             descriptions.update(self.variable_descriptions)
@@ -1475,7 +1508,7 @@ class InteractiveSession:
         )
         if self.context.data:
             target = str(payload.get("target") or self.context.target or "")
-            features = payload.get("features") or list(self.context.feature_names())
+            features = payload.get("features", list(self.context.feature_names()))
             X, y = self._select_context_columns(target, features)
         else:
             X, y = {"x": np.empty(1)}, {"y": np.empty(1)}
@@ -1514,8 +1547,8 @@ class InteractiveSession:
         target: str,
         features: Any,
     ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
-        if not target or not isinstance(features, list) or not features or target in features:
-            raise ValueError("Select a target and at least one distinct feature")
+        if not target or not isinstance(features, list) or target in features:
+            raise ValueError("Select a target and a list of distinct features")
 
         def array(name: str) -> np.ndarray | None:
             return self.context.data.get(name)

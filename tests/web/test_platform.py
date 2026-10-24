@@ -83,7 +83,7 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert "$('data-setup-next-button').onclick=()=>selectCenterTab('timeline')" in page.text
     assert "dataButton.disabled=!useCommittedContext" in page.text
     assert "taskButton.disabled=!taskConfigurationReady()" in page.text
-    assert "selectedFeatures().length&&researchProblemDescription()" in page.text
+    assert "targetVariable()&&researchProblemDescription()" in page.text
     assert '.workflow-next-button:not(:disabled){border-color:var(--accent);background:var(--accent)' in page.text
     assert "connected:'已连接到后端'" in page.text
     assert 'id="pause"' not in page.text
@@ -188,7 +188,7 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert 'function applyEvaluatorAgentResult()' in page.text
     assert "toolCallsBlock(card,payload.tool_calls)" in page.text
     assert 'evaluatorCustomSource' not in page.text
-    assert "evaluatorConfiguration.evaluators.map(item=>{const option=el('option'" in page.text
+    assert "evaluatorChoices().map(item=>{const option=el('option'" in page.text
     assert "Object.assign(el('option',_('evaluatorCustom'))" not in page.text
     assert "evaluatorArgsTitle:'context.args.*'" in page.text
     assert "copy.append(el('b',name),el('small',_(helpKey)))" in page.text
@@ -1608,6 +1608,35 @@ def test_data_agent_model_test_checks_completion_and_tool_call(platform, monkeyp
     assert created['tool_box'].native_tool_calls is True
 
 
+@pytest.mark.parametrize("selected,class_name", [
+    ("default", "DefaultEvaluator"),
+    ("graph", "GraphEvaluator"),
+])
+def test_evaluator_source_preview_does_not_select_or_create_files(platform, selected, class_name):
+    _, session = platform
+    preview = session.evaluator_configuration(selected)
+    assert preview["selected"] == "default"
+    assert preview["source_for"] == selected
+    assert f"class {class_name}" in preview["source"]
+    assert preview["evaluators"] == []
+    assert type(session.context.evaluator).__name__ == "DefaultEvaluator"
+    assert not session.evaluator_workspace.exists()
+    session.configure_evaluator({"selected": selected, "source": preview["source"]})
+    assert type(session.context.evaluator).__name__ == class_name
+    exported = session.export_persistent_state()
+    restored = InteractiveSession(session.run_dir, workspace_path=session.workspace)
+    restored.restore_persistent_state(exported)
+    assert type(restored.context.evaluator).__name__ == class_name
+
+
+@pytest.mark.parametrize("selected", ["../default_evaluator", "os.system", "sandboxed", "missing"])
+def test_evaluator_source_preview_rejects_unexported_classes(platform, selected):
+    _, session = platform
+    with pytest.raises(ValueError, match="Unknown evaluator"):
+        session.evaluator_configuration(selected)
+    assert type(session.context.evaluator).__name__ == "DefaultEvaluator"
+
+
 def test_evaluator_configuration_test_and_restricted_agent(platform, monkeypatch):
     client, session = platform
     capabilities = client.get(
@@ -1625,7 +1654,7 @@ def test_evaluator_configuration_test_and_restricted_agent(platform, monkeypatch
     configuration = client.get('/api/evaluator')
     assert configuration.status_code == 200
     assert configuration.json()['selected'] == 'default'
-    assert {item['id'] for item in configuration.json()['evaluators']} == {'default', 'graph'}
+    assert {item['id'] for item in configuration.json()['evaluators']} == set()
     assert not session.evaluator_workspace.exists()
     outside_evaluators = session.run_dir / 'outside-evaluators'
     outside_evaluators.mkdir()
@@ -1633,7 +1662,7 @@ def test_evaluator_configuration_test_and_restricted_agent(platform, monkeypatch
     session.evaluator_workspace.symlink_to(outside_evaluators, target_is_directory=True)
     assert {
         item['id'] for item in client.get('/api/evaluator').json()['evaluators']
-    } == {'default', 'graph'}
+    } == set()
     session.evaluator_workspace.unlink()
     session.evaluator_workspace.mkdir()
     invalid_file = session.evaluator_workspace / 'broken_evaluator.py'
@@ -1652,8 +1681,8 @@ def test_evaluator_configuration_test_and_restricted_agent(platform, monkeypatch
     invalid_file.unlink()
     session.evaluator_workspace.rmdir()
     evaluator_dir = Path(sr_harness.__file__).parent / 'evaluator'
-    default = next(item for item in configuration.json()['evaluators'] if item['id'] == 'default')
-    assert default['abstract'] is False
+    default = configuration.json()
+    assert default['source_for'] == 'default'
     assert 'class DefaultEvaluator:' in default['source']
     assert default['source'] == (evaluator_dir / 'default_evaluator.py').read_text()
     assert 'class CustomEvaluator(DefaultEvaluator):' in configuration.json()['custom_template']
@@ -1672,7 +1701,7 @@ def test_evaluator_configuration_test_and_restricted_agent(platform, monkeypatch
     assert renamed.json()['custom_file'] == str(saved_evaluator)
     assert {
         item['id'] for item in renamed.json()['evaluators']
-    } == {'default', 'graph', 'custom:project_evaluator.py'}
+    } == {'custom:project_evaluator.py'}
     assert saved_evaluator.read_text() == renamed_source
     assert type(session.context.evaluator).__name__ == 'ProjectEvaluator'
     assert type(session.context.evaluator).__module__ == 'sr_harness.evaluator.project_evaluator'
@@ -1708,7 +1737,7 @@ class CustomEvaluator(DefaultEvaluator):
     assert type(session.context.evaluator).__name__ == 'CustomEvaluator'
     custom_ids = {item['id'] for item in configured.json()['evaluators']}
     assert custom_ids == {
-        'default', 'graph', 'custom:custom_evaluator.py',
+        'custom:custom_evaluator.py',
         'custom:project_evaluator.py',
     }
     project_item = next(

@@ -147,8 +147,11 @@ def mount_platform(app, session: InteractiveSession):
             raise HTTPException(400, str(exc)) from exc
 
     @app.get("/api/evaluator")
-    def evaluator_configuration():
-        return session.evaluator_configuration()
+    def evaluator_configuration(selected: str | None = None):
+        try:
+            return session.evaluator_configuration(selected)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
 
     @app.put("/api/evaluator")
     def configure_evaluator(payload: dict = Body(...)):
