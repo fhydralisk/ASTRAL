@@ -18,7 +18,14 @@ _logger = getLogger(f"sr_harness.{__name__}")
 
 @dataclass(frozen=True)
 class Skill:
-    """Metadata for one runtime skill."""
+    """Metadata describing a built-in, tool-generated, or user-defined runtime skill.
+
+    Attributes:
+        name: Unique skill identifier.
+        description: Brief summary used for skill discovery.
+        readonly: Whether modifying the skill's files at runtime is disallowed.
+        skill_directory: Filesystem path to the directory containing ``SKILL.md``.
+    """
     name: str
     description: str
     readonly: bool
@@ -26,7 +33,7 @@ class Skill:
 
 
 class SkillManager:
-    """Manage built-in, runtime, and custom skills through one interface."""
+    """Registry that discovers, searches, reads, and updates built-in, tool, and custom skills."""
 
     def __init__(
         self,
@@ -34,6 +41,13 @@ class SkillManager:
         custom_directory: str | Path | None = None,
         workspace: Workspace | None = None,
     ):
+        """Initialize the skill manager with built-in and optional custom skill directories.
+
+        Args:
+            built_in_directory: Directory containing built-in packaged skills.
+            custom_directory: Directory where user-created or agent-created skills are stored.
+            workspace: Optional :class:`~sr_harness.runtime.Workspace` enforcing safe file access.
+        """
         package_directory = Path(__file__).parent
         runtime_directory = Path(tempfile.mkdtemp(prefix="sr_agent_runtime_skills_"))
         self.skill_directories: dict[str, Path] = {
@@ -48,10 +62,10 @@ class SkillManager:
         self.workspace = workspace
 
     def register_tool_docs(self, tool_cls_list: Iterable[type]) -> None:
-        """Materialize documentation from enabled tools as read-only runtime skills.
+        """Generate read-only reference skills from the docstrings and source code of enabled tools.
 
         Args:
-            tool_cls_list: Tool classes to register.
+            tool_cls_list: Iterable of :class:`~sr_harness.tools.BaseTool` subclasses.
         """
         for tool_cls in tool_cls_list:
             doc = tool_cls.get_doc()
@@ -79,10 +93,10 @@ class SkillManager:
             (skill_dir / "SKILL.md").write_text(content, encoding="utf-8")
 
     def load_tool_skills(self) -> list[tuple[Skill, str]]:
-        """Return registered tool skills together with their Python source.
+        """Return all registered tool-documentation skills paired with their Python source code.
 
         Returns:
-            Pairs containing the skill metadata and ``tool.py`` source.
+            list[tuple[Skill, str]]: List of ``(Skill, python_source)`` pairs.
         """
         loaded = []
         for skill in self.load_skills().values():
@@ -94,10 +108,10 @@ class SkillManager:
         return loaded
 
     def load_skills(self) -> dict[str, Skill]:
-        """Load skills.
+        """Scan all configured skill directories and return a mapping of available skills by name.
 
         Returns:
-            dict[str, Skill]: The operation result.
+            dict[str, Skill]: Mapping from skill name to :class:`Skill` metadata.
         """
         skills: dict[str, Skill] = {}
         for scope, root in self.skill_directories.items():
@@ -130,13 +144,16 @@ class SkillManager:
         return skills
 
     def get_skill(self, name: str) -> Skill:
-        """Return skill.
+        """Look up a single skill by name.
 
         Args:
-            name: Registered name.
+            name: Registered skill name.
 
         Returns:
-            Skill: The operation result.
+            Skill: Matching skill metadata object.
+
+        Raises:
+            KeyError: If no skill with ``name`` exists.
         """
         skills = self.load_skills()
         if name in skills:
@@ -145,14 +162,14 @@ class SkillManager:
         raise ValueError(f"Skill '{name}' not found. Available skills: {available}")
 
     def search_skills(self, query: str, limit: int = 5) -> list[Skill]:
-        """Rank skills by lexical overlap in name and discovery description.
+        """Search available skills by keyword overlap against skill names and descriptions.
 
         Args:
-            query: Search query.
-            limit: Maximum number of results.
+            query: Free-text search query.
+            limit: Maximum number of matching skills to return.
 
         Returns:
-            list[Skill]: The operation result.
+            list[Skill]: Top matching skills ordered by relevance.
         """
         tokens = set(re.findall(r"[a-zA-Z][\w-]+|[\u4e00-\u9fff]{2,}", query.lower()))
         ranked = []
@@ -167,14 +184,14 @@ class SkillManager:
         return matches[:max(1, min(int(limit), 20))]
 
     def read_skill(self, name: str, file_path: str = "SKILL.md") -> str:
-        """Read skill.
+        """Read a markdown or supporting text file from a skill directory.
 
         Args:
-            name: Registered name.
-            file_path: Path relative to the selected resource.
+            name: Registered skill name.
+            file_path: Relative path inside the skill directory (defaults to ``"SKILL.md"``).
 
         Returns:
-            str: The operation result.
+            str: UTF-8 text content of the requested skill file.
         """
         skill = self.get_skill(name)
         path = self._resolve_skill_file(skill, file_path)
@@ -184,13 +201,13 @@ class SkillManager:
             return f.read()
 
     def get_skill_tree(self, name: str) -> list[str]:
-        """Return skill tree.
+        """List all relative file paths inside a skill's directory.
 
         Args:
-            name: Registered name.
+            name: Registered skill name.
 
         Returns:
-            list[str]: The operation result.
+            list[str]: Sorted list of relative file paths belonging to the skill.
         """
         skill_dir = self.get_skill(name).skill_directory
         return [
@@ -207,16 +224,16 @@ class SkillManager:
         file_path: str = "SKILL.md",
         force: bool = False,
     ) -> Skill:
-        """Create a custom skill file or update a file in an editable skill.
+        """Create a new custom skill or update a file inside an editable custom skill.
 
         Args:
-            name: Registered name.
-            content: Text content.
-            file_path: Path relative to the selected resource.
-            force: Whether to overwrite an existing resource.
+            name: Target skill name.
+            content: UTF-8 text content to write.
+            file_path: Relative file path inside the skill directory (defaults to ``"SKILL.md"``).
+            force: Whether to allow overwriting an existing file.
 
         Returns:
-            Skill: The operation result.
+            Skill: Updated :class:`Skill` metadata object.
         """
         name = self._validate_name(name)
         skills = self.load_skills()

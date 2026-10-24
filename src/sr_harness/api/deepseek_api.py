@@ -9,9 +9,15 @@ from ..core import APICallSample, ToolCall
 
 @BaseAPI.register("deepseek")
 class DeepSeekAPI(BaseAPI):
-    """DeepSeek adapter accepting models in its live provider catalog."""
+    """LLM provider adapter for the official DeepSeek API (OpenAI-compatible endpoint)."""
 
     def __init__(self, model: str = "deepseek-chat", **kwargs: Any) -> None:
+        """Initialize the DeepSeek API adapter.
+
+        Args:
+            model: DeepSeek model identifier (defaults to ``"deepseek-chat"``).
+            **kwargs: Additional arguments forwarded to :class:`BaseAPI`.
+        """
         super().__init__(model=model, **kwargs)
         self._model_catalog = RemoteModelCatalog(
             lambda url: httpx.Client(proxy=self.proxy_url(url), trust_env=False)
@@ -20,12 +26,25 @@ class DeepSeekAPI(BaseAPI):
     def format_response(
         self, message: dict[str, Any], tool_calls: list[ToolCall], content: str | None = None
     ) -> APICallSample:
-        """Convert one DeepSeek message into the public response contract."""
+        """Convert a DeepSeek assistant message into a normalized :class:`~sr_harness.core.APICallSample`.
+
+        Args:
+            message: Raw DeepSeek response message dictionary.
+            tool_calls: Normalized tool calls extracted from the message.
+            content: Optional explicit text content override.
+
+        Returns:
+            APICallSample: Normalized assistant response sample.
+        """
         return self._build_response(message, tool_calls, content)
 
     @property
     def model_list(self) -> list[str]:
-        """Return the current DeepSeek model catalog."""
+        """Fetch and return the list of available models from the DeepSeek catalog.
+
+        Returns:
+            list[str]: Model identifiers offered by DeepSeek.
+        """
         endpoint = self.get_env("DEEPSEEK_ENDPOINT", "https://api.deepseek.com")
         return self._model_catalog.get(
             f"{endpoint.rstrip('/')}/models",

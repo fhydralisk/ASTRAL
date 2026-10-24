@@ -5,17 +5,15 @@ from .base_tool import BaseTool, ToolMetadata
 
 @BaseTool.register("edit_tool")
 class EditTool(BaseTool):
-    """Implementation of the edit tool."""
+    """Tool for patching and hot-reloading a custom ``tool.py`` inside an editable skill."""
     metadata = ToolMetadata(
         name="edit_tool",
         description=(
-            "Edit and reload a previously created custom tool. Pass the skill "
-            "directory name (not metadata.name) and one or more exact SEARCH/"
-            "REPLACE blocks: `<<<<<<< SEARCH\\nold\\n=======\\nnew\\n>>>>>>> "
-            "REPLACE`. SEARCH text must match exactly once; failed patches do "
-            "not modify files. A failed reload leaves the edited tool unavailable. Custom "
-            "tools must not use `@BaseTool.register(...)`; the loader registers "
-            "them from `metadata.name`."
+            "Patch and reload a custom tool in an editable skill directory. "
+            "Pass the skill directory name (`name`, not `metadata.name`) and one or more exact "
+            "SEARCH/REPLACE blocks (`<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE`). "
+            "Each SEARCH block must match once; failed patches leave files untouched. "
+            "Custom tools must not use `@BaseTool.register(...)`."
         ),
     )
     SEARCH_MARKER = "<<<<<<< SEARCH"
@@ -23,17 +21,15 @@ class EditTool(BaseTool):
     REPLACE_MARKER = ">>>>>>> REPLACE"
 
     def execute(self, name: str, tool_patch: str, skill_patch: str = "") -> Dict[str, Any]:
-        """Edit and reload a custom tool using exact search/replace blocks.
+        """Patch and reload a custom tool in an editable skill using exact ``SEARCH/REPLACE`` blocks.
 
         Args:
-            name: Exact skill name containing the custom tool.
-            tool_patch: One or more exact SEARCH/REPLACE blocks for tool.py,
-                using ``<<<<<<< SEARCH`` + old text + ``=======`` + new text +
-                ``>>>>>>> REPLACE``. SEARCH text must match exactly once. The
-                resulting tool must not use ``@BaseTool.register(...)``.
-            skill_patch: Optional blocks in the same format applied to the
-                complete SKILL.md file. ``name`` is the skill directory name,
-                not the tool's metadata.name.
+            name: Skill directory name containing ``tool.py`` (not the tool's ``metadata.name``).
+            tool_patch: One or more ``<<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE`` blocks for ``tool.py``. Each SEARCH block must match exactly once, and the resulting class must not use ``@BaseTool.register(...)``.
+            skill_patch: Optional ``SEARCH/REPLACE`` blocks to apply simultaneously to ``SKILL.md``.
+
+        Returns:
+            Dict[str, Any]: Reload status, skill name, registered ``tool_name``, and any patch warnings.
         """
         assert hasattr(self.context.args, "skill_manager"), "skill_manager must be provided in context.args."
         manager = self.context.args.skill_manager
@@ -100,13 +96,13 @@ class EditTool(BaseTool):
 
     @classmethod
     def format_result_dict(cls, result: Dict[str, Any]) -> str:
-        """Format a tool result for the language model.
+        """Format the custom tool patch and reload status for the Agent.
 
         Args:
-            result: Result mapping to format or update.
+            result: Result dictionary returned by :meth:`execute`.
 
         Returns:
-            str: The operation result.
+            str: Confirmation message or failure diagnostics.
         """
         if not result.get("success"):
             return f"Custom tool edit failed for skill {result['skill']!r}: " + "; ".join(result["warnings"])

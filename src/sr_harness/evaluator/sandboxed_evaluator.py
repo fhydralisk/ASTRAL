@@ -27,7 +27,12 @@ def _context_payload(context: AgentContext) -> dict[str, Any]:
 
 
 class SandboxedCustomEvaluator(DefaultEvaluator):
-    """DefaultEvaluator-compatible proxy whose implementation runs out of process."""
+    """Out-of-process proxy for a user-defined :class:`DefaultEvaluator` subclass.
+
+    Delegates :meth:`split`, :meth:`fit`, :meth:`evaluate`, :meth:`fit_candidate`,
+    and :meth:`evaluate_candidate` to an isolated OS sandbox worker so untrusted
+    custom evaluator code never runs inside the main server process.
+    """
 
     CUSTOM_EVALUATOR: dict[str, Any]
     SANDBOX_SOURCE: str
@@ -68,7 +73,14 @@ class SandboxedCustomEvaluator(DefaultEvaluator):
 
     @classmethod
     def split(cls, context: AgentContext):
-        """Split context data in the isolated evaluator process."""
+        """Execute the custom evaluator's ``split(context)`` method inside the OS sandbox.
+
+        Args:
+            context: Complete unsplit :class:`~sr_harness.core.AgentContext`.
+
+        Returns:
+            dict[str, AgentContext]: Training and validation context views reconstructed from sandbox outputs.
+        """
         result = cls._request("split", context)
         if set(result.arrays) != {"train", "validation"}:
             raise ValueError("Custom evaluator split() must return train and validation data")
@@ -78,7 +90,16 @@ class SandboxedCustomEvaluator(DefaultEvaluator):
     def fit(
         cls, f: engine.Expression, y: engine.Expression, context: AgentContext
     ) -> engine.Expression:
-        """Fit a general equality in the isolated evaluator process."""
+        """Execute the custom evaluator's ``fit(f, y, context)`` method inside the OS sandbox.
+
+        Args:
+            f: Symbolic expression whose parameters will be fitted.
+            y: Target symbolic expression.
+            context: Training split :class:`~sr_harness.core.AgentContext`.
+
+        Returns:
+            engine.Expression: Parameter-bound expression returned by the sandboxed worker.
+        """
         result = cls._request("fit", context, f=f, y=y)
         return engine.parse(str(result.payload["expression"]))
 
@@ -86,19 +107,44 @@ class SandboxedCustomEvaluator(DefaultEvaluator):
     def evaluate(
         cls, f: engine.Expression, y: engine.Expression, context: AgentContext
     ) -> MetricDict:
-        """Evaluate a general equality in the isolated evaluator process."""
+        """Execute the custom evaluator's ``evaluate(f, y, context)`` method inside the OS sandbox.
+
+        Args:
+            f: Parameter-bound expression to evaluate.
+            y: Target symbolic expression.
+            context: Training or validation :class:`~sr_harness.core.AgentContext`.
+
+        Returns:
+            MetricDict: Validated dictionary of numeric metrics.
+        """
         result = cls._request("evaluate", context, f=f, y=y)
         return dict(result.payload["metrics"])
 
     @classmethod
     def fit_candidate(cls, f: engine.Expression, context: AgentContext) -> engine.Expression:
-        """Fit a candidate in the isolated evaluator process."""
+        """Execute the custom evaluator's ``fit_candidate(f, context)`` method inside the OS sandbox.
+
+        Args:
+            f: Candidate symbolic expression predicting ``context.target``.
+            context: Training split :class:`~sr_harness.core.AgentContext`.
+
+        Returns:
+            engine.Expression: Parameter-bound candidate expression.
+        """
         result = cls._request("fit", context, f=f, candidate=True)
         return engine.parse(str(result.payload["expression"]))
 
     @classmethod
     def evaluate_candidate(cls, f: engine.Expression, context: AgentContext) -> MetricDict:
-        """Evaluate a candidate in the isolated evaluator process."""
+        """Execute the custom evaluator's ``evaluate_candidate(f, context)`` method inside the OS sandbox.
+
+        Args:
+            f: Parameter-bound candidate expression.
+            context: Training or validation :class:`~sr_harness.core.AgentContext`.
+
+        Returns:
+            MetricDict: Validated dictionary of numeric candidate metrics.
+        """
         result = cls._request("evaluate", context, f=f, candidate=True)
         return dict(result.payload["metrics"])
 
@@ -156,7 +202,15 @@ def _inspect_source(source: str, filename: str) -> tuple[str, tuple[tuple[str, A
 
 
 def create_sandboxed_evaluator(source: str, file: Path | None = None) -> DefaultEvaluator:
-    """Validate source in the sandbox and return a named proxy instance."""
+    """Validate custom evaluator Python source in the sandbox and construct a named proxy instance.
+
+    Args:
+        source: Python source code defining a single ``DefaultEvaluator`` subclass.
+        file: Optional source file path recorded for provenance.
+
+    Returns:
+        DefaultEvaluator: Proxy instance whose class name matches the custom subclass.
+    """
     filename = file.name if file is not None else "custom_evaluator.py"
     class_name, class_attributes = _inspect_source(source, filename)
     module_name = f"sr_harness.evaluator.{Path(filename).stem}"

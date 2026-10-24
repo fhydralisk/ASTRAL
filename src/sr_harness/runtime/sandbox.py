@@ -535,6 +535,7 @@ class SandboxRunner:
     """Execute Python code with optional workspace access in the OS sandbox."""
 
     def __init__(self) -> None:
+        """Initialize the sandbox runner and verify that the host kernel supports Landlock ABI 3+."""
         self._process_runner = _SandboxProcessRunner()
 
     def run(

@@ -54,15 +54,18 @@ class _DuckDuckGoParser(HTMLParser):
 
 @BaseTool.register("web_search")
 class WebSearchTool(BaseTool):
-    """Implementation of the web search tool."""
+    """Tool for searching the public web for scientific papers, benchmarks, and documentation."""
     metadata = ToolMetadata(name="web_search")
 
     def execute(self, query: str, max_results: int = 5) -> Dict[str, Any]:
-        """Search the public web for papers, documentation, and scientific context.
+        """Search the public web for scientific literature, documentation, and domain context.
 
         Args:
-            query: Specific search query.
-            max_results: Maximum number of results, between 1 and 10.
+            query: Specific search query string.
+            max_results: Maximum number of search results to return (1-10, default 5).
+
+        Returns:
+            Dict[str, Any]: Search query, provider name, and list of ``{"title", "url", "snippet"}`` results.
         """
         if not query.strip():
             raise ValueError("query must not be empty")
@@ -109,15 +112,22 @@ class _TextParser(HTMLParser):
 
 @BaseTool.register("web_fetch")
 class WebFetchTool(BaseTool):
-    """Implementation of the web fetch tool."""
+    """Tool for fetching readable plain text from a public HTTP(S) webpage."""
     metadata = ToolMetadata(name="web_fetch")
 
     def execute(self, url: str, max_characters: int = 30000) -> Dict[str, Any]:
-        """Fetch readable text from a public HTTP or HTTPS page.
+        """Fetch and extract readable text from a public HTTP or HTTPS webpage URL.
+
+        Rejects non-public IP addresses, credentials in URLs, and HTTP redirects. If a site blocks
+        automated access (HTTP 401/403/429), returns ``blocked=True`` so you can search for an
+        alternative source instead of retrying.
 
         Args:
-            url: Absolute public webpage URL returned by web_search.
-            max_characters: Maximum number of extracted text characters, between 1000 and 50000.
+            url: Absolute public ``http://`` or ``https://`` URL to fetch.
+            max_characters: Maximum number of extracted text characters to return (1000-50000, default 30000).
+
+        Returns:
+            Dict[str, Any]: URL, extracted text, truncation flag, and block status if access was denied.
         """
         parsed = urlparse(url)
         if (

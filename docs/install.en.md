@@ -2,26 +2,32 @@
 
 ## Requirements
 
-- Python 3.12 or newer;
-- Linux, macOS, or an equivalent Python environment;
-- an API key for at least one supported model provider.
+- **Python**: 3.12 or newer
+- **Operating System**: Linux, macOS, or an equivalent Python environment
+- **Model Provider**: An API key for at least one supported LLM provider (such as OpenRouter, DeepSeek, OpenAI, Gemini, or SiliconFlow)
 
-!!! note "The code sandbox requires Landlock ABI 3 or newer"
-    `code_executor`, `evaluate_code`, `workspace_code_executor`, custom Tools, and custom Evaluators use Linux Landlock and seccomp for kernel-enforced isolation. Landlock is a Linux Security Module built into the kernel, not a package installed with `pip` or a system package manager. SRHarness requires Landlock ABI 3 or newer (normally Linux 6.2 or newer) so the sandbox can restrict file truncation. If the current distribution kernel does not provide or enable Landlock, install or enable a newer kernel supplied by the distribution. Other platforms can still use features that do not execute arbitrary code, but these entry points raise `SandboxUnavailableError` rather than falling back to Python source inspection.
+!!! note "Kernel Sandbox Requirement (Landlock ABI 3+)"
+    Code-execution tools (`code_executor`, `evaluate_code`, `workspace_code_executor`) as well as custom Tools and custom Evaluators rely on Linux **Landlock** and **seccomp** for kernel-level isolation.
 
-    Check the Landlock ABI exposed by the running kernel with:
+    - Landlock is a built-in Linux Security Module in the kernel, not a package installed via `pip` or `apt`.
+    - SRHarness requires **Landlock ABI 3 or newer** (typically **Linux 6.2+**) so the sandbox can block unauthorized file truncation and writes.
+    - On kernels or platforms without Landlock support, you can still use all features that do not execute arbitrary Python code, but calling sandboxed code-execution entry points will raise `SandboxUnavailableError` rather than falling back to weak AST-only checks.
+
+    You can check the Landlock ABI version supported by your current kernel with:
 
     ```bash
     python -c "from sr_harness.runtime.landlock import landlock_abi; print(landlock_abi())"
     ```
 
-## Install from PyPI
+## Install from PyPI (Recommended)
+
+To run SRHarness or launch the interactive WebUI workbench, install the package from PyPI:
 
 ```bash
 pip install sr-harness
 ```
 
-Verify the entry point and imports with:
+Verify that the CLI and core packages work properly:
 
 ```bash
 sr-harness --help
@@ -30,7 +36,9 @@ python -c "import sr_harness, sr_harness_engine; print('SRHarness is ready')"
 
 ## Run with Docker
 
-The official image is published on [Docker Hub](https://hub.docker.com/r/yumeoww/sr-harness). It includes the WebUI and the `tools` optional dependencies, so Python does not need to be installed on the host. First create a `.env` file in the current directory with the API key for your model provider, then run:
+If you prefer not to manage a local Python environment, use the official image on [Docker Hub](https://hub.docker.com/r/yumeoww/sr-harness), which comes pre-installed with the WebUI and the `tools` extras.
+
+Create a `.env` file in your current directory containing your model provider's API key, then run:
 
 ```bash
 docker volume create sr-harness-data
@@ -44,7 +52,9 @@ docker run --detach \
   yumeoww/sr-harness:latest
 ```
 
-Open `http://127.0.0.1:8000/` in a browser. The `sr-harness-data` Docker volume persistently stores the conversation registry, conversation workspaces, and run records; removing or replacing the container does not remove this data. Use these commands to inspect logs or manage the service:
+Open `http://127.0.0.1:8000/` in your browser. The `sr-harness-data` Docker volume stores your conversation list, workspaces, and run logs persistently across container restarts or upgrades.
+
+Useful commands for viewing logs and managing the container:
 
 ```bash
 docker logs --follow --tail 100 sr-harness
@@ -52,14 +62,14 @@ docker stop sr-harness
 docker start sr-harness
 ```
 
-To accept connections from other hosts, change the port mapping to `--publish 8000:8000` and open the corresponding firewall port. SRHarness does not provide a complete authentication, authorization, or network-security boundary. Configure a reverse proxy, TLS, and access control before exposing it to an untrusted network.
+To allow access from other machines, change the port flag to `--publish 8000:8000` and open the port in your firewall. Note that SRHarness does not include built-in user authentication; always place it behind a reverse proxy with TLS and access control before exposing it to an untrusted network.
 
-!!! warning
-    Docker can restrict an Agent's access to host files and processes, but code executed inside the container may still read environment variables passed to that container. Do not mount host directories containing sensitive files at `/data`. For a public deployment serving untrusted users, place model credentials in a separate gateway and restrict container egress instead of giving the Agent container a real API key.
+!!! warning "Container Security Note"
+    While Docker isolates host files and processes, environment variables passed directly into the container may still be readable by code running inside it. Never mount sensitive host directories at `/data`. For public multi-user deployments, keep real API keys in a separate proxy gateway and restrict container outbound traffic.
 
-## Install from source
+## Install from Source (Development)
 
-Use an editable installation when modifying SRHarness, running its tests, or building its documentation:
+If you want to modify SRHarness, run the test suite, or build the documentation locally, install it in editable mode:
 
 ```bash
 git clone https://github.com/yuzhTHU/SRHarness.git SRHarness
@@ -70,72 +80,74 @@ python -m pip install --upgrade pip
 pip install -e '.[all]'
 ```
 
-## Optional dependencies
+## Optional Dependencies (Extras)
 
-| Extra | Contents | Command |
+Heavyweight or specialized dependencies are grouped into optional extras so the base installation stays fast and lightweight:
+
+| Extra | Included Packages | Install Command |
 |---|---|---|
-| `tools` | PySR, PySINDy, PDF support, and research tools | `pip install 'sr-harness[tools]'` |
+| `tools` | PySR, PySINDy, PDF reading, and scientific discovery tools | `pip install 'sr-harness[tools]'` |
 | `nn` | PyTorch and PyTorch Geometric | `pip install 'sr-harness[nn]'` |
-| `dev` | pytest, MkDocs, Material, mkdocstrings, and development tools | `pip install 'sr-harness[dev]'` |
-| `all` | Every optional extra | `pip install 'sr-harness[all]'` |
+| `dev` | pytest, MkDocs, Material, mkdocstrings, and developer utilities | `pip install 'sr-harness[dev]'` |
+| `all` | All optional extras above | `pip install 'sr-harness[all]'` |
 
-For a development environment with research tools:
+For example, to install both research tools and development utilities:
 
 ```bash
 pip install 'sr-harness[tools,dev]'
 ```
 
-For source development, replace the command above with `pip install -e '.[tools,dev]'`.
+When working from a source checkout, use `pip install -e '.[tools,dev]'`.
 
 !!! note
-    PySR and PyTorch take longer to install and may have additional platform requirements. You do not need every extra to try SRHarness; install them later when you need the corresponding features.
+    Packages like PySR and PyTorch take longer to install and may have platform-specific requirements. You can start with the base package and install extras later as needed.
 
-## Configure a model provider
+## Configure Model Providers
 
-Create a `.env` file in the working directory or export the provider variables in your shell. For example, configure OpenRouter with:
+Create a `.env` file in your working directory or export the environment variable for your model provider in your shell. For example, with OpenRouter:
 
 ```dotenv
 OPENROUTER_API_KEY="sk-or-v1-..."
 ```
 
-For a source installation, you can also run `test -f .env || cp .env.sample .env` and edit the generated `.env` template.
+In a source checkout, you can also copy the sample file via `test -f .env || cp .env.sample .env` and fill in your keys.
 
-Common credentials are:
+Common provider environment variables:
 
-| Provider | Environment variables | Get an API key |
+| Provider | Environment Variables | Get an API Key |
 |---|---|---|
 | OpenRouter | `OPENROUTER_API_KEY` | [OpenRouter Keys](https://openrouter.ai/settings/keys) |
 | DeepSeek | `DEEPSEEK_API_KEY` | [DeepSeek Platform](https://platform.deepseek.com/api_keys) |
 | Gemini | `GEMINI_API_KEY` | [Google AI Studio](https://aistudio.google.com/app/apikey) |
 | SiliconFlow | `SILICONFLOW_API_KEY` | [SiliconFlow API Keys](https://cloud.siliconflow.cn/account/ak) |
-| OpenAI/Azure OpenAI | `OPENAI_API_KEY`, `OPENAI_ENDPOINT`, `OPENAI_API_VERSION` | [OpenAI API Keys](https://platform.openai.com/api-keys) / [Azure Portal](https://portal.azure.com/) |
+| OpenAI / Azure OpenAI | `OPENAI_API_KEY`, `OPENAI_ENDPOINT`, `OPENAI_API_VERSION` | [OpenAI API Keys](https://platform.openai.com/api-keys) / [Azure Portal](https://portal.azure.com/) |
 
-You can also configure API keys in the [WebUI](web-ui.md). A configured key is saved to the current conversation's private `sessions/{CONVERSATION_ID}/.env` and is not exposed to Agent workspaces or other conversations.
+You can also enter API keys directly in the [WebUI](web-ui.md) settings panel. Keys saved through the WebUI are stored in each conversation's private `sessions/{CONVERSATION_ID}/.env` and are isolated from Agent workspace tools and other conversations.
 
-## Proxy configuration
+## Proxy Configuration
 
-To use a network proxy, set `HTTP_PROXY` and `HTTPS_PROXY`, for example:
+If you need an HTTP/HTTPS proxy to reach model APIs, export `HTTP_PROXY` and `HTTPS_PROXY`:
 
 ```bash
 export HTTP_PROXY=http://127.0.0.1:7890
 export HTTPS_PROXY=http://127.0.0.1:7890
 ```
 
-You can also configure a network proxy in the [WebUI](web-ui.md). The configured address is used for HTTP and HTTPS requests and saved to the current conversation's private `.env`.
+You can also set a proxy URL per conversation inside the [WebUI](web-ui.md) Agent settings panel.
 
-## Verify and run
+## Verify and Launch
 
-Launch the workbench:
+Start the interactive workbench locally:
 
 ```bash
 sr-harness run --save-path ./sr-harness --host 127.0.0.1 --port 8000
 ```
 
-Then open `http://127.0.0.1:8000/` in a browser.
+Then open `http://127.0.0.1:8000/` in your browser.
 
-## Build this documentation
+## Build the Documentation
 
-Clone the project from GitHub and build the documentation locally:
+To preview or build this documentation site locally:
 
 ```bash
 git clone https://github.com/yuzhTHU/SRHarness.git SRHarness
@@ -144,11 +156,8 @@ pip install -e '.[dev]'
 mkdocs serve
 ```
 
-Then open `http://127.0.0.1:8001/` in a browser.
-
-Run a strict build before publishing:
+Open `http://127.0.0.1:8001/` in your browser. Before publishing changes, run a strict build check:
 
 ```bash
 mkdocs build --strict
 ```
-

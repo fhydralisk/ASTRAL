@@ -16,19 +16,28 @@ _logger = logging.getLogger(f"sr_harness.{__name__}")
 
 @BaseAPI.register("lmstudio")
 class LMStudioAPI(BaseAPI):
-    """LLM API adapter for an LM Studio server.
+    """LLM provider adapter for a local or remote LM Studio server.
 
-    ``LMSTUDIO_ENDPOINT`` may point at LM Studio's native ``/api/v1/chat``
-    endpoint, as recommended by LM Studio. SRAgent needs multi-turn messages
-    and custom function tools, so requests are sent to the OpenAI-compatible
-    ``/v1/chat/completions`` endpoint on the same server.
+    Automatically normalizes LM Studio's ``/api/v1/chat`` endpoint to the
+    OpenAI-compatible ``/v1/chat/completions`` route required for multi-turn
+    conversations and function calling.
     """
 
     def __init__(self, model: str = "qwen_qwen3-4b-instruct-2507", **kwargs: Any) -> None:
+        """Initialize the LM Studio API adapter.
+
+        Args:
+            model: Local model identifier loaded in LM Studio.
+            **kwargs: Additional arguments forwarded to :class:`BaseAPI`.
+        """
         super().__init__(model=model, **kwargs)
 
     def cancel(self) -> str:
-        """Report that the current synchronous HTTP request cannot be preempted."""
+        """Request cancellation and note that synchronous LM Studio HTTP calls finish the active request before stopping.
+
+        Returns:
+            str: Human-readable notice describing cancellation behavior.
+        """
         return (
             "LMStudioAPI does not support force-interrupting an active non-streaming request. "
             "The Agent will pause at its next safe boundary."
@@ -37,23 +46,36 @@ class LMStudioAPI(BaseAPI):
     def format_response(
         self, message: dict[str, Any], tool_calls: list[ToolCall], content: str | None = None
     ) -> APICallSample:
-        """Convert one LM Studio message into one API-call sample."""
+        """Convert an LM Studio completion message into a normalized :class:`~sr_harness.core.APICallSample`.
+
+        Args:
+            message: Raw message dictionary returned by LM Studio.
+            tool_calls: Normalized tool calls extracted from the message.
+            content: Optional explicit text content override.
+
+        Returns:
+            APICallSample: Normalized assistant response sample.
+        """
         return self._build_response(message, tool_calls, content)
 
     @property
     def model_list(self) -> list[str]:
-        """Return the default LM Studio model configured for this adapter."""
+        """Return the configured model identifier for this LM Studio instance.
+
+        Returns:
+            list[str]: Single-element list containing the active model name.
+        """
         return ["qwen_qwen3-4b-instruct-2507"]
 
     @staticmethod
     def normalize_endpoint(endpoint: str) -> str:
-        """Return the OpenAI-compatible chat-completions URL.
+        """Convert an LM Studio base URL or native chat path into the ``/v1/chat/completions`` endpoint URL.
 
         Args:
-            endpoint: The endpoint value.
+            endpoint: Raw endpoint URL from ``LMSTUDIO_ENDPOINT`` or settings.
 
         Returns:
-            str: The operation result.
+            str: Normalized OpenAI-compatible chat completions URL.
         """
         endpoint = endpoint.strip()
         parts = urlsplit(endpoint)

@@ -23,14 +23,21 @@ request_work_keys: ContextVar[tuple[str, ...]] = ContextVar("request_work_keys",
 
 
 class RequestWorkPool:
-    """No unbounded queue; timed-out work keeps its slot until it really exits.
+    """Bounded thread-pool admission controller that prevents a single conversation from monopolizing HTTP workers.
 
-    Python threads cannot be killed safely. Admission accounting deliberately
-    outlives the HTTP timeout, preventing retries from spawning unlimited work.
-    This is containment of HTTP work, not OS-level memory/GIL isolation.
+    Timed-out synchronous requests keep their admission slot until the underlying
+    worker thread actually exits, preventing client retries from spawning unbounded
+    background threads.
     """
 
     def __init__(self, *, workers=16, per_key=4, timeout=30.0):
+        """Initialize the bounded HTTP worker pool.
+
+        Args:
+            workers: Total maximum concurrent worker threads across all conversations.
+            per_key: Maximum concurrent worker threads permitted per conversation/tenant key.
+            timeout: Per-request execution timeout in seconds before returning HTTP 504.
+        """
         self.workers = workers
         self.per_key = per_key
         self.timeout = timeout
@@ -41,6 +48,16 @@ class RequestWorkPool:
         self._closed = False
 
     async def run(self, function, *args, **kwargs):
+        """Execute ``function(*args, **kwargs)`` in the worker pool while enforcing per-key admission limits and timeouts.
+
+        Args:
+            function: Synchronous callable to execute.
+            *args: Positional arguments passed to ``function``.
+            **kwargs: Keyword arguments passed to ``function``.
+
+        Returns:
+            Any: Return value of ``function``.
+        """
         keys = tuple(set(request_work_keys.get()))
         with self._lock:
             if any(self._counts[key] >= self.per_key for key in keys):
@@ -89,17 +106,25 @@ class RequestWorkPool:
             raise HTTPException(504, "This request took too long. It may still be finishing; check its state before retrying.") from exc
 
     def start(self):
+        """Ensure the underlying ``ThreadPoolExecutor`` is running (recreating it if previously closed)."""
         with self._lock:
             if self._closed:
                 self._executor = ThreadPoolExecutor(max_workers=self.workers, thread_name_prefix="srh-http")
                 self._closed = False
 
     def close(self):
+        """Shut down the underlying ``ThreadPoolExecutor`` without waiting for hung threads."""
         self._closed = True
         self._executor.shutdown(wait=False, cancel_futures=True)
 
 
 def install_route_isolation(app, pool):
+    """Configure ``app`` so synchronous route handlers run inside ``pool`` with JSON response budget checks.
+
+    Args:
+        app: FastAPI application instance.
+        pool: :class:`RequestWorkPool` managing synchronous route execution.
+    """
     class IsolatedRoute(APIRoute):
         def __init__(self, path, endpoint, **kwargs):
             if not inspect.iscoroutinefunction(endpoint):
@@ -131,13 +156,26 @@ def install_route_isolation(app, pool):
 
 
 class RequestBodyLimit:
-    """Reject large bodies before JSON parsing, including chunked requests."""
+    """ASGI middleware that rejects oversized HTTP request bodies (including chunked transfers) before JSON parsing."""
 
     def __init__(self, app, max_bytes=4 * 1024 * 1024):
+        """Initialize the request body size limiter middleware.
+
+        Args:
+            app: Downstream ASGI application.
+            max_bytes: Maximum allowed request body size in bytes (defaults to 4 MiB).
+        """
         self.app = app
         self.max_bytes = max_bytes
 
     async def __call__(self, scope, receive, send):
+        """Enforce the request body byte limit on incoming HTTP requests before forwarding to ``self.app``.
+
+        Args:
+            scope: ASGI connection scope dictionary.
+            receive: ASGI receive callable.
+            send: ASGI send callable.
+        """
         if scope['type'] != 'http' or scope.get('method') in {'GET', 'HEAD', 'OPTIONS'}:
             return await self.app(scope, receive, send)
         # Upload already streams to disk with its own 256 MiB size check.

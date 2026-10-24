@@ -11,12 +11,16 @@ _logger = getLogger(f'sr_harness.{__name__}')
 
 @BaseParser.register('openai')
 class OpenAIParser(BaseParser):
-    """Parser for native OpenAI-compatible tool calls."""
+    """Tool-call parser for providers supporting native OpenAI-compatible function calling."""
 
     native_tool_calls = True
 
     def format_tools(self) -> List[Dict[str, Any]]:
-        """Return OpenAI-compatible native function descriptions."""
+        """Return OpenAI-compatible function tool schema definitions for all enabled tools.
+
+        Returns:
+            List[Dict[str, Any]]: List of ``{"type": "function", "function": ...}`` tool schemas.
+        """
         return [
             {
                 "type": "function",
@@ -30,7 +34,14 @@ class OpenAIParser(BaseParser):
         ]
 
     def parse_response(self, response: Any) -> List[ToolCall]:
-        """Normalize provider-native function calls already extracted by BaseAPI."""
+        """Normalize native ``tool_calls`` structures returned by an OpenAI-compatible provider.
+
+        Args:
+            response: Provider message dictionary or list of raw tool-call objects.
+
+        Returns:
+            List[ToolCall]: Normalized :class:`~sr_harness.core.ToolCall` instances.
+        """
         normalized = []
         for tool_call in response or []:
             if isinstance(tool_call, dict):
@@ -73,14 +84,14 @@ class OpenAIParser(BaseParser):
         tool_calls: List[ToolCall],
         results: List[ToolCallResult],
     ) -> List[Dict[str, Any]]:
-        """Format tool result messages.
+        """Format each :class:`~sr_harness.core.ToolCallResult` as a ``role="tool"`` message linked by ``tool_call_id``.
 
         Args:
-            tool_calls: Tool calls returned by the model.
-            results: Result records to process.
+            tool_calls: Executed tool calls carrying provider ``id`` values.
+            results: Corresponding tool execution results.
 
         Returns:
-            List[Dict[str, Any]]: The operation result.
+            List[Dict[str, Any]]: OpenAI ``tool`` role messages.
         """
         messages = []
         for tool_call, result in zip(tool_calls, results):

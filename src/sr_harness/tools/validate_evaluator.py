@@ -13,7 +13,7 @@ from .evaluate_formula import EvaluateTool
 
 @BaseTool.register("validate_evaluator")
 class ValidateEvaluatorTool(BaseTool):
-    """Load an evaluator file in isolation and use it to evaluate one formula."""
+    """Tool for testing a workspace custom evaluator file against a formula in isolation."""
 
     metadata = ToolMetadata(name="validate_evaluator")
 
@@ -25,14 +25,17 @@ class ValidateEvaluatorTool(BaseTool):
         fit: bool = False,
         show_diagnostics: bool = False,
     ) -> dict[str, Any]:
-        """Validate a custom evaluator without changing the live context.
+        """Load and test a custom evaluator on a formula without mutating the active ``AgentContext``.
 
         Args:
-            evaluator_file: Optional workspace-relative Python file under context.evaluator/. When omitted, validate the evaluator already attached to the context.
-            f: Formula to evaluate.
-            y: Optional target expression; defaults to context.target.
-            fit: Whether to fit formula parameters first.
-            show_diagnostics: Whether to include residual diagnostics.
+            f: Symbolic formula string to score with the evaluator.
+            evaluator_file: Optional workspace-relative Python file (e.g., ``"context.evaluator/custom_evaluator.py"``). Tests the currently attached context evaluator when omitted.
+            y: Optional target variable or expression; defaults to ``context.target``.
+            fit: Whether to fit formula parameters on the training split before scoring.
+            show_diagnostics: Whether to include residual diagnostics in the evaluation report.
+
+        Returns:
+            dict[str, Any]: Evaluator class name, source file, and formula evaluation output.
         """
         relative = None
         evaluator = self.context.evaluator
@@ -69,13 +72,13 @@ class ValidateEvaluatorTool(BaseTool):
 
     @classmethod
     def format_result_dict(cls, result: dict[str, Any]) -> str:
-        """Format evaluator identity and formula-evaluation details.
+        """Format the evaluator identity and formula evaluation summary for the Agent.
 
         Args:
-            result: Structured result returned by :meth:`execute`.
+            result: Result dictionary returned by :meth:`execute`.
 
         Returns:
-            A model-readable evaluator validation report.
+            str: Formatted evaluator validation output.
         """
         reference = result["evaluator_file"] or result["evaluator"]
         return f"Evaluator: {reference}\n" + EvaluateTool.format_result_dict(result)

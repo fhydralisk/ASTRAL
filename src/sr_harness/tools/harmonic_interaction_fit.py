@@ -19,7 +19,7 @@ from .base_tool import BaseTool, ToolMetadata
 # 这个工具太狭隘了，用处不大
 # @BaseTool.register("harmonic_interaction_fit")
 class HarmonicInteractionFitTool(BaseTool):
-    """Implementation of the harmonic interaction fit tool."""
+    """Tool for fitting a polynomial trend plus a state-modulated sinusoidal interaction."""
     metadata = ToolMetadata(name="harmonic_interaction_fit")
 
     def execute(
@@ -33,17 +33,20 @@ class HarmonicInteractionFitTool(BaseTool):
         grid_size: int = 320,
         show_diagnostics: bool = True,
     ) -> Dict[str, Any]:
-        """Fit y = polynomial(carrier) + carrier * sin(frequency * oscillator).
+        """Fit ``y = polynomial(carrier) + c * carrier * sin(frequency * oscillator)`` by frequency grid search and local refinement.
 
         Args:
-            carrier: State variable or expression that multiplies the sine term.
-            oscillator: Variable or expression used as the sine argument.
-            y: Target variable; defaults to the discovery target.
-            degree: Polynomial degree in carrier, from 1 through 4.
-            include_bias: Whether to fit an additive constant.
-            max_cycles: Largest number of cycles across the observed oscillator span.
-            grid_size: Number of initial frequency-grid points, from 64 through 2048.
-            show_diagnostics: Include residual diagnostics in the returned evaluation.
+            carrier: State variable or expression that forms the polynomial trend and modulates the sine term.
+            oscillator: Phase/time variable or expression inside ``sin(frequency * oscillator)``.
+            y: Target variable or expression. Defaults to ``context.target``.
+            degree: Polynomial degree in ``carrier`` (1-4, default 2).
+            include_bias: Whether to include a constant intercept term.
+            max_cycles: Maximum number of oscillation cycles across the observed ``oscillator`` span (default 20.0).
+            grid_size: Number of frequency grid points to scan before local refinement (64-2048, default 320).
+            show_diagnostics: Whether to include residual diagnostics in the returned evaluation.
+
+        Returns:
+            Dict[str, Any]: Evaluation result and fitted harmonic configuration.
         """
         target_name = (y or self.context.target).strip().strip('"').strip("'")
         data = self.context.train_split.data
@@ -139,13 +142,13 @@ class HarmonicInteractionFitTool(BaseTool):
 
     @classmethod
     def format_result_dict(cls, result: Dict[str, Any]) -> str:
-        """Format a tool result for the language model.
+        """Format the fitted harmonic-interaction formula and frequency for the Agent.
 
         Args:
-            result: Result mapping to format or update.
+            result: Result dictionary returned by :meth:`execute`.
 
         Returns:
-            str: The operation result.
+            str: Formatted evaluation and frequency summary.
         """
         text = cls.format_evaluation_result(result, title="Fitted harmonic interaction")
         config = result["fit_configuration"]

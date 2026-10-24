@@ -2,10 +2,10 @@
 import argparse
 
 def add_minus_flags(parser: argparse.ArgumentParser):
-    """
-    自动为 argparse.ArgumentParser 中含有下划线的参数添加别名。例如：
-    --fix_existing -> 添加别名 --fix-existing
-    --augment_OD_num -> 添加别名 --augment-OD-num
+    """Add hyphenated aliases (``--foo-bar``) for any underscored CLI options (``--foo_bar``) on ``parser``.
+
+    Args:
+        parser: :class:`argparse.ArgumentParser` to augment in place.
     """
     for action in parser._actions:
         # 仅处理可选参数（以 '-' 开头的参数）
@@ -24,8 +24,10 @@ def add_minus_flags(parser: argparse.ArgumentParser):
 
 
 def add_negation_flags(parser: argparse.ArgumentParser):
-    """
-    自动为 parser 中的 store_true 参数添加对应的 --no-xxx 选项。
+    """Add ``--no-<flag>`` negation options for every boolean ``store_true`` flag on ``parser``.
+
+    Args:
+        parser: :class:`argparse.ArgumentParser` to augment in place.
     """
     args_to_add = []
     

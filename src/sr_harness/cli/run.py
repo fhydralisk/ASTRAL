@@ -14,13 +14,13 @@ SCRIPT_NAME = "run"
 
 
 def setup_parser(parser: argparse.ArgumentParser | None = None) -> argparse.ArgumentParser:
-    """Configure the command-line argument parser.
+    """Configure CLI arguments for ``sr-harness run`` (the interactive WebUI workbench server).
 
     Args:
-        parser: Argument parser to configure.
+        parser: Optional existing :class:`argparse.ArgumentParser` to populate.
 
     Returns:
-        argparse.ArgumentParser: The operation result.
+        argparse.ArgumentParser: Parser configured with host, port, workspace, mount, and read-only flags.
     """
     if parser is None:
         parser = argparse.ArgumentParser(
@@ -91,13 +91,13 @@ def _resolve_workspace_dir(
 
 
 def main(args: argparse.Namespace) -> int:
-    """Run the command and return its process exit code.
+    """Launch the FastAPI/Uvicorn interactive WebUI server from parsed CLI arguments.
 
     Args:
         args: Parsed command-line arguments.
 
     Returns:
-        int: The operation result.
+        int: Process exit code (``0`` on clean shutdown).
     """
     try:
         import uvicorn

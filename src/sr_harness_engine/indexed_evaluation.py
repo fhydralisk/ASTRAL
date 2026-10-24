@@ -64,7 +64,7 @@ class _SparseTensor:
 
 
 class IndexedEvaluator:
-    """Evaluate indexed expressions against a fixed structural demand."""
+    """Evaluator for symbolic expressions containing graph/hypergraph indices, ``sum[...]``, and ``gather(...)``."""
 
     def __init__(
         self,
@@ -75,6 +75,16 @@ class IndexedEvaluator:
         time: Any,
         delay_resolver: Callable[..., Any] | None,
     ):
+        """Initialize the indexed expression evaluator.
+
+        Args:
+            values: Mapping of variable and relation names to NumPy arrays.
+            parameters: Mapping of parameter names to fitted numeric values.
+            parameter_defaults: Default values extracted from parameter nodes in the expression.
+            num_nodes: Explicit node count ``N`` for preserving isolated nodes in reductions.
+            time: Optional sample time array for ``delay(...)`` evaluation.
+            delay_resolver: Optional custom callback for resolving delayed expressions.
+        """
         if num_nodes is None:
             raise ValueError("num_nodes must be provided when evaluating indexed expressions.")
         if isinstance(num_nodes, bool) or int(num_nodes) != num_nodes or num_nodes <= 0:
@@ -90,6 +100,14 @@ class IndexedEvaluator:
         self._domain_cache: dict[int, Expression | None] = {}
 
     def __call__(self, expression: Expression) -> Any:
+        """Evaluate an indexed ``expression`` and return the resulting NumPy array.
+
+        Args:
+            expression: Desugared symbolic expression to evaluate.
+
+        Returns:
+            Any: Evaluated scalar or NumPy array aligned with the surviving free indices.
+        """
         self._validate_scopes(expression)
         self._validate_bare_symbols(expression)
         free = self.free_indices(expression)

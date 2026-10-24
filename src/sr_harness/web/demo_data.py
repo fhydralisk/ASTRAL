@@ -58,11 +58,11 @@ def _kuramoto_sample(rng: np.random.Generator) -> tuple[dict[str, np.ndarray], d
     arrays = {"t": t, "omega": omega, "x": x, "dx_dt": dx_dt, "A": edges}
     manifest = {
         "variables": {
-            "omega": _variable("Angular-frequency measurement at each time and node.", ["t", "node"]),
-            "x": _variable("Observed oscillator phase at each time and node.", ["t", "node"]),
-            "dx_dt": _variable("Time derivative of the observed oscillator phase.", ["t", "node"]),
+            "omega": _variable("Natural angular frequency of each oscillator node.", ["t", "node"]),
+            "x": _variable("Oscillator phase angle (in radians) at each time step and node.", ["t", "node"]),
+            "dx_dt": _variable("Instantaneous phase velocity dx/dt of each oscillator node.", ["t", "node"]),
             "A": {
-                **_variable("Directed edge representation of the observed network.", ["edge", "endpoint"]),
+                **_variable("Directed edge list (target, source) of the 10-node interaction network.", ["edge", "endpoint"]),
                 "kind": "relation",
             },
         },
@@ -78,7 +78,19 @@ def _kuramoto_sample(rng: np.random.Generator) -> tuple[dict[str, np.ndarray], d
 
 
 def build_demo(kind: str) -> tuple[dict[str, np.ndarray], dict[str, Any], str]:
-    """Return arrays, a context.data manifest, and the suggested target variable."""
+    """Generate one of the four built-in sample datasets for the WebUI workbench.
+
+    Args:
+        kind: Sample dataset identifier (``"polynomial"``, ``"grouped_parameters"``,
+            ``"driven_ode"``, or ``"kuramoto_ba"``).
+
+    Returns:
+        tuple[dict[str, np.ndarray], dict[str, Any], str]: Tuple of
+            ``(arrays_by_name, manifest_dict, suggested_target_name)``.
+
+    Raises:
+        ValueError: If ``kind`` is not a supported sample dataset identifier.
+    """
     if kind not in DEMO_KINDS:
         raise ValueError(f"Unknown sample dataset: {kind}")
     rng = np.random.default_rng(42)
@@ -101,7 +113,7 @@ def build_demo(kind: str) -> tuple[dict[str, np.ndarray], dict[str, Any], str]:
         descriptions = {
             "x1": "First continuous input variable.",
             "x2": "Second continuous input variable.",
-            "label": "Categorical input variable with three groups.",
+            "label": "Categorical group identifier ('alpha', 'beta', or 'gamma').",
             "y": "Observed target variable.",
         }
     elif kind == "driven_ode":
@@ -119,8 +131,8 @@ def build_demo(kind: str) -> tuple[dict[str, np.ndarray], dict[str, Any], str]:
         arrays = {"t": t, "x": x, "dx_dt": dx_dt}
         manifest = {
             "variables": {
-                "x": _variable("Observed state trajectory.", ["t"]),
-                "dx_dt": _variable("Time derivative of the observed oscillatory state x.", ["t"]),
+                "x": _variable("Observed oscillator displacement x(t).", ["t"]),
+                "dx_dt": _variable("Instantaneous velocity dx/dt of the oscillator.", ["t"]),
             },
             "axes": {"t": {"file": "t.npy", "description": "Simulation time."}},
         }

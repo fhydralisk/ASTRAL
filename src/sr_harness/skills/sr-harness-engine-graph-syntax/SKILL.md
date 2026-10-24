@@ -3,82 +3,74 @@ name: sr-harness-engine-graph-syntax
 description: Use this skill before writing, evaluating, or submitting SRHarness Engine formulas for graphs, networks, hypergraphs, node interactions, relation reductions, edge or hyperedge fields, gather operations, or message passing.
 ---
 
-# Write graph and hypergraph formulas
+# Write Graph and Hypergraph Formulas
 
-Read `sr-harness-engine-syntax` first for ordinary arithmetic, functions, fitted parameters, and general parser restrictions. This skill covers the indexed structural language used for graph and hypergraph models.
+Read `sr-harness-engine-syntax` first for standard arithmetic, elementary functions, `param(...)` declarations, and parser safety rules. This guide covers the **indexed structural syntax** used for complex networks, graphs, and hypergraphs.
 
-Prefer structured Engine formulas over `evaluate_code`: indexed formulas retain interpretable structure, support parameter fitting and diagnostics, have measurable symbolic complexity, and can appear naturally in TopK and Pareto views.
+Whenever possible, express network dynamics in SRHarness Engine syntax rather than `evaluate_code` so parameters can be fitted automatically and formulas appear in the Top-k and Pareto-front leaderboards.
 
-## Indexed structural expressions
+## 1. Symbolic Indices and Array Shapes
 
-An expression containing symbolic indices such as `[i]`, `[i, j]`, or `[i, j, k]` uses the final array dimension as a structural dimension. Leading dimensions use ordinary element-wise broadcasting.
+Any expression that uses symbolic subscripts—such as `x[i]`, `A[i, j]`, or `T[i, j, k]`—treats the **last array dimension** as the structural (node/edge/hyperedge) dimension, while all leading dimensions (such as time or sample index) broadcast elementwise.
 
-Indices must be symbolic identifiers; integer indices and slices such as `x[0]` or `x[0:10]` are invalid. In `theta[i]`, `i` names a node dimension rather than selecting the element stored in a Python variable named `i`.
-
-The runtime must provide `num_nodes=N`. It is never inferred from a relation because isolated nodes may not occur in any relation row.
-
-Typical value shapes are:
+- **Symbolic identifiers only**: Subscripts must be symbolic index names like `i`, `j`, `k`. Integer indexing (`x[0]`) and slicing (`x[0:10]`) are not allowed.
+- **Explicit node count**: Graph datasets must define `num_nodes = N` in `context.data` so isolated nodes with no edges are still preserved in output arrays.
+- **Standard array shapes**:
 
 ```text
-node field:       (..., N)
-edge field:       (..., E)
-hyperedge field:  (..., H)
-scalar field:     (..., 1)
-binary relation:  (E, 2)
-ternary relation: (H, 3)
+Node variable:      (..., N)
+Edge variable:      (..., E)
+Hyperedge variable: (..., H)
+Scalar / global:    (..., 1)
+Binary graph (A):   (E, 2)   with columns (target, source)
+Ternary hypergraph: (H, 3)   with columns (target, source1, source2)
 ```
 
-Relations must be declared as relations in `context.data`. Do not infer relation semantics from names such as `A` or `T`.
-
-Once an expression uses symbolic indices, index every non-singleton structural variable. Thus `x + x[i]` is invalid when `x.shape[-1] == N`; use `x[i] + x[i]`. A final singleton dimension may remain unindexed and broadcast naturally.
-
-Free indices become dense trailing output axes in first-appearance order:
+- **Index every structural variable**: Once an expression uses symbolic indices, every variable whose last dimension has size `N`, `E`, or `H` must carry an index. For example, when `x` has shape `(..., N)`, writing `x + x[i]` is invalid—write `x[i] + x[i]`. (Variables with a trailing singleton dimension `(..., 1)` or 1D sample-only variables can remain unindexed and broadcast automatically.)
+- **Free indices determine output shape**: Any index that is *not* summed over by `sum[...]` remains as a trailing axis in first-appearance order:
 
 ```text
-x[i]                         -> (..., N)
-x[i] + x[j]                  -> (..., N, N)
-x[i] * x[j] * x[k]           -> (..., N, N, N)
+x[i]                   -> shape (..., N)
+x[i] + x[j]            -> shape (..., N, N)
+x[i] * x[j] * x[k]     -> shape (..., N, N, N)
 ```
 
-Multiple free indices are legal, but their cost grows as `N**r`. Avoid dense multi-index intermediates when a relation-restricted reduction or `gather` can request only needed components.
+Avoid materializing dense `N × N` or `N × N × N` intermediate arrays when a sparse relation reduction `sum[j](A[i, j], ...)` or `gather(A[i, j], ...)` can compute only the connected pairs.
 
-## Relations and `sum[...]`
+## 2. Neighbor Reductions with `sum[...]`
 
-A binary relation stores rows in `(target, source)` order. Therefore:
+In `context.data`, binary relation tables `A` of shape `(E, 2)` store directed edges in **`(target, source)`** column order, and ternary hypergraph tables `T` of shape `(H, 3)` store **`(target, source1, source2)`**.
+
+Therefore, writing:
 
 ```text
 A[i, j]
 ```
 
-binds `i` to the target column and `j` to the source column. A ternary relation stores `(target, source1, source2)` and is written `T[i, j, k]`.
+binds `i` to the **target** node (column 0) and `j` to the **source** neighbor (column 1).
 
-Use `sum[index](operand)` to reduce a named structural index:
+### Sparse Relation-Restricted Sums (Recommended)
 
-```text
-sum[j](x[i] * x[j])
-sum[j, k](x[i] * x[j] * x[k])
-```
-
-If the operand does not contain a reduced index, summing over that index multiplies the value by `N`.
-
-Use the two-argument form to restrict the reduction to a sparse relation:
+Use the two-argument `sum[index](relation, message)` form to sum incoming messages over connected edges only:
 
 ```text
 sum[j](A[i, j], x[j] - x[i])
 sum[j, k](T[i, j, k], x[i] * x[j] * x[k])
 ```
 
-Mathematically, `sum[j](A[i, j], eq)` means `sum[j](A[i, j] * eq)`. The two-argument form is preferable because the evaluator can compute only relation-supported components instead of materializing a dense `N x N` tensor.
+Mathematically, `sum[j](A[i, j], expr)` is equivalent to $\sum_{j} A_{ij} \cdot \text{expr}$, but the two-argument form evaluates `expr` **only along existing edges**, avoiding dense $O(N^2)$ or $O(N^3)$ memory blow-ups.
 
-An edge-aligned field with shape `(..., E)` uses the same complete relation indices:
+### Edge-Aligned and Hyperedge-Aligned Variables
+
+If your dataset includes a variable defined on edges (shape `(..., E)`, such as edge weights `w`) or hyperedges (shape `(..., H)`), index it with the same indices as its relation:
 
 ```text
 sum[j](A[i, j], w[i, j] * sin(theta[j] - theta[i]))
 ```
 
-A hyperedge-aligned field with shape `(..., H)` similarly uses all three indices. When several compatible relations make field association ambiguous, the data context must explicitly associate the field with its relation; changing the formula cannot resolve ambiguous data metadata.
+### Algebra on Multiple Relations and Scoping Rules
 
-Relation expressions are numerical sparse tensors and support ordinary algebra:
+You can combine multiple relation tables algebraically inside the first argument of `sum`:
 
 ```text
 sum[j](A1[i, j] + A2[i, j], x[j])
@@ -86,56 +78,47 @@ sum[j](A1[i, j] * A2[i, j], x[j])
 sum[j](A1[i, j] + 0.5 * A2[i, j], x[j])
 ```
 
-The first expression adds overlapping relation values; it is not merely a support union.
-
-Do not bind the same index again inside its active scope. This is invalid:
+**Never reuse a bound index name inside a nested scope**:
 
 ```text
-sum[j](A[i, j], sum[j](x[j]))
+sum[j](A[i, j], sum[j](x[j]))    # Invalid: index j is already bound!
+sum[j](A[i, j], sum[k](x[k]))    # Valid: inner sum uses a distinct index k
 ```
 
-Rename the inner index, for example to `k`.
+## 3. Common Network Dynamics Examples
 
-## Network and hypergraph examples
-
-Unnormalized Kuramoto-like dynamics:
+- **Coupled Kuramoto oscillators**:
 
 ```text
 omega[i] + param('K') * sum[j](A[i, j], sin(theta[j] - theta[i]))
 ```
 
-Degree-normalized interaction:
+- **In-degree normalized coupling**:
 
 ```text
 omega[i] + param('K') * sum[j](A[i, j], sin(theta[j] - theta[i])) / sum[j](A[i, j], 1)
 ```
 
-Node, edge-weighted, and hypergraph terms in one RHS:
+- **Combined node self-dynamics, weighted pairwise edges, and ternary hyperedges**:
 
 ```text
 (param('a') * x[i]
-+ param('b') * sum[j](A[i, j], w[i, j] * tanh(x[j] - x[i]))
-+ param('c') * sum[j, k](T[i, j, k], x[j] * x[k]))
+ + param('b') * sum[j](A[i, j], w[i, j] * tanh(x[j] - x[i]))
+ + param('c') * sum[j, k](T[i, j, k], x[j] * x[k]))
 ```
 
-Use parentheses when a denominator might be zero and inspect the data before submitting singular expressions.
+*(Tip: When dividing by node degree `sum[j](A[i, j], 1)`, check whether any node has zero in-degree so you don't divide by zero.)*
 
-## `gather`: produce relation-aligned values
+## 4. Edge-Level Evaluation with `gather`
 
-`gather(relation, expression)` selects an indexed expression at the relation's stored coordinates and multiplies by relation values:
+When the target variable itself is defined on edges `(..., E)` or hyperedges `(..., H)`—or when you need an intermediate edge-level quantity without summing over neighbors—use `gather(relation, expression)`:
 
 ```text
-gather(A[i, j], x[i] + x[j])          -> (..., E)
-gather(T[i, j, k], x[i] * x[j] * x[k]) -> (..., H)
+gather(A[i, j], x[i] + x[j])            -> shape (..., E)
+gather(T[i, j, k], x[i] * x[j] * x[k])  -> shape (..., H)
 ```
 
-The operand may use only a subset of relation indices; missing indices broadcast:
-
-```text
-gather(A[i, j], x[i])
-```
-
-The result behaves like an ordinary edge or hyperedge field:
+The output of `gather(...)` behaves just like an edge or hyperedge variable:
 
 ```text
 2 * gather(A[i, j], x[i] + x[j])
@@ -143,17 +126,14 @@ sin(gather(A[i, j], x[i] + x[j]))
 gather(A[i, j], x[i] + x[j]) + w
 ```
 
-It can be indexed again with the same complete relation indices inside another structural expression:
+Summary of when to use each construct:
 
-```text
-sum[j](A[i, j], gather(A[i, j], x[i] + x[j])[i, j] * x[j])
-```
+- Use **`sum[j](A[i, j], ...)`** when the output should be aligned with **nodes** `(..., N)`.
+- Use **`gather(A[i, j], ...)`** when the output should be aligned with **edges** `(..., E)` or **hyperedges** `(..., H)`.
 
-Use `sum[...]` when the desired output is node-aligned after reduction. Use `gather(...)` when the desired output is relation-row-aligned.
+## 5. Shorthand Syntax: `aggr`, `targ`, and `sour`
 
-## `aggr`, `targ`, and `sour` convenience syntax
-
-For ordinary binary message passing, these forms are accepted:
+For standard pairwise graph message passing, the parser also accepts `aggr`, `targ` (target node $i$), and `sour` (source neighbor $j$):
 
 ```text
 aggr(A * targ(x) * sour(x))
@@ -161,21 +141,17 @@ aggr(A, targ(x) * sour(x))
 aggr(A, targ(A, x) * sour(A, x))
 ```
 
-They compile to canonical indexed syntax:
+All three forms automatically desugar to the canonical indexed reduction:
 
 ```text
 sum[j](A[i, j], x[i] * x[j])
 ```
 
-`targ` reads the target endpoint and `sour` reads the source endpoint. They are only valid inside `aggr`. Nested `aggr` is legal because the desugaring pass generates fresh indices automatically. Prefer explicit indexed syntax for hypergraphs, unusual reductions, and formulas that need precise index control.
+`targ(...)` and `sour(...)` are valid only inside `aggr(...)`. For hypergraphs, multi-relation expressions, or custom index combinations, always write explicit `sum[j](A[i, j], ...)` syntax.
 
-## Graph and hypergraph checklist
+## Pre-Submission Checklist for Graph Formulas
 
-Before calling `evaluate_formula` or `submit_formula`:
-
-1. Confirm that `context.data` defines `num_nodes` explicitly.
-2. Confirm relation metadata, endpoint order, structural-axis lengths, and any edge/hyperedge field association.
-3. Index every non-singleton structural variable and keep reduction indices distinct across nested scopes.
-4. Prefer relation-restricted `sum` over dense `N**r` expressions.
-5. Use `gather` when relation-aligned output or an intermediate edge/hyperedge field is intended.
-6. Inspect finite coverage, residual diagnostics, and train/validation metrics before submitting the formula.
+1. Check that `context.data` declares `num_nodes` and marks relation variables with `kind: "relation"`.
+2. Remember that relation columns are ordered `(target, source)`—so in `A[i, j]`, `i` is the receiving node and `j` is the sending neighbor.
+3. Attach symbolic indices (`[i]`, `[i, j]`, etc.) to every node, edge, or hyperedge variable in the formula, and keep index names distinct in nested reductions.
+4. Use two-argument `sum[j](A[i, j], ...)` instead of dense unguarded sums whenever aggregating over a graph or hypergraph.

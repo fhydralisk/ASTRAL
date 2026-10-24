@@ -6,7 +6,7 @@ from ..core import ToolMetadata
 
 
 class ModelTestTool(BaseTool):
-    """Report a requested value during a model connectivity test."""
+    """Internal connectivity-check tool used to verify LLM tool-calling support."""
 
     metadata = ToolMetadata(
         name="report_model_test",
@@ -25,12 +25,12 @@ class ModelTestTool(BaseTool):
     )
 
     def execute(self, answer: str) -> dict[str, str]:
-        """Return the value supplied by the model-test request.
+        """Echo the exact answer string requested by a model connectivity check.
 
         Args:
-            answer: Exact value requested by the test prompt.
+            answer: Exact string requested by the connectivity test prompt.
 
         Returns:
-            The reported answer.
+            dict[str, str]: Dictionary mapping ``"answer"`` to ``answer``.
         """
         return {"answer": answer}

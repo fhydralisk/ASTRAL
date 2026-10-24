@@ -32,15 +32,28 @@ if "sr_harness" not in sys.modules:
 
 
 class LimitedWriter(io.StringIO):
-    """Text buffer with a hard character limit."""
+    """In-memory text stream writer that truncates output once a character limit is reached."""
 
     SUFFIX = "...[truncated]"
 
     def __init__(self, limit: int) -> None:
+        """Initialize the bounded writer with a maximum character capacity.
+
+        Args:
+            limit: Maximum number of characters to retain.
+        """
         super().__init__()
         self.limit = limit
 
     def write(self, text: str) -> int:
+        """Append text up to the remaining character budget.
+
+        Args:
+            text: String chunk to write.
+
+        Returns:
+            int: Length of ``text`` passed by the caller.
+        """
         remaining = self.limit - self.tell() - len(self.SUFFIX)
         if remaining <= 0:
             return len(text)
@@ -52,7 +65,14 @@ class LimitedWriter(io.StringIO):
 
 
 def load_array_groups(root: Path) -> dict[str, dict[str, np.ndarray]]:
-    """Load trusted parent-produced arrays."""
+    """Load serialized NumPy array groups prepared by the parent process.
+
+    Args:
+        root: Directory containing ``manifest.json`` and ``.npy`` files for each group.
+
+    Returns:
+        dict[str, dict[str, np.ndarray]]: Nested mapping of group names to variable arrays.
+    """
     manifest = json.loads((root / "arrays.json").read_text(encoding="utf-8"))
     return {
         group_name: {
@@ -64,7 +84,12 @@ def load_array_groups(root: Path) -> dict[str, dict[str, np.ndarray]]:
 
 
 def save_array_groups(root: Path, groups: dict[str, dict[str, Any]]) -> None:
-    """Save arrays for safe loading by the parent process."""
+    """Write named groups of NumPy arrays to ``root`` for safe reading by the parent process.
+
+    Args:
+        root: Destination directory where ``manifest.json`` and ``.npy`` files are written.
+        groups: Mapping of group names to dictionaries of NumPy arrays.
+    """
     array_root = root / "arrays"
     array_root.mkdir(exist_ok=True)
     manifest: dict[str, dict[str, str]] = {}
@@ -83,7 +108,11 @@ def save_array_groups(root: Path, groups: dict[str, dict[str, Any]]) -> None:
 
 
 def apply_resource_limits(request: dict[str, Any]) -> None:
-    """Apply CPU and address-space limits before executing user code."""
+    """Enforce RLIMIT CPU time, address space, file size, and open-descriptor caps in the worker process.
+
+    Args:
+        request: Sandbox request dictionary specifying resource limits.
+    """
     timeout_seconds = max(1, int(request["timeout_seconds"]))
     memory_limit_mb = max(64, int(request["memory_limit_mb"]))
     try:
@@ -102,7 +131,14 @@ def apply_resource_limits(request: dict[str, Any]) -> None:
 
 
 def execute_program(request: dict[str, Any]) -> dict[str, Any]:
-    """Execute a general Python program and capture ordinary text streams."""
+    """Run a standalone Python snippet under Landlock and seccomp confinement and capture stdout/stderr.
+
+    Args:
+        request: Sandbox request dictionary containing ``code``, ``stdin``, and limits.
+
+    Returns:
+        dict[str, Any]: Execution result containing ``exit_code``, ``stdout``, and ``stderr``.
+    """
     stdout = LimitedWriter(int(request["output_limit_bytes"]))
     stderr = LimitedWriter(int(request["output_limit_bytes"]))
     stdin = io.StringIO(str(request.get("stdin_text", "")))
@@ -174,7 +210,16 @@ def _format_model(model: Any) -> str:
 def evaluate_code(
     request: dict[str, Any], arrays: dict[str, dict[str, np.ndarray]], output: Path
 ) -> dict[str, Any]:
-    """Fit and evaluate a Python-defined model inside the sandbox."""
+    """Fit and score a Python-defined model inside the sandbox against train and validation splits.
+
+    Args:
+        request: Sandbox request dictionary with user code and evaluation settings.
+        arrays: Loaded train/validation NumPy array groups.
+        output: Scratch directory for any output artifacts.
+
+    Returns:
+        dict[str, Any]: Evaluation metrics and captured output streams.
+    """
     data = arrays["train"]
     validation = arrays.get("validation", {})
     namespace: dict[str, Any] = {
@@ -336,7 +381,15 @@ def _build_tool_context(request: dict[str, Any], data: dict[str, np.ndarray], ev
 def execute_custom_tool(
     request: dict[str, Any], arrays: dict[str, dict[str, np.ndarray]]
 ) -> dict[str, Any]:
-    """Inspect or execute one custom tool entirely inside the sandbox."""
+    """Load or execute a custom ``BaseTool`` subclass inside the isolated sandbox worker.
+
+    Args:
+        request: Sandbox request dictionary specifying ``mode``, ``source``, and ``params``.
+        arrays: Loaded context arrays exposed to the custom tool.
+
+    Returns:
+        dict[str, Any]: Tool metadata or execution result dictionary.
+    """
     from sr_harness.core import json_value
 
     tool_class = _load_custom_tool(str(request["source"]), str(request["filename"]))
@@ -390,7 +443,16 @@ def _build_evaluator_context(request: dict[str, Any], data: dict[str, np.ndarray
 def execute_evaluator(
     request: dict[str, Any], arrays: dict[str, dict[str, np.ndarray]], output: Path
 ) -> dict[str, Any]:
-    """Load a custom evaluator and perform one protocol operation."""
+    """Load a custom ``DefaultEvaluator`` subclass in the sandbox and run one protocol method.
+
+    Args:
+        request: Sandbox request dictionary specifying ``operation``, ``source``, and expressions.
+        arrays: Loaded context arrays for splitting, fitting, or evaluation.
+        output: Directory where split array groups are written when ``operation == "split"``.
+
+    Returns:
+        dict[str, Any]: Serialized result of the requested evaluator operation.
+    """
     import sr_harness_engine as engine
 
     evaluator = _load_evaluator(str(request["source"]), str(request["filename"]))
@@ -509,7 +571,7 @@ def _sandbox_paths() -> tuple[Path, Path, Path]:
 
 
 def main() -> None:
-    """Dispatch one trusted request and persist a JSON result."""
+    """Entry point for the isolated sandbox worker child process."""
     input_root, output_root, _ = _sandbox_paths()
     result_file = output_root / "result.json"
     try:

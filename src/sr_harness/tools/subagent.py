@@ -11,7 +11,7 @@ from .base_tool import BaseTool, ToolMetadata
 
 @BaseTool.register("delegate_subagent")
 class SubagentTool(BaseTool):
-    """Implementation of the subagent tool."""
+    """Tool for delegating context-isolated hypothesis generation, candidate critique, residual diagnosis, or search recovery."""
     metadata = ToolMetadata(name="delegate_subagent")
     MODES = {
         "hypothesis_generation": (
@@ -41,18 +41,21 @@ class SubagentTool(BaseTool):
         candidate_formulas: List[str] = None,
         evidence: str = "",
     ) -> Dict[str, Any]:
-        """Run a bounded independent SR analysis with a specific scientific role.
+        """Invoke an independent, context-isolated scientific critic or hypothesis generator.
 
-        Use this only when diversity or an independent audit is valuable: generating competing
-        hypotheses before committing search budget, critiquing near-tied candidates, diagnosing
-        structured residuals, or recovering a stagnated search. The subagent cannot execute tools
-        or mutate the main search state; it must return falsifiable recommendations.
+        Use this tool when an independent perspective helps: proposing distinct formula families
+        before spending search budget, auditing near-tied candidates for redundancy or overfitting,
+        interpreting structured residuals, or breaking out of a stagnated search. The subagent
+        cannot call tools or mutate state; it returns falsifiable recommendations for the main Agent.
 
         Args:
-            objective: Precise scientific question or search decision to resolve.
-            mode: hypothesis_generation, candidate_critique, residual_diagnosis, or search_recovery.
-            candidate_formulas: Candidate expressions to compare when relevant.
-            evidence: Compact metrics, residual summaries, units, or search history from main tools.
+            objective: Specific scientific question or search decision for the subagent to address.
+            mode: Subagent role: ``"hypothesis_generation"``, ``"candidate_critique"``, ``"residual_diagnosis"``, or ``"search_recovery"``.
+            candidate_formulas: Optional list of candidate formula strings to audit or compare.
+            evidence: Compact summary of fit metrics, residual patterns, domain constraints, or prior attempts.
+
+        Returns:
+            Dict[str, Any]: Subagent mode, objective, critique/recommendations text, and token usage.
         """
         if not objective.strip():
             raise ValueError("objective must not be empty")
@@ -170,13 +173,13 @@ class SubagentTool(BaseTool):
 
     @classmethod
     def format_result_dict(cls, result: Dict[str, Any]) -> str:
-        """Format a tool result for the language model.
+        """Format the subagent's independent analysis for the main Agent.
 
         Args:
-            result: Result mapping to format or update.
+            result: Result dictionary returned by :meth:`execute`.
 
         Returns:
-            str: The operation result.
+            str: Labeled subagent response.
         """
         return f"Independent SR subagent ({result['mode']}):\n{result['content']}"
 

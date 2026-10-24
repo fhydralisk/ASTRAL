@@ -1,5 +1,5 @@
 # Copyright (c) 2026-present, Yumeow. Licensed under the MIT License.
-"""有理式拟合工具。"""
+"""Rational function fitting tool using linearized least squares and holdout degree selection."""
 import numpy as np
 from typing import Any, Dict, List
 from .polynomial_fit import PolynomialFitTool
@@ -8,7 +8,7 @@ from .base_tool import BaseTool, ToolMetadata, is_numeric_array
 
 @BaseTool.register("rational_fit")
 class RationalFitTool(BaseTool):
-    """Implementation of the rational fit tool."""
+    """Tool for fitting rational functions ``P(x) / Q(x)`` via linearized least squares and holdout selection."""
     metadata = ToolMetadata("rational_fit")
 
     def execute(
@@ -25,20 +25,28 @@ class RationalFitTool(BaseTool):
         complexity_penalty: float = 1e-12,
         show_diagnostics: bool = True,
     ) -> Dict[str, Any]:
-        """Fit a rational expression P(x) / Q(x) by linearized least squares with Q's constant fixed to one.
+        """Fit a rational function ``P(x) / Q(x)`` (with ``Q``'s constant term fixed to ``1``) across degree combinations.
+
+        Solves the linearized system ``P(x) - y * (Q(x) - 1) ≈ y`` on a training split, ranks
+        ``(numerator_degree, denominator_degree)`` pairs by complexity-penalized holdout RMSE,
+        refits the best degree pair on all finite samples, and checks whether the fitted
+        denominator crosses or approaches zero.
 
         Args:
-            x: Input variables or expressions. Use all numeric non-target variables by default.
-            y: Target variable or expression. Use the formula-discovery target by default.
-            numerator_degree: Maximum total degree of numerator P (0-8).
-            denominator_degree: Maximum total degree of denominator Q excluding its fixed constant (0-8).
-            include_interactions: Whether polynomial terms may contain multiple input features.
-            numerator_degrees: Optional numerator degree grid; overrides numerator_degree when provided.
-            denominator_degrees: Optional denominator degree grid; overrides denominator_degree when provided.
-            validation_fraction: Deterministic holdout fraction used to rank degree combinations (0.05-0.5).
-            top_k: Number of degree-grid candidates to return (1-20).
-            complexity_penalty: Penalty per fitted coefficient added to validation RMSE after target-scale normalization.
-            show_diagnostics: Whether final metrics should include compact residual diagnostics.
+            x: Input variable names or expressions. Defaults to all numeric non-target variables.
+            y: Target variable name or expression. Defaults to ``context.target``.
+            numerator_degree: Maximum total degree of numerator polynomial ``P`` (0-8, default 2).
+            denominator_degree: Maximum total degree of non-constant denominator polynomial ``Q - 1`` (0-8, default 1).
+            include_interactions: Whether cross-product monomials are included in ``P`` and ``Q``.
+            numerator_degrees: Optional list of numerator degrees to grid-search; overrides ``numerator_degree``.
+            denominator_degrees: Optional list of denominator degrees to grid-search; overrides ``denominator_degree``.
+            validation_fraction: Holdout fraction used to score degree pairs (0.05-0.5, default 0.2).
+            top_k: Maximum number of simpler Pareto-optimal alternatives to report (1-20, default 5).
+            complexity_penalty: Penalty per fitted term added to normalized holdout RMSE (default 1e-12).
+            show_diagnostics: Whether to include residual diagnostics in the evaluation output.
+
+        Returns:
+            Dict[str, Any]: Best rational formula evaluation, Pareto alternatives, matrix rank, and denominator zero-crossing diagnostics.
         """
         data = self.context.train_split.data
         target_name = (y or self.context.target).strip().strip('"').strip("'")
@@ -252,13 +260,13 @@ class RationalFitTool(BaseTool):
 
     @classmethod
     def format_result_dict(cls, result: Dict[str, Any]) -> str:
-        """Format a tool result for the language model.
+        """Format the best rational fit, Pareto alternatives, and pole/rank warnings for the Agent.
 
         Args:
-            result: Result mapping to format or update.
+            result: Result dictionary returned by :meth:`execute`.
 
         Returns:
-            str: The operation result.
+            str: Formatted rational fit report.
         """
         lines = [cls.format_evaluation_result(result, title="Best fitted rational formula")]
         if result["alternatives"]:

@@ -18,7 +18,13 @@ from .agent import Agent
 
 
 class DataPreparationAgent(Agent):
-    """Turn workspace and web evidence into the shared structured dataset."""
+    """Interactive agent that inspects raw workspace files and builds ``context.data/``.
+
+    Maintains a multi-turn conversation across user instructions, running
+    sandboxed Python scripts and workspace utilities to clean data, derive
+    variables, and validate ``context.data/manifest.json`` before committing
+    structured arrays to the shared :class:`~sr_harness.core.AgentContext`.
+    """
 
     DEFAULT_TOOLS = [
         "workspace_shell",
@@ -43,6 +49,18 @@ class DataPreparationAgent(Agent):
         skills: list[str] | None = None,
         interaction_manager: InteractionManager,
     ) -> None:
+        """Initialize the data preparation agent.
+
+        Args:
+            llm_provider: Name of the LLM provider backend (e.g., ``"openrouter"``).
+            llm_model: Model identifier requested from the provider.
+            context: Shared runtime context holding the workspace and active dataset.
+            tools: Optional list of enabled tool names. Defaults to ``DEFAULT_TOOLS``.
+            tool_parser: Tool-call parser name or instance.
+            llm_max_tokens: Optional per-response output token cap.
+            skills: Optional list of enabled skill names.
+            interaction_manager: Manager handling user stop commands and timeline events.
+        """
         self.llm_provider = llm_provider
         self.llm_model = llm_model
         self.tool_parser = tool_parser
@@ -149,7 +167,12 @@ class DataPreparationAgent(Agent):
         return bool(messages)
 
     def queue_runtime_settings(self, settings: dict[str, Any]) -> None:
-        """Queue validated settings for the next safe iteration boundary."""
+        """Queue validated model and capability settings to apply before the next turn.
+
+        Args:
+            settings: Validated dictionary of provider, model, parser, token-limit,
+                tool, and skill settings.
+        """
         current = self._pending_runtime_settings or {}
         self._pending_runtime_settings = {**current, **settings}
 
@@ -182,10 +205,10 @@ class DataPreparationAgent(Agent):
             self.interaction_manager.publish_event("prompt_added", {"message": message})
 
     def initialize_with_context(self, context: AgentContext) -> None:
-        """Bind configured skills before constructing context-aware tools.
+        """Bind configured skills and initialize context-aware data-preparation tools.
 
         Args:
-            context: Shared agent and tool context.
+            context: Shared runtime context providing workspace and dataset access.
         """
         context.args.enabled_skills = self.skills
         super().initialize_with_context(context)
@@ -193,13 +216,14 @@ class DataPreparationAgent(Agent):
             tool.cancel_event = self.interaction_manager.cancellation_signal
 
     def run(self, instruction: str) -> dict[str, Any]:
-        """Continue the persistent preparation conversation until it yields control.
+        """Process a user instruction and run tool turns until preparation completes or pauses.
 
         Args:
-            instruction: Natural-language instruction for the agent.
+            instruction: Natural-language data-preparation request from the user.
 
         Returns:
-            dict[str, Any]: The operation result.
+            dict[str, Any]: Execution summary containing ``status``, ``message``,
+                ``finish_reason``, ``turn_count``, and the current context schema.
         """
         instruction = instruction.strip()
         if not instruction:

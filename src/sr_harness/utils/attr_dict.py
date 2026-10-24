@@ -6,7 +6,14 @@ __all__ = ["AttrDict"]
 
 
 class AttrDict(dict):
+    """Dictionary subclass that exposes its keys as object attributes and recursively wraps nested dicts."""
     def __init__(self, *args, **kwargs):
+        """Initialize the attribute dictionary and recursively convert any nested dictionaries.
+
+        Args:
+            *args: Positional mapping or iterable of key-value pairs passed to ``dict``.
+            **kwargs: Keyword pairs passed to ``dict``.
+        """
         super(AttrDict, self).__init__(*args, **kwargs)
         for key, value in self.items():
             if isinstance(value, dict):
@@ -19,12 +26,28 @@ class AttrDict(dict):
 
     @classmethod
     def load_yaml(cls, __filepath):
+        """Load a YAML file from disk and return its contents as an :class:`AttrDict`.
+
+        Args:
+            __filepath: Path to the YAML file to read.
+
+        Returns:
+            AttrDict: Parsed YAML mapping wrapped as an :class:`AttrDict`.
+        """
         assert os.path.exists(__filepath), f"File {__filepath} not found!"
         yaml_dict = yaml.load(open(__filepath, "r"), Loader=yaml.FullLoader)
         return cls(yaml_dict)
 
     @classmethod
     def load_yaml_str(cls, str):
+        """Parse a YAML string and return its contents as an :class:`AttrDict`.
+
+        Args:
+            str: Raw YAML text to parse.
+
+        Returns:
+            AttrDict: Parsed YAML mapping wrapped as an :class:`AttrDict`.
+        """
         yaml_dict = yaml.load(str, Loader=yaml.FullLoader)
         return cls(yaml_dict)
 

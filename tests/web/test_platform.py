@@ -152,14 +152,14 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert "content:'3'" in page.text
     assert 'class="evaluator-config-heading step-heading"' in page.text
     assert ".task-problem-heading,.evaluator-config-heading{margin-bottom:10px}" in page.text
-    assert "evaluatorHelp:'选择内置评估器或自定义新的评估器，实现数据切分、模型拟合、模型评估'" in page.text
+    assert "evaluatorHelp:'选择内置评估器或编写自定义代码，控制数据切分、常数拟合与误差指标计算'" in page.text
     assert 'class="evaluator-editor"' in page.text
     assert '.evaluator-editor{margin-top:10px;overflow:hidden;border:1px solid #d8dee4;border-radius:25px;background:#fff;box-shadow:var(--interactive-shadow)}' in page.text
     assert 'id="evaluator-code"' in page.text
     assert 'id="evaluator-agent-input"' in page.text
     assert "evaluatorToggle.id='evaluator-agent-toggle'" in page.text
     assert 'evaluatorAgent.hidden=true' in page.text
-    assert "evaluatorAgentToggle:'也可以描述需求，让 Agent 创建 Evaluator'" in page.text
+    assert "evaluatorAgentToggle:'需要特殊指标？让 Agent 帮你编写自定义 Evaluator'" in page.text
     assert 'id="evaluator-agent-feed" class="data-agent-feed evaluator-agent-feed" hidden' in page.text
     assert 'class="data-agent-compose evaluator-agent-compose"' in page.text
     assert 'class="data-agent-compose-toolbar evaluator-agent-compose-toolbar"' in page.text
@@ -205,9 +205,9 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert "if(!shownSessionErrors.has(errorKey)){shownSessionErrors.add(errorKey);notice(sessionError)}" in page.text
     assert "shownSessionErrors.clear()" in page.text
     assert '<h3>配置变量描述</h3>' in data_view
-    assert '点击颜色条切换变量角色，点击变量描述以编辑，也可拖动手柄调整变量顺序' in data_view
+    assert '点击左侧色标切换变量角色（因变量 / 自变量 / 暂不参与），点击描述直接编辑，拖动 ⠿ 可调整顺序' in data_view
     assert '<h3 id="task-problem-title">配置问题描述</h3>' in data_view
-    assert '说明研究目标作为初始提示词。变量描述中已有的内容无需重复。' in data_view
+    assert '简要说明你的研究背景与建模目标（将自动加入初始提示词，上方已填写的变量说明无需重复）。' in data_view
     assert '#data-setup>.data-layout{padding:0}' in page.text
     assert '#variable-config-card,#task-problem-card{padding:0;border:0;border-radius:0;background:transparent' in page.text
     assert '.data-agent-card{padding:0;border:0;background:transparent}' in page.text
@@ -369,13 +369,13 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert "MESSAGE_CATALOGS.zh.dataDropCopy" not in page.text
     assert "Object.assign(MESSAGE_CATALOGS['zh-CN']" in page.text
     assert "Object.assign(MESSAGE_CATALOGS.zh," not in page.text
-    assert "uploadDataHelpPrefix:'上传数据文件，也可以从',uploadDataHelpSuffix:'快速开始'" in page.text
-    assert "dataAgentHelp:'用自然语言指导 Agent 整理、清洗、补充或检查数据，结果将被保存在 context.data/ 目录以供使用'" in page.text
-    assert "dataAgentPlaceholder:'例如：将我上传的文件整理成 ASTRAL 可接受的格式'" in page.text
-    assert "dataNextHint:'数据准备完成后，进入下一步',dataNextAction:'任务配置'" in page.text
-    assert "taskNextHint:'任务配置完成后，进入下一步',taskNextAction:'符号回归'" in page.text
+    assert "uploadDataHelpPrefix:'上传本地数据文件，或直接加载',uploadDataHelpSuffix:'快速体验'" in page.text
+    assert "dataAgentHelp:'直接用自然语言让 Agent 帮你检查、清洗数据或构造衍生变量，处理结果会自动保存到 context.data/ 目录'" in page.text
+    assert "dataAgentPlaceholder:'例如：读取我上传的文件，清洗缺失值并整理为 ASTRAL 标准数据集格式…'" in page.text
+    assert "dataNextHint:'数据准备就绪后，继续前往',dataNextAction:'任务配置'" in page.text
+    assert "taskNextHint:'任务配置完成后，继续前往',taskNextAction:'符号回归'" in page.text
     assert "help.textContent=_('dataAgentHelp');link.textContent=_('dataAgentSafety')" in page.text
-    assert "dataAgentSafety:'它是否会危害我的系统和数据？'" in page.text
+    assert "dataAgentSafety:'安全与数据权限说明'" in page.text
     assert 'id="evaluator-agent-safety" class="data-agent-safety"' in page.text
     assert '.evaluator-editor-toolbar,.evaluator-line-numbers,.evaluator-editor-status{background:#fff}' in page.text
     assert '.evaluator-editor-toolbar #evaluator-select{min-width:220px;height:34px' in page.text
@@ -423,8 +423,8 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert 'id="system-prompt" class="prompt-editor" aria-label="System Prompt"' in page.text
     assert 'aria-label="System Prompt" readonly' not in page.text
     assert 'id="system-prompt-confirm-title">确认系统提示词</b>' in page.text
-    assert "systemPromptConfirmHelp:'内置默认提示词，可在发送前编辑。'" in page.text
-    assert "composerPurposeHelp:'根据任务配置自动生成，可在发送前直接编辑。'" in page.text
+    assert "systemPromptConfirmHelp:'定义 Agent 的工作规范与搜索策略，可在发送前直接编辑。'" in page.text
+    assert "composerPurposeHelp:'已根据任务配置自动生成，可在发送前直接编辑。'" in page.text
     assert "composerPurposeTitle:'确认用户提示词'" in page.text
     assert 'function mountStopSettings()' in page.text
     assert "field('stop-review-rounds','number')" in page.text
@@ -488,8 +488,8 @@ def test_workspace_roundtrip_and_boundaries(platform, tmp_path):
     assert 'id="workspace-name-editor"' in page.text
     assert 'id="data-context-guide"' not in page.text
     assert (
-        'manifest.json 记录变量与轴信息；网络或超图数据还会记录 num_nodes 和关系变量。'
-        '&lt;name&gt;.npy 保存取值'
+        'manifest.json 记录变量、坐标轴及图/超图关系，'
+        '&lt;name&gt;.npy 保存各变量的数组取值'
     ) in page.text
     assert 'id="data-agent-safety"' in page.text
     assert "api('/api/workspace/lock',{path,locked},'PUT')" in page.text

@@ -929,7 +929,7 @@
     <button id="home">Home</button>
     <span id="status" class="muted"></span>
     <div class="agent-control" aria-label="Live agent controls">
-      <input id="guidance" placeholder="Inject guidance at the next safe boundary">
+      <input id="guidance" placeholder="Send guidance for the next turn…">
       <button id="send-guidance">Send</button>
       <button id="pause-agent">Pause</button>
       <button id="stop-agent" class="danger">Stop</button>
@@ -1018,10 +1018,10 @@
       <div id="legend" class="legend">
         <strong id="legend-title"><span class="legend-toggle"></span><span>Legend</span></strong>
         <div class="legend-body">
-          <div class="legend-row"><span class="sample node-dot"></span><span>Node: one local sample from the agent.</span></div>
-          <div class="legend-row"><span class="sample line"></span><span>Solid edge: strong context inheritance.</span></div>
-          <div class="legend-row"><span class="sample line weak"></span><span>Dashed edge: weak parent, partial tool-call context.</span></div>
-          <div class="legend-row"><span></span><span>Color: selected metric is mapped from red to green; error metrics use lower-is-better.</span></div>
+          <div class="legend-row"><span class="sample node-dot"></span><span>Node: one sampled step (R, C, L, K) in the search tree.</span></div>
+          <div class="legend-row"><span class="sample line"></span><span>Solid edge: primary conversation continuation.</span></div>
+          <div class="legend-row"><span class="sample line weak"></span><span>Dashed edge: shared tool outputs from a sibling sample.</span></div>
+          <div class="legend-row"><span></span><span>Color: node score mapped from red (worse) to green (better) on the selected metric.</span></div>
         </div>
       </div>
       <svg id="graph" width="1200" height="760" role="img" aria-label="Search graph"></svg>
@@ -2664,7 +2664,7 @@
         }
         return await response.json();
       } catch (error) {
-        if (error.name === "AbortError") throw new Error("请求超时");
+        if (error.name === "AbortError") throw new Error("Request timed out");
         throw error;
       } finally { clearTimeout(timer); }
     }

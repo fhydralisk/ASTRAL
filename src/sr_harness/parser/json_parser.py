@@ -13,13 +13,13 @@ _logger = getLogger(f'sr_harness.{__name__}')
 
 @BaseParser.register('json')
 class JSONParser(BaseParser):
-    """Parser for JSON-formatted tool calls."""
+    """Tool-call parser that instructs the model to emit JSON tool calls and parses them from text."""
 
     def format_tools(self) -> str:
-        """Format tools.
+        """Render enabled tool schemas and JSON call formatting instructions for the system prompt.
 
         Returns:
-            str: The operation result.
+            str: Prompt block describing available tools and the required JSON call syntax.
         """
         lines = ["## Available Tools:", ""]
 
@@ -64,13 +64,13 @@ class JSONParser(BaseParser):
         return "\n".join(lines)
 
     def parse_response(self, response: str) -> List[ToolCall]:
-        """Parse response.
+        """Extract :class:`~sr_harness.core.ToolCall` objects from JSON blocks in the model's text response.
 
         Args:
-            response: Provider response object.
+            response: Model text output potentially containing JSON tool-call blocks.
 
         Returns:
-            List[ToolCall]: The operation result.
+            List[ToolCall]: Normalized tool calls recovered from ``response``.
         """
         tool_calls = []
 

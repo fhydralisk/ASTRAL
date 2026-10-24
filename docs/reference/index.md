@@ -1,14 +1,16 @@
 # API Reference
 
-This section is generated from SRHarness type signatures and Google-style docstrings.
+本页根据 SRHarness 源码中的类型标注与 Google 风格 docstring 自动生成。
 
-The public API consists of objects exported by each package. Vendored modules,
-Web route handlers, and implementation details whose names start with an
-underscore are outside the compatibility contract.
+公开 API 仅包含各顶层包显式导出（`__all__`）的类与函数；第三方内嵌模块（`_vendor`）、Web 路由处理函数以及以下划线 `_` 开头的内部实现细节不属于向后兼容范围。
 
-Use the table of contents to jump between packages, classes, and methods. All
-sections below are generated from the current source tree during the MkDocs
-build.
+你可以通过右侧目录快速跳转到对应的模块、类与方法。
+
+---
+
+This reference is generated automatically from SRHarness type annotations and Google-style docstrings.
+
+The public API consists of objects explicitly exported by each package (`__all__`). Vendored modules (`_vendor`), web route handlers, and internal helpers prefixed with an underscore (`_`) are outside the stability contract.
 
 ## Agents
 
@@ -57,4 +59,3 @@ build.
 ::: sr_harness_engine
     options:
       members: true
-

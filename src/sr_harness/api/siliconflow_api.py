@@ -18,16 +18,26 @@ class _SiliconFlowRequestFailed(RuntimeError):
 
 @BaseAPI.register("siliconflow")
 class SiliconFlowAPI(BaseAPI):
-    """SiliconFlow adapter for the Qwen3-8B and Deepseek-V3 workflows."""
+    """LLM provider adapter for SiliconFlow chat and reasoning models."""
 
     def __init__(self, model: str = "Qwen3-8B", **kwargs: Any) -> None:
+        """Initialize the SiliconFlow API adapter.
+
+        Args:
+            model: SiliconFlow model identifier (defaults to ``"Qwen3-8B"``).
+            **kwargs: Additional arguments forwarded to :class:`BaseAPI`.
+        """
         super().__init__(model=model, **kwargs)
         self._model_catalog = RemoteModelCatalog(
             lambda url: httpx.Client(proxy=self.proxy_url(url), trust_env=False)
         )
 
     def cancel(self) -> str:
-        """Report that the current synchronous HTTP request cannot be preempted."""
+        """Request cancellation and note that synchronous SiliconFlow HTTP requests pause once the active call returns.
+
+        Returns:
+            str: Human-readable notice describing cancellation behavior.
+        """
         return (
             "SiliconFlowAPI does not support force-interrupting an active non-streaming "
             "request. The Agent will pause at its next safe boundary."
@@ -36,12 +46,25 @@ class SiliconFlowAPI(BaseAPI):
     def format_response(
         self, message: dict[str, Any], tool_calls: list[ToolCall], content: str | None = None
     ) -> APICallSample:
-        """Convert one SiliconFlow message into one API-call sample."""
+        """Convert a SiliconFlow response message into a normalized :class:`~sr_harness.core.APICallSample`.
+
+        Args:
+            message: Raw SiliconFlow assistant message dictionary.
+            tool_calls: Normalized tool calls extracted from the message.
+            content: Optional explicit text content override.
+
+        Returns:
+            APICallSample: Normalized assistant response sample.
+        """
         return self._build_response(message, tool_calls, content)
 
     @property
     def model_list(self) -> list[str]:
-        """Return the current SiliconFlow chat-model catalog."""
+        """Fetch and return the available chat models from SiliconFlow's model catalog.
+
+        Returns:
+            list[str]: Supported SiliconFlow model identifiers.
+        """
         chat_endpoint = self.get_env(
             "SILICONFLOW_ENDPOINT",
             "https://api.siliconflow.cn/v1/chat/completions",

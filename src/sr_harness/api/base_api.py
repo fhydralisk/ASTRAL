@@ -30,7 +30,7 @@ ProgressCallback = Callable[[dict[str, Any]], None]
 
 @dataclass(slots=True)
 class ProviderSampleResult:
-    """One provider sample plus the accounting needed by the batch caller."""
+    """Internal container pairing one sampled :class:`~sr_harness.core.APICallSample` with its token usage, cost, and error status."""
 
     response: APICallSample
     token_usage: dict[str, int | float] = field(default_factory=dict)
@@ -40,7 +40,12 @@ class ProviderSampleResult:
 
 
 class BaseAPI(ABC, FactoryMixin):
-    """Common request, parser, and tool-call behavior for LLM providers."""
+    """Abstract base adapter for language-model providers.
+
+    Handles API key and proxy resolution from the session environment, native or
+    parser-based tool formatting, OpenAI-compatible streaming and non-streaming
+    chat completions, retry backoff, and cooperative cancellation.
+    """
 
     STREAM_IDLE_TIMEOUT_SECONDS = 300.0
 
@@ -51,6 +56,14 @@ class BaseAPI(ABC, FactoryMixin):
         environment: Mapping[str, str] | None = None,
         save_path: str | Path | None = None,
     ) -> None:
+        """Initialize the LLM provider adapter.
+
+        Args:
+            model: Model identifier to request (defaults to the subclass's default model).
+            tool_box: Optional :class:`~sr_harness.parser.BaseParser` holding enabled tools.
+            environment: Optional session-scoped environment mapping for API keys and proxies.
+            save_path: Optional directory path for logging raw provider responses.
+        """
         self.model = model
         if tool_box is not None and not isinstance(tool_box, BaseParser):
             raise TypeError("tool_box must be a BaseParser instance or None")
@@ -62,7 +75,11 @@ class BaseAPI(ABC, FactoryMixin):
     @property
     @abstractmethod
     def model_list(self) -> list[str]:
-        """Return model identifiers accepted by this provider adapter."""
+        """Return the list of model identifiers supported by this provider adapter.
+
+        Returns:
+            list[str]: Supported model names.
+        """
         raise NotImplementedError
 
     def get_env(
@@ -72,14 +89,30 @@ class BaseAPI(ABC, FactoryMixin):
         *,
         required: bool = False,
     ) -> str | None:
-        """Read a provider setting and optionally require a non-None value."""
+        """Read an environment variable from the session environment (falling back to ``os.environ``).
+
+        Args:
+            name: Environment variable name (e.g., ``"OPENROUTER_API_KEY"``).
+            default: Fallback value returned when the variable is unset or empty.
+            required: If ``True``, raise a ``ValueError`` when no non-empty value is found.
+
+        Returns:
+            str | None: Resolved environment variable value, or ``default``.
+        """
         value = self.environment.get(name, os.environ.get(name, default))
         if required and value is None:
             raise KeyError(name)
         return value
 
     def proxy_url(self, url: str | None = None) -> str | None:
-        """Return this API instance's session proxy unless ``url`` bypasses it."""
+        """Resolve the outbound HTTP/SOCKS proxy URL for ``url``, honoring ``NO_PROXY`` exclusions.
+
+        Args:
+            url: Target request URL used to check ``NO_PROXY`` rules, or ``None``.
+
+        Returns:
+            str | None: Effective proxy URL, or ``None`` when direct connection should be used.
+        """
         if url and should_bypass_proxies(
             url, no_proxy=self.get_env("NO_PROXY") or self.get_env("no_proxy")
         ):
@@ -96,17 +129,26 @@ class BaseAPI(ABC, FactoryMixin):
         callback: ProgressCallback | None,
         update: dict[str, Any],
     ) -> None:
-        """Publish one optional progress update."""
+        """Invoke the caller's progress callback with a live streaming or status update.
+
+        Args:
+            callback: Optional progress callback supplied by the caller.
+            update: Progress event dictionary to pass to ``callback``.
+        """
         if callback is not None:
             callback(update)
 
     def raise_if_cancelled(self) -> None:
-        """Raise at an API-owned cancellation boundary."""
+        """Raise :class:`~sr_harness.core.ToolRunAbort` immediately if cancellation has been requested."""
         if self._cancel_requested.is_set():
             raise InterruptedError("Model API request was cancelled")
 
     def wait_before_retry(self, delay: float) -> None:
-        """Wait for retry backoff while remaining immediately cancellable."""
+        """Sleep for ``delay`` seconds before retrying a failed request while remaining immediately cancellable.
+
+        Args:
+            delay: Backoff duration in seconds.
+        """
         if self._cancel_requested.wait(delay):
             raise InterruptedError("Model API request was cancelled")
 
@@ -191,7 +233,15 @@ class BaseAPI(ABC, FactoryMixin):
         )
 
     def error_message(self, error: BaseException, *, description: str | None = None) -> str:
-        """Log one raw provider error and prepare its frontend representation."""
+        """Log a provider exception and return a sanitized error message safe for the frontend.
+
+        Args:
+            error: Exception raised during the provider request.
+            description: Optional human-readable context describing the failed operation.
+
+        Returns:
+            str: Sanitized error message with sensitive tokens redacted.
+        """
         label = description or f"{type(self).__name__}({self.model})"
         formatted_error = "".join(traceback.format_exception(error)).rstrip()
         _logger.error(f"Error requesting {label}:\n{formatted_error}")
@@ -205,7 +255,15 @@ class BaseAPI(ABC, FactoryMixin):
 
     @staticmethod
     def retry_delay(error: Exception, attempt: int) -> float:
-        """Honor a provider Retry-After hint, or use bounded backoff."""
+        """Compute the retry backoff delay from a ``Retry-After`` header or exponential backoff.
+
+        Args:
+            error: Exception raised by the HTTP/SDK client.
+            attempt: Zero-based retry attempt index.
+
+        Returns:
+            float: Delay in seconds before the next retry attempt.
+        """
         headers = getattr(getattr(error, "response", None), "headers", None) or {}
         retry_after = headers.get("retry-after") or headers.get("Retry-After")
         if retry_after is None:
@@ -228,7 +286,18 @@ class BaseAPI(ABC, FactoryMixin):
         sample: int,
         callback: ProgressCallback | None = None,
     ) -> tuple[Any, dict[str, Any], dict[str, Any], str]:
-        """Request one OpenAI-compatible completion and normalize its shape."""
+        """Execute one OpenAI-compatible chat completion (streaming when a callback is provided) and normalize the output.
+
+        Args:
+            client: OpenAI-compatible SDK client instance.
+            payload: Request keyword arguments passed to ``client.chat.completions.create``.
+            sample: Zero-based sample index within the current batch.
+            callback: Optional callback receiving live streaming deltas.
+
+        Returns:
+            tuple[Any, dict[str, Any], dict[str, Any], str]: Tuple of
+                ``(completion_object, assistant_message_dict, usage_dict, finish_reason)``.
+        """
         if callback is not None:
             return self.stream_openai_chat_completion(
                 client,
@@ -315,7 +384,18 @@ class BaseAPI(ABC, FactoryMixin):
         sample: int,
         callback: ProgressCallback,
     ) -> tuple[Any, dict[str, Any], dict[str, Any], str]:
-        """Consume an OpenAI-compatible stream and emit provider-neutral snapshots."""
+        """Consume an OpenAI-compatible SSE stream, publishing incremental reasoning/content deltas and assembling the final message.
+
+        Args:
+            client: OpenAI-compatible SDK client instance.
+            payload: Request keyword arguments passed to ``client.chat.completions.create``.
+            sample: Zero-based sample index within the current batch.
+            callback: Callback invoked for each incremental stream delta.
+
+        Returns:
+            tuple[Any, dict[str, Any], dict[str, Any], str]: Tuple of
+                ``(synthetic_completion, assistant_message_dict, usage_dict, finish_reason)``.
+        """
         stream_payload = {
             **payload,
             "stream": True,
@@ -407,7 +487,15 @@ class BaseAPI(ABC, FactoryMixin):
         return completion, {"chunks": raw_chunks, "finish_reason": finish_reason}, message, content
 
     def parse_tool_calls(self, message: dict[str, Any], content: str) -> list[ToolCall]:
-        """Parse one assistant message using the configured tool-call mode."""
+        """Extract normalized :class:`~sr_harness.core.ToolCall` objects from an assistant message.
+
+        Args:
+            message: Raw provider assistant message dictionary.
+            content: Assistant text content.
+
+        Returns:
+            list[ToolCall]: Parsed tool calls (empty list when no tools were called).
+        """
         if self.tool_box is None:
             return []
         if not self.tool_box.native_tool_calls:
@@ -416,7 +504,15 @@ class BaseAPI(ABC, FactoryMixin):
 
     @staticmethod
     def openai_token_usage(completion: Any, *, other_key: str = "others") -> dict[str, int]:
-        """Extract token counters from an OpenAI-compatible completion."""
+        """Extract prompt, completion, reasoning, and cached token counts from an OpenAI-style completion object.
+
+        Args:
+            completion: OpenAI-compatible completion response object.
+            other_key: Key name used to store cached/extra tokens (defaults to ``"others"``).
+
+        Returns:
+            dict[str, int]: Token usage breakdown dictionary.
+        """
         usage = getattr(completion, "usage", None)
         if usage is None:
             return {}
@@ -430,7 +526,15 @@ class BaseAPI(ABC, FactoryMixin):
 
     @staticmethod
     def aggregate_sample_results(results: list[ProviderSampleResult]) -> dict[str, Any]:
-        """Build the aggregate result for independently requested samples."""
+        """Combine per-sample token counts, costs, and error messages into a batch summary dictionary.
+
+        Args:
+            results: List of :class:`ProviderSampleResult` objects from one batch call.
+
+        Returns:
+            dict[str, Any]: Aggregated ``ok``, ``error``, ``token_usage``, ``money_usage``,
+                and ``extra`` metadata.
+        """
         token_usage: dict[str, int | float] = {}
         money_usage: dict[str, int | float] = {}
         for result in results:
@@ -477,7 +581,16 @@ class BaseAPI(ABC, FactoryMixin):
         tool_calls: list[ToolCall],
         content: str | None = None,
     ) -> APICallSample:
-        """Convert one provider message into a normalized API-call sample."""
+        """Convert a provider message and parsed tool calls into a normalized :class:`~sr_harness.core.APICallSample`.
+
+        Args:
+            message: Raw provider message object or dictionary.
+            tool_calls: Normalized tool calls extracted from the message.
+            content: Optional explicit text content override.
+
+        Returns:
+            APICallSample: Normalized response sample.
+        """
         raise NotImplementedError
 
     def __call__(
@@ -486,7 +599,18 @@ class BaseAPI(ABC, FactoryMixin):
         callback: ProgressCallback | None = None,
         **kwargs: Any,
     ) -> APICallSummary:
-        """Request the provider and wrap its result generator."""
+        """Send conversation messages to the model provider and return an iterable :class:`~sr_harness.core.APICallSummary`.
+
+        Args:
+            messages: Conversation message list or a single user prompt string.
+            callback: Optional callback for live streaming progress updates.
+            **kwargs: Additional sampling parameters such as ``n``, ``max_tokens``,
+                ``temperature``, and ``top_p``.
+
+        Returns:
+            APICallSummary: Iterable summary yielding :class:`~sr_harness.core.APICallSample`
+                objects and capturing total token/cost usage.
+        """
         if isinstance(messages, str):
             messages = [{"role": "user", "content": messages}]
         if callback is not None:
@@ -599,6 +723,10 @@ class BaseAPI(ABC, FactoryMixin):
             _logger.warning(f"Unable to append API call log {path}: {error}")
 
     def cancel(self) -> str | None:
-        """Request interruption at the next API-owned cancellation boundary."""
+        """Signal active provider requests to abort at the next cancellation boundary and close active streams.
+
+        Returns:
+            str | None: Optional diagnostic note if the underlying SDK cannot be preempted mid-request.
+        """
         self._cancel_requested.set()
         return None

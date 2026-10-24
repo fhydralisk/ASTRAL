@@ -42,19 +42,42 @@ def _now() -> str:
 
 
 class ConversationSessionProxy:
-    """Resolve attribute access to the session bound to the current request."""
+    """Request-scoped proxy that forwards attribute access to the active :class:`InteractiveSession`."""
 
     def __init__(self, registry: "ConversationRegistry"):
+        """Initialize the session proxy bound to a :class:`ConversationRegistry`.
+
+        Args:
+            registry: Conversation registry providing the fallback default session.
+        """
         object.__setattr__(self, "_registry", registry)
         object.__setattr__(self, "_current", ContextVar("sr_harness_session", default=None))
 
     def bind(self, session: InteractiveSession):
+        """Bind ``session`` to the current async/thread request context.
+
+        Args:
+            session: Active :class:`InteractiveSession` for the current HTTP request.
+
+        Returns:
+            Token: Contextvar token that can be passed to :meth:`reset`.
+        """
         return self._current.set(session)
 
     def reset(self, token) -> None:
+        """Restore the previous request-context session binding.
+
+        Args:
+            token: Contextvar reset token returned by :meth:`bind`.
+        """
         self._current.reset(token)
 
     def current_session(self) -> InteractiveSession:
+        """Return the :class:`InteractiveSession` bound to the current request context.
+
+        Returns:
+            InteractiveSession: Active session for the current request.
+        """
         session = self._current.get()
         if session is None:
             raise RuntimeError("No InteractiveSession is bound to the current request")
@@ -68,7 +91,7 @@ class ConversationSessionProxy:
 
 
 class ConversationRegistry:
-    """Persist conversation metadata and lazily own one session per conversation."""
+    """Persistent registry managing multi-conversation metadata, workspaces, and lazy session loading."""
 
     def __init__(
         self,
@@ -81,6 +104,17 @@ class ConversationRegistry:
         persistence_interval: float = 5.0,
         read_only: bool = False,
     ):
+        """Initialize the conversation registry and load existing records from ``conversations.json``.
+
+        Args:
+            workspace_dir: Root directory storing ``conversations.json``, ``workspaces/``, and ``sessions/``.
+            workspace_files: Optional list of host paths mounted read-only into every conversation workspace.
+            isolate_users: Whether to scope conversation listings per browser visitor cookie.
+            run_root: Optional root directory where per-conversation run logs are saved.
+            persist_sessions: Whether to periodically save session snapshots to disk.
+            persistence_interval: Minimum interval in seconds between background snapshot writes.
+            read_only: Whether to serve existing conversations without allowing state mutations.
+        """
         self.workspace_dir = Path(workspace_dir).expanduser().resolve()
         self.read_only = bool(read_only)
         if self.read_only:
@@ -139,6 +173,11 @@ class ConversationRegistry:
 
     @property
     def default_session(self) -> InteractiveSession:
+        """Return the default active :class:`InteractiveSession` instance.
+
+        Returns:
+            InteractiveSession: Default interactive session.
+        """
         self._refresh_read_only()
         with self.lock:
             record = next((item for item in self._records if not item["archived"]), None)
@@ -395,12 +434,22 @@ class ConversationRegistry:
             self._drop_transient(conversation_id)
 
     def acquire(self, conversation_id: str) -> None:
+        """Increment the active request lease count for ``conversation_id``.
+
+        Args:
+            conversation_id: Identifier of the conversation being accessed.
+        """
         with self._active_lock:
             self._active_requests[conversation_id] = (
                 self._active_requests.get(conversation_id, 0) + 1
             )
 
     def release(self, conversation_id: str) -> None:
+        """Decrement the active request lease count for ``conversation_id``.
+
+        Args:
+            conversation_id: Identifier of the conversation whose request completed.
+        """
         with self._active_lock:
             remaining = self._active_requests.get(conversation_id, 0) - 1
             if remaining > 0:
@@ -529,7 +578,7 @@ class ConversationRegistry:
         return self._session_dir(record) / "interactive-session.json"
 
     def persist(self) -> None:
-        """Atomically persist every materialized InteractiveSession."""
+        """Atomically write ``conversations.json`` and dirty session snapshots to disk."""
         if not self.persist_sessions:
             return
         with self.lock:
@@ -589,6 +638,19 @@ class ConversationRegistry:
         materialize_reason: str | None = None,
         load_session: bool = True,
     ) -> tuple[dict[str, Any], InteractiveSession | None]:
+        """Resolve the active conversation record and session for a client request.
+
+        Args:
+            client_id: Browser visitor identifier from the session cookie.
+            selected_id: Conversation ID requested via header or query parameter.
+            materialize_reason: If provided, promote a temporary session to durable storage
+                with this reason string.
+            load_session: Whether to instantiate or load the :class:`InteractiveSession`.
+
+        Returns:
+            tuple[dict[str, Any], InteractiveSession | None]: Pair of
+                ``(conversation_record, interactive_session)``.
+        """
         self._refresh_read_only()
         with self.lock:
             self._sweep_transients()
@@ -621,6 +683,16 @@ class ConversationRegistry:
         return record, self._session_for(record) if load_session else None
 
     def list(self, client_id: str, selected_id: str | None = None) -> dict[str, Any]:
+        """Return the visible conversation list and active selection for ``client_id``.
+
+        Args:
+            client_id: Browser visitor identifier.
+            selected_id: Optional currently selected conversation ID.
+
+        Returns:
+            dict[str, Any]: Dictionary containing ``conversations``, ``selected``,
+                ``read_only``, and ``persistence_warning``.
+        """
         self._refresh_read_only()
         with self.lock:
             records = [record for record in self._records if self._visible(record, client_id)]
@@ -646,7 +718,16 @@ class ConversationRegistry:
         conversation_id: str,
         reason: str,
     ) -> tuple[dict[str, Any], InteractiveSession]:
-        """Make a selected temporary conversation durable."""
+        """Promote a transient in-memory conversation to persistent storage on disk.
+
+        Args:
+            client_id: Browser visitor identifier owning the conversation.
+            conversation_id: Identifier of the conversation to persist.
+            reason: Event label explaining why the conversation became durable.
+
+        Returns:
+            tuple[dict[str, Any], InteractiveSession]: Durable conversation record and its session.
+        """
         with self.lock:
             transient = self._transient_records.get(conversation_id)
             if transient is not None:
@@ -670,6 +751,15 @@ class ConversationRegistry:
             return record, self._session_for(record)
 
     def create(self, client_id: str, name: str | None = None) -> dict[str, Any]:
+        """Create a new transient conversation for ``client_id`` without writing empty directories to disk.
+
+        Args:
+            client_id: Browser visitor identifier.
+            name: Optional initial display name for the conversation.
+
+        Returns:
+            dict[str, Any]: Newly created conversation metadata record.
+        """
         if self.read_only:
             raise PermissionError("Conversation registry is read-only")
         with self.lock:
@@ -686,6 +776,15 @@ class ConversationRegistry:
             return record
 
     def select(self, client_id: str, conversation_id: str) -> dict[str, Any]:
+        """Select an existing or transient conversation for ``client_id``.
+
+        Args:
+            client_id: Browser visitor identifier.
+            conversation_id: Conversation identifier to select.
+
+        Returns:
+            dict[str, Any]: Selected conversation metadata record.
+        """
         self._refresh_read_only()
         with self.lock:
             transient = self._transient_records.get(conversation_id)
@@ -706,6 +805,16 @@ class ConversationRegistry:
         return record
 
     def rename(self, client_id: str, conversation_id: str, name: str) -> dict[str, Any]:
+        """Update a conversation's display name in ``conversations.json`` without moving its workspace path.
+
+        Args:
+            client_id: Browser visitor identifier.
+            conversation_id: Identifier of the conversation to rename.
+            name: New non-empty display name (up to 120 characters).
+
+        Returns:
+            dict[str, Any]: Updated conversation metadata record.
+        """
         if self.read_only:
             raise PermissionError("Conversation registry is read-only")
         name = name.strip()
@@ -731,7 +840,16 @@ class ConversationRegistry:
         conversation_id: str,
         selected_id: str,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        """Archive a conversation and choose the conversation that remains selected."""
+        """Archive (soft-delete) a conversation and return the next selected conversation.
+
+        Args:
+            client_id: Browser visitor identifier.
+            conversation_id: Identifier of the conversation to archive.
+            selected_id: Currently active conversation ID in the client.
+
+        Returns:
+            tuple[dict[str, Any], dict[str, Any]]: Pair of ``(archived_record, next_selected_record)``.
+        """
         if self.read_only:
             raise PermissionError("Conversation registry is read-only")
         with self.lock:
@@ -800,7 +918,15 @@ class ConversationRegistry:
                         shutil.copyfileobj(input_stream, output_stream)
 
     def export(self, client_id: str, conversation_id: str) -> tuple[Path, str]:
-        """Create a temporary ZIP containing a conversation and its retained state."""
+        """Package a conversation's workspace and session snapshot (excluding ``.env``) into a temporary ZIP file.
+
+        Args:
+            client_id: Browser visitor identifier.
+            conversation_id: Identifier of the conversation to export.
+
+        Returns:
+            tuple[Path, str]: Pair of ``(zip_file_path, download_filename)``.
+        """
         record = self.select(client_id, conversation_id)
         session = self._session_for(record)
         with self.lock:
@@ -834,6 +960,7 @@ class ConversationRegistry:
         return Path(archive_name), f"conversation-{conversation_id}.zip"
 
     def close(self) -> None:
+        """Stop the background persistence thread and flush any pending conversation state to disk."""
         self._persistence_stop.set()
         if self._persistence_thread is not None:
             self._persistence_thread.join(timeout=self.persistence_interval + 1)
@@ -856,7 +983,12 @@ class ConversationRegistry:
 
 
 def mount_conversations(app, registry: ConversationRegistry) -> None:
-    """Bind browser identity, conversation selection, and registry endpoints."""
+    """Register conversation management middleware and REST endpoints on ``app``.
+
+    Args:
+        app: FastAPI application instance.
+        registry: Active :class:`ConversationRegistry` instance.
+    """
 
     def persistence_timing(request: Request) -> tuple[str | None, str | None]:
         path = request.url.path

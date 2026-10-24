@@ -5,34 +5,25 @@ from .base_tool import BaseTool, ToolMetadata
 
 @BaseTool.register("edit_skill")
 class EditSkill(BaseTool):
-    """Implementation of the edit skill."""
+    """Tool for patching an existing editable ``SKILL.md`` file with exact SEARCH/REPLACE blocks."""
     metadata = ToolMetadata(name="edit_skill")
     SEARCH_MARKER = "<<<<<<< SEARCH"
     SEPARATOR_MARKER = "======="
     REPLACE_MARKER = ">>>>>>> REPLACE"
 
     def execute(self, name: str, patch: str) -> Dict[str, Any]:
-        """Edit an existing skill with exact search/replace blocks.
-        Use this when an existing skill is clearly relevant but should be corrected,
-        refined, or extended based on concrete results from the current or recent work.
-        You do not need to find a perfect formula or reach MSE = 0.0 before editing
-        a skill; edit it when an attempt reveals a useful reusable tactic.
-        Prefer small, evidence-backed edits. Do not overwrite broad guidance with a
-        one-off dataset detail, a final formula, or an unverified guess. If no existing
-        skill matches the reusable lesson, create a new skill instead.
+        """Update an editable skill's ``SKILL.md`` using exact ``SEARCH/REPLACE`` blocks.
+
+        Use this tool when concrete evidence from the current run refines or corrects an existing
+        skill. Prefer small, generalizable edits; never hard-code dataset-specific constants or
+        unverified guesses into a reusable skill.
 
         Args:
-            name: The exact skill name to edit.
-            patch: One or more SEARCH/REPLACE blocks. Each SEARCH text must 
-                match exactly once in the target skill file. Format:
+            name: Exact name of the editable skill to modify.
+            patch: One or more ``<<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE`` blocks where each SEARCH section matches ``SKILL.md`` exactly once.
 
-                <<<<<<< SEARCH
-                old text copied exactly from the skill file
-                =======
-                new replacement text
-                >>>>>>> REPLACE
-
-                Use multiple blocks for multiple focused edits.
+        Returns:
+            Dict[str, Any]: Counts of requested and applied replacements plus any match warnings.
         """
         name = name.strip()
         replacements = self._parse_patch(patch)
@@ -55,13 +46,13 @@ class EditSkill(BaseTool):
 
     @classmethod
     def format_result_dict(cls, result: Dict[str, Any]) -> str:
-        """Format a tool result for the language model.
+        """Format the skill patch summary and any replacement warnings for the Agent.
 
         Args:
-            result: Result mapping to format or update.
+            result: Result dictionary returned by :meth:`execute`.
 
         Returns:
-            str: The operation result.
+            str: Summary of applied replacements and warnings.
         """
         text = (
             f"Edited skill {result['skill']!r}: "

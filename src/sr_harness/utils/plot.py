@@ -11,6 +11,31 @@ def get_fig(RN, CN, FW=None, FH=None, AW=None, AH=None, A_ratio=1.0,
             LM=3, RM=3, TM=3, BM=3, HS=None, VS=None, dpi=300,
             fontsize=7, lw=0.5, gridspec=False, **kwargs):
     # 基础字体和尺寸
+    """Create a publication-style Matplotlib figure and axes grid with exact millimeter dimensions.
+
+    Args:
+        RN: Number of subplot rows.
+        CN: Number of subplot columns.
+        FW: Optional total figure width in millimeters.
+        FH: Optional total figure height in millimeters.
+        AW: Optional single-subplot width in millimeters.
+        AH: Optional single-subplot height in millimeters.
+        A_ratio: Subplot height-to-width aspect ratio when only one dimension is given.
+        LM: Left margin in millimeters.
+        RM: Right margin in millimeters.
+        TM: Top margin in millimeters.
+        BM: Bottom margin in millimeters.
+        HS: Horizontal spacing between subplots in millimeters.
+        VS: Vertical spacing between subplots in millimeters.
+        dpi: Figure resolution in dots per inch.
+        fontsize: Default font size in points.
+        lw: Default line width for axes spines and ticks.
+        gridspec: If ``True``, return a ``GridSpec`` instead of creating subplot axes.
+        **kwargs: Additional keyword arguments forwarded to ``plt.subplots``.
+
+    Returns:
+        tuple: ``(fig, axes)`` or ``(fig, gs)`` when ``gridspec=True``.
+    """
     plt.rcParams['font.family'] = kwargs.get('font_family', 'Arial')
     plt.rcParams['font.size'] = fontsize
     # --- 字体大小设置 (Font Sizes) ---
@@ -93,19 +118,20 @@ def get_fig(RN, CN, FW=None, FH=None, AW=None, AH=None, A_ratio=1.0,
 
 
 def plot_resilience(f:callable, extent=(0, 1, 0, 1), gridnum=(1000, 1000), cmap=None, norm=None, ax=None, reset_xylim=True, lw=1):
-    """
-    绘制二维函数的韧性
-    - f: 二维函数，如 lambda x, y: y - 3*y**2 - y**3 + x*y**3
-    - extent: 函数定义域 (xmin, xmax, ymin, ymax)
-    - gridnum: 网格数量 (xnum, ynum)
-    ---
-    Example:
-    >>> f = lambda x, y: y - 3*y**2 - y**3 + x*y**3
-    >>> plot_resilience(f, ax=axes[0], extent=(0, 5, 0, 5))
-    >>> f = lambda x, y: np.sin(np.sqrt(x**2 + y ** 2))
-    >>> plot_resilience(f, ax=axes[1], extent=(-4*np.pi, 4*np.pi, -4*np.pi, 4*np.pi))
-    >>> f = lambda x, y: np.sin(np.sqrt(x ** 2 + y ** 2)) * x - y * np.cos(np.sqrt(x ** 2 + y ** 2))
-    >>> plot_resilience(f, ax=axes[2], extent=(-4*np.pi, 4*np.pi, -4*np.pi, 4*np.pi))
+    """Plot a 2D scalar function heatmap over ``extent`` with marginal slice curves.
+
+    Args:
+        f: Callable taking ``(x, y)`` meshgrid arrays and returning a 2D scalar field.
+        extent: Tuple ``(xmin, xmax, ymin, ymax)`` defining the plotting domain.
+        gridnum: Tuple ``(nx, ny)`` specifying grid resolution.
+        cmap: Optional Matplotlib colormap.
+        norm: Optional Matplotlib normalization instance.
+        ax: Optional target Matplotlib ``Axes``.
+        reset_xylim: Whether to clamp axis limits to ``extent``.
+        lw: Line width for contour lines.
+
+    Returns:
+        tuple: ``(fig, axes)`` containing the rendered plot.
     """
     if cmap is None: cmap = mcolors.LinearSegmentedColormap.from_list('my_bwr', ['#74b9ff', 'white', '#ff7675'])
     if norm is None: norm = mcolors.SymLogNorm(linthresh=0.01, linscale=0.01, vmin=-1, vmax=1)
@@ -157,8 +183,14 @@ def plot_resilience(f:callable, extent=(0, 1, 0, 1), gridnum=(1000, 1000), cmap=
 
 
 class EqualizeNormalize(mcolors.Normalize):
-    """ 按分布而非值进行归一化 """
+    """Matplotlib ``Normalize`` subclass that maps values to ``[0, 1]`` by empirical quantiles (histogram equalization)."""
     def __init__(self, samples, clip=False):
+        """Initialize the quantile normalizer from empirical ``samples``.
+
+        Args:
+            samples: Array-like sample values used to compute the empirical CDF.
+            clip: Whether to clip out-of-range values to ``[0, 1]``.
+        """
         super().__init__(vmin=samples.min(), vmax=samples.max(), clip=clip)
         hist, bin_edges = np.histogram(samples.flatten(), bins=256, range=(self.vmin, self.vmax), density=True)
         cdf = hist.cumsum()
@@ -166,9 +198,26 @@ class EqualizeNormalize(mcolors.Normalize):
         self.bin_edges = bin_edges
         self.cdf = cdf
     def __call__(self, value, clip=False):
+        """Map ``value`` to its empirical quantile in ``[0, 1]``.
+
+        Args:
+            value: Scalar or array of values to normalize.
+            clip: Unused compatibility flag matching ``matplotlib.colors.Normalize``.
+
+        Returns:
+            np.ma.MaskedArray: Quantile-normalized values in ``[0, 1]``.
+        """
         value = np.array(value)
         return np.ma.masked_array(np.interp(value.flatten(), self.bin_edges[:-1], self.cdf).reshape(value.shape))
     def inverse(self, value):
+        """Map normalized quantiles in ``[0, 1]`` back to the original sample value scale.
+
+        Args:
+            value: Normalized quantile scalar or array in ``[0, 1]``.
+
+        Returns:
+            np.ma.MaskedArray: Values on the original data scale.
+        """
         value = np.array(value)
         return np.ma.masked_array(np.interp(value.flatten(), self.cdf, self.bin_edges[:-1]).reshape(value.shape))
 
@@ -176,7 +225,20 @@ class EqualizeNormalize(mcolors.Normalize):
 def plotOD(ax, source:List[str], destination:List[str], flow:List[float], location:Dict[str, Tuple[float, float]],
            linetype:Literal['straight', 'parabola', 'rotated_parabola', 'projected_parabola']='straight', N=100, zorder=10,
            **kwargs):
-    """ 绘制OD流量 """
+    """Plot origin-destination (OD) flow arcs between 2D node coordinates on ``ax``.
+
+    Args:
+        ax: Target Matplotlib ``Axes``.
+        source: List of origin node identifiers.
+        destination: List of destination node identifiers.
+        flow: List of flow magnitudes corresponding to each ``(source, destination)`` pair.
+        location: Mapping from node identifier to ``(x, y)`` coordinates.
+        linetype: Arc geometry style (``"straight"``, ``"parabola"``,
+            ``"rotated_parabola"``, or ``"projected_parabola"``).
+        N: Number of interpolation points per curve.
+        zorder: Matplotlib drawing z-order.
+        **kwargs: Additional style arguments forwarded to ``ax.plot``.
+    """
     cmap = mcolors.LinearSegmentedColormap.from_list('cmap', ['#0308F8', '#FD0B1B', '#ffff00'], gamma=5.0)
     norm = EqualizeNormalize(flow.values)
     t = np.linspace(0, 1, N)
@@ -211,12 +273,11 @@ def plotOD(ax, source:List[str], destination:List[str], flow:List[float], locati
 
 
 def clear_svg(path, debug=False):
-    """
-    matplotlib 生成的 svg 中会使用 <text style="font: 9.8px 'Arial'; text-anchor: middle" x="80.307802" y="193.900483">2020-02-02</text> 的语法，而 Powerpoint 无法识别 font: 9.8px 'Arial'; 的简写记法，只能识别 font-family: 'Arial'; font-size: 9.8px; 的记法。因此需要进行转换。考虑的属性包括：
-    - font-size
-    - font-family
-    - font-weight
-    - font-style
+    """Rewrite shorthand CSS ``font:`` declarations in a Matplotlib SVG file so PowerPoint can import text cleanly.
+
+    Args:
+        path: Path to the SVG file to rewrite in place.
+        debug: Whether to print unrecognized CSS properties during conversion.
     """
     raise DeprecationWarning("现在好像不需要 clear 了，直接导入 PPT 即可")
     from lxml import etree
@@ -247,11 +308,7 @@ def clear_svg(path, debug=False):
 
 
 def load_font():
-    """
-    - plt.title("示例图表：数字平方", fontproperties=font, size=15)
-    - plt.xlabel("数字", fontproperties=font, size=12)
-    - plt.ylabel("平方", fontproperties=font, size=12)
-    """
+    """Print available system fonts and return a sample ``FontProperties`` instance for Chinese typography."""
     import requests
     from matplotlib.font_manager import FontProperties
 
@@ -289,6 +346,15 @@ def _distance_to_box(point, box):
 
 # 调整文本位置的函数
 def adjust_text(texts, ax, step=0.01, max_iterations=100, mode="xy"):
+    """Iteratively nudge Matplotlib ``Text`` annotations on ``ax`` to minimize overlapping bounding boxes.
+
+    Args:
+        texts: Sequence of Matplotlib ``Text`` artists to reposition.
+        ax: Matplotlib ``Axes`` containing the text artists.
+        step: Repulsion step size as a fraction of axis span.
+        max_iterations: Maximum relaxation iterations.
+        mode: Allowed movement directions (``"xy"``, ``"x"``, or ``"y"``).
+    """
     raw_pos = np.array([text.get_position() for text in texts], dtype=float)
     cur_pos = raw_pos.copy()
 
@@ -345,12 +411,29 @@ def adjust_text(texts, ax, step=0.01, max_iterations=100, mode="xy"):
 
 
 def use_chinese_font(fontpath="/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"):
+    """Register a CJK font file with Matplotlib and set it as the default ``sans-serif`` font.
+
+    Args:
+        fontpath: Filesystem path to a ``.ttf`` or ``.ttc`` CJK font file.
+
+    Returns:
+        FontProperties | None: Loaded ``FontProperties`` object, or ``None`` if the file is missing.
+    """
     font_prop = FontProperties(fname=fontpath)
     rcParams["font.family"] = font_prop.get_name()
     rcParams["axes.unicode_minus"] = False
 
 
 def merge_axes(axes, fig=None):
+    """Replace a group of adjacent subplot ``Axes`` with a single merged ``Axes`` spanning their combined grid box.
+
+    Args:
+        axes: Sequence or array of Matplotlib ``Axes`` sharing a ``GridSpec``.
+        fig: Optional parent ``Figure`` (inferred from ``axes`` when omitted).
+
+    Returns:
+        Axes: Newly created merged ``Axes``.
+    """
     if fig is None: fig = axes[0].figure
     xmin = min(ax.get_position().bounds[0] for ax in axes)  # axes[0, 2] 的左上角坐标
     xmax = max(ax.get_position().bounds[0] + ax.get_position().bounds[2] for ax in axes)  # axes[1, 3] 的右下角坐标

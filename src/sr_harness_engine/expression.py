@@ -266,27 +266,48 @@ class Expression:
 
 @dataclass(frozen=True, slots=True)
 class Number(Expression):
-    """Fixed numeric literal."""
+    """Constant numeric literal node in a symbolic expression tree.
+
+    Attributes:
+        value: Integer or floating-point numeric value.
+    """
     value: int | float
 
 
 @dataclass(frozen=True, slots=True)
 class Symbol(Expression):
-    """Named input symbol with an optional bound value."""
+    """Named dataset variable or coordinate axis symbol in a symbolic expression.
+
+    Attributes:
+        name: Identifier name of the variable in ``context.data``.
+        value: Optional bound NumPy array or scalar value.
+    """
     name: str
     value: Any = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True, slots=True)
 class Parameter(Expression):
-    """Named scalar parameter optimized during fitting."""
+    """Named scalar parameter optimized during expression fitting (created via ``param('name')``).
+
+    Attributes:
+        name: Shared parameter identifier across the expression.
+        value: Optional bound or initial numeric value.
+    """
     name: str
     value: float | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True, slots=True)
 class GroupedParameter(Expression):
-    """Parameter with one fitted value per category."""
+    """Category-specific parameter that fits one scalar value per distinct category of ``by``.
+
+    Attributes:
+        by: Categorical symbol or expression determining group membership.
+        name: Optional identifier for the grouped parameter family.
+        value: Optional mapping from category label to bound/initial float value.
+        default: Optional fallback value used for unseen categories.
+    """
     by: Expression
     name: str | None = None
     value: Mapping[Any, float] | None = field(default=None, compare=False)
@@ -295,7 +316,11 @@ class GroupedParameter(Expression):
 
 @dataclass(frozen=True, slots=True)
 class Index:
-    """Symbolic relation index."""
+    """Symbolic index variable (such as ``i``, ``j``, ``k``) used in graph and hypergraph expressions.
+
+    Attributes:
+        name: Identifier name of the symbolic index.
+    """
     name: str
 
     def __str__(self) -> str:
@@ -304,14 +329,25 @@ class Index:
 
 @dataclass(frozen=True, slots=True)
 class Unary(Expression):
-    """Unary expression node."""
+    """Unary arithmetic operation node (such as negation ``-x``).
+
+    Attributes:
+        operator: Unary operator symbol (``"-"`` or ``"+"``).
+        operand: Child expression node.
+    """
     operator: str
     operand: Expression
 
 
 @dataclass(frozen=True, slots=True)
 class Binary(Expression):
-    """Binary expression node."""
+    """Binary arithmetic operation node (``+``, ``-``, ``*``, ``/``, ``**``).
+
+    Attributes:
+        operator: Binary operator symbol.
+        left: Left-hand child expression.
+        right: Right-hand child expression.
+    """
     operator: str
     left: Expression
     right: Expression
@@ -319,21 +355,37 @@ class Binary(Expression):
 
 @dataclass(frozen=True, slots=True)
 class Function(Expression):
-    """Named function-call expression node."""
+    """Elementwise mathematical or delay function call node (e.g., ``sin(x)``, ``exp(x)``, ``delay(x, tau)``).
+
+    Attributes:
+        name: Canonical function name.
+        arguments: Tuple of argument expression nodes.
+    """
     name: str
     arguments: tuple[Expression, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class Indexed(Expression):
-    """Expression annotated with symbolic indices."""
+    """Variable or relation expression annotated with symbolic indices (e.g., ``x[i]`` or ``A[i, j]``).
+
+    Attributes:
+        base: Underlying variable or relation expression.
+        indices: Tuple of :class:`Index` nodes bound to ``base``.
+    """
     base: Expression
     indices: tuple[Index, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class Reduction(Expression):
-    """Sum reduction with an optional relation binder."""
+    """Indexed summation node (e.g., ``sum[j](A[i, j], x[i] * x[j])``).
+
+    Attributes:
+        indices: Tuple of :class:`Index` variables eliminated by the sum.
+        operand: Message expression being summed.
+        relation: Optional indexed relation expression (such as ``A[i, j]``) restricting the sum.
+    """
     indices: tuple[Index, ...]
     operand: Expression
     relation: Expression | None = None
@@ -341,21 +393,37 @@ class Reduction(Expression):
 
 @dataclass(frozen=True, slots=True)
 class Gather(Expression):
-    """Weighted collection of a structural expression on relation entries."""
+    """Edge- or hyperedge-level evaluation node ``gather(A[i, j], expr)`` returning relation-aligned values.
+
+    Attributes:
+        relation: Indexed relation expression defining the active edges or hyperedges.
+        operand: Expression evaluated at each relation entry.
+    """
     relation: Expression
     operand: Expression
 
 
 @dataclass(frozen=True, slots=True)
 class Aggregate(Expression):
-    """Convenience aggregation node lowered to indexed syntax."""
+    """Shorthand ``aggr(...)`` node that desugars into a canonical indexed :class:`Reduction`.
+
+    Attributes:
+        relation: Relation expression or product containing it.
+        operand: Message expression to aggregate by target node.
+    """
     relation: Expression
     operand: Expression
 
 
 @dataclass(frozen=True, slots=True)
 class RelationLift(Expression):
-    """Convenience source or target projection used inside an aggregation."""
+    """Shorthand ``targ(x)`` or ``sour(x)`` projection node used inside :class:`Aggregate`.
+
+    Attributes:
+        role: Projection role (``"targ"`` or ``"sour"``).
+        operand: Node-level expression being projected onto relation endpoints.
+        relation: Optional explicit relation expression.
+    """
     role: str
     operand: Expression
     relation: Expression | None = None

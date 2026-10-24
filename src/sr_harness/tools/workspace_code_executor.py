@@ -13,7 +13,7 @@ from .code_executor import CodeExecutorTool
 
 @BaseTool.register("workspace_code_executor")
 class WorkspaceCodeExecutorTool(CodeExecutorTool):
-    """Implementation of the workspace code executor tool."""
+    """Tool for running sandboxed Python code with read/write access to the active workspace directory."""
 
     metadata = ToolMetadata(name="workspace_code_executor")
 
@@ -24,20 +24,20 @@ class WorkspaceCodeExecutorTool(CodeExecutorTool):
         memory_limit_mb: int = CodeExecutorTool.DEFAULT_MEMORY_LIMIT_MB,
         output_limit_bytes: int = CodeExecutorTool.DEFAULT_OUTPUT_LIMIT_BYTES,
     ) -> Dict[str, Any]:
-        """Execute Python code in the workspace directory with file access.
-        1) Code runs with cwd set to the workspace directory.
-        2) Use `open("filename")` or `pandas.read_csv("filename")` to read workspace files.
-        3) Use `open("output.csv", "w")` to write results back to the workspace.
-        4) All file paths must be within the workspace. Absolute paths outside
-           workspace are forbidden.
-        5) Installed scientific Python libraries are available. Networking and
-           child-process creation are unavailable.
+        """Execute Python code in an OS sandbox with the active workspace mounted as the working directory.
+
+        1. Runs with ``cwd`` set to the workspace root so relative paths (e.g., ``open("data.csv")``, ``np.save("context.data/x.npy", arr)``) read and write workspace files directly.
+        2. Also receives serialized ``context.data`` on ``sys.stdin`` (optional to read).
+        3. Scientific Python libraries are available; access outside the workspace, networking, and subprocess creation are blocked.
 
         Args:
-            program: Python code string to execute.
-            timeout_seconds: Wall-clock timeout in seconds. The effective value is capped.
-            memory_limit_mb: Address-space memory limit in MB. The effective value is capped.
-            output_limit_bytes: Limit on the amount of output (in bytes) that can be produced.
+            program: Python source code to execute inside the workspace sandbox.
+            timeout_seconds: Wall-clock timeout in seconds (1-120, default 30).
+            memory_limit_mb: Maximum address-space memory in MB (64-4096, default 1024).
+            output_limit_bytes: Maximum stdout/stderr capture size in bytes (1024-1048576, default 65536).
+
+        Returns:
+            Dict[str, Any]: Sandbox stdout, stderr, timing, and resource-usage metrics.
         """
         timeout_seconds = self.bounded_int(
             timeout_seconds, self.DEFAULT_TIMEOUT_SECONDS, 1, self.MAX_TIMEOUT_SECONDS

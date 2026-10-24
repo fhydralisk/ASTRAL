@@ -9,12 +9,12 @@ from .tool import ToolCall
 
 @dataclass(init=False)
 class APICallSample:
-    """One complete assistant sample returned by a model provider.
+    """Single assistant completion sample normalized across model providers.
 
-    ``message_extra`` contains provider message fields not represented by the
-    normalized content and tool calls.  The :attr:`message`
-    property reconstructs a provider-compatible assistant message without
-    retaining a duplicate raw message object.
+    Stores the assistant text ``content``, parsed ``tool_calls``, completion
+    ``finish_reason``, and any provider-specific ``message_extra`` fields (such
+    as reasoning traces). Accessing :attr:`message` reconstructs a provider-ready
+    assistant message dictionary on demand.
     """
 
     content: str | None
@@ -29,6 +29,14 @@ class APICallSample:
         message_extra: dict[str, Any] | None = None,
         finish_reason: str | None = None,
     ) -> None:
+        """Initialize a normalized assistant response sample.
+
+        Args:
+            content: Assistant text content, or ``None`` when only tool calls were emitted.
+            tool_calls: Normalized tool calls extracted from the response.
+            message_extra: Additional provider-specific message fields (e.g., ``reasoning``).
+            finish_reason: Provider stop reason (such as ``"stop"``, ``"tool_calls"``, or ``"length"``).
+        """
         self.content = content
         self.finish_reason = finish_reason
         self._tool_calls = tool_calls if tool_calls is not None else []
@@ -36,12 +44,20 @@ class APICallSample:
 
     @property
     def tool_calls(self) -> list[ToolCall]:
-        """Return the normalized tool calls used to construct this response."""
+        """Return a copy of the normalized tool calls emitted in this sample.
+
+        Returns:
+            list[ToolCall]: Normalized tool call objects.
+        """
         return self._tool_calls
 
     @property
     def reasoning(self) -> Any:
-        """Return provider reasoning without imposing one provider field name."""
+        """Extract the model's reasoning trace across provider-specific field formats.
+
+        Returns:
+            Any: Reasoning text or structured reasoning blocks, or ``None`` if absent.
+        """
         if self.message_extra.get("reasoning"):
             return self.message_extra["reasoning"]
         if self.message_extra.get("reasoning_content"):
@@ -54,12 +70,21 @@ class APICallSample:
 
     @property
     def truncated(self) -> bool:
-        """Whether this sample ended at the provider's output limit."""
+        """Return whether generation stopped because it hit the output token limit.
+
+        Returns:
+            bool: ``True`` when ``finish_reason`` is ``"length"`` or ``"max_tokens"``.
+        """
         return self.finish_reason in {"length", "max_tokens", "max_output_tokens", "MAX_TOKENS"}
 
     @property
     def message(self) -> dict[str, Any]:
-        """Reconstruct the assistant message represented by this response."""
+        """Reconstruct a provider-compatible assistant message dictionary for conversation history.
+
+        Returns:
+            dict[str, Any]: Assistant message containing ``role``, ``content``,
+                provider extras, and serialized ``tool_calls``.
+        """
         message = {**self.message_extra, "content": self.content}
         raw_tool_calls = [call.raw for call in self.tool_calls if isinstance(call.raw, dict)]
         if raw_tool_calls and "tool_calls" not in message:
@@ -70,16 +95,12 @@ class APICallSample:
 
 @dataclass
 class APICallSummary:
-    """
-    Wrapper for LLM generator that captures the return value.
+    """Iterable wrapper over a provider response generator that captures aggregate usage and status.
 
-    Example:
-        >>> api = OpenAIAPI(model='gpt-4o-mini')
-        >>> result = api("Hello", n=3)  # Returns APICallSummary
-        >>> for response in result:
-        ...     print(response.content, response.tool_calls)
-        >>> print(result.ok, result.error)
-        >>> print(result.token_usage, result.money_usage)
+    Iterating over an :class:`APICallSummary` yields individual
+    :class:`APICallSample` instances as they complete, then populates ``ok``,
+    ``error``, ``token_usage``, ``money_usage``, and ``extra`` from the
+    generator's final return value.
     """
 
     gen: Iterator[APICallSample]
@@ -92,7 +113,11 @@ class APICallSummary:
 
     @property
     def truncated(self) -> bool:
-        """Whether any returned sample reached its output limit."""
+        """Return whether any yielded sample in this call was truncated by the token limit.
+
+        Returns:
+            bool: ``True`` if at least one sample has ``truncated == True``.
+        """
         return any(sample.truncated for sample in self.yielded)
 
     def __iter__(self):

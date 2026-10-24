@@ -13,12 +13,14 @@ import yaml
 
 
 def parse_json_with_template(text: str, template: Any) -> Any:
-    """Parse an LLM response and coerce it to the shape described by template.
+    """Extract a JSON payload from model text and coerce its structure to match ``template``.
 
-    Template examples:
-        {"score": float, "detail": [{"claim_id": str, "score": float, "detail": str}]}
-        {"equation_list": [str], "detail": str}
-        [{"key1": float, "key2": str}]
+    Args:
+        text: Raw text output potentially containing fenced or inline JSON.
+        template: Example Python structure (dict, list, or primitive) defining expected types and keys.
+
+    Returns:
+        Any: Parsed and type-coerced Python object matching ``template``.
     """
     errors = []
     for candidate in _candidate_texts(text):

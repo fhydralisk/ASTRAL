@@ -1,5 +1,5 @@
 # Copyright (c) 2026-present, Yumeow. Licensed under the MIT License.
-"""变量关系、条件分布和一维 collapse 分析工具。"""
+"""Feature-target relationship, conditional binning, and 1D collapse analysis tool."""
 import numpy as np
 from scipy import stats
 from scipy.interpolate import UnivariateSpline
@@ -9,7 +9,7 @@ from .base_tool import BaseTool, ToolMetadata, is_numeric_array
 
 @BaseTool.register("relationship_analysis")
 class RelationshipAnalysisTool(BaseTool):
-    """Implementation of the relationship analysis tool."""
+    """Tool for analyzing feature-target correlations, conditional bin profiles, and 1D cross-validated collapse."""
     metadata = ToolMetadata("relationship_analysis")
 
     def execute(
@@ -22,16 +22,24 @@ class RelationshipAnalysisTool(BaseTool):
         n_folds: int = 5,
         collapse_model: str = "bins",
     ) -> Dict[str, Any]:
-        """Analyze feature-target relationships, conditional distributions, and one-dimensional collapse.
+        """Analyze how each variable or expression relates to target ``y`` via correlations, binning, and 1D held-out fits.
+
+        For each candidate feature ``x_i``, computes:
+        - Pearson linear and Spearman rank correlations with ``y``.
+        - Conditional mean, std, and range of ``y`` across quantile or equal-width bins of ``x_i``.
+        - Cross-validated 1D predictive ``R2`` (testing whether ``y ≈ g(x_i)`` collapses onto a single feature/composite) and the strongest remaining variable correlated with the 1D residual.
 
         Args:
-            variables: Variables or expressions to analyze. Use all numeric non-target variables by default.
-            y: Target variable or expression. Use the formula-discovery target by default.
-            n_bins: Number of bins for each feature's conditional target summary (2-100).
-            pairwise: Whether to also return full pairwise Pearson and Spearman matrices.
-            binning: Binning strategy: "quantile" or "equal_width".
-            n_folds: Number of disjoint cross-validation folds (2-20). Default: 5.
-            collapse_model: One-dimensional predictor fitted on each training fold: "bins", "spline", or "isotonic". Spline diagnostics support at most 5000 distinct training coordinates; use bins or isotonic for larger catalogs.
+            variables: Feature names or expressions to analyze, e.g., ``["x1", "x2", "x1 * x2"]``. Defaults to all numeric non-target variables.
+            y: Target variable name or expression. Defaults to ``context.target``.
+            n_bins: Number of bins for conditional target summaries and bin-mean collapse (2-100, default 5).
+            pairwise: Whether to also compute full pairwise Pearson and Spearman matrices across all analyzed variables.
+            binning: Binning scheme, either ``"quantile"`` (default) or ``"equal_width"``.
+            n_folds: Number of cross-validation folds for the 1D held-out collapse test (2-20, default 5).
+            collapse_model: 1D predictor used in cross-validation: ``"bins"`` (default), ``"spline"``, or ``"isotonic"``. Spline diagnostics support at most 5000 distinct training coordinates; use bins or isotonic for larger catalogs.
+
+        Returns:
+            Dict[str, Any]: Per-variable correlations, conditional bin summaries, 1D held-out R2, residual associations, and optional pairwise matrices.
         """
         data = self.context.data
         target_name = (y or self.context.target).strip().strip('"').strip("'")
@@ -249,13 +257,13 @@ class RelationshipAnalysisTool(BaseTool):
 
     @classmethod
     def format_result_dict(cls, result: Dict[str, Any]) -> str:
-        """Format a tool result for the language model.
+        """Format feature-target correlations, conditional bin tables, and 1D collapse scores for the Agent.
 
         Args:
-            result: Result mapping to format or update.
+            result: Result dictionary returned by :meth:`execute`.
 
         Returns:
-            str: The operation result.
+            str: Formatted relationship analysis report.
         """
         def number(value):
             if value == 0:

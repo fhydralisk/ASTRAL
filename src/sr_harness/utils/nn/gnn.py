@@ -4,7 +4,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class GNNLayer(nn.Module):
+    """Message-passing graph neural network layer updating node and edge embeddings."""
     def __init__(self, node_dim, edge_dim, out_dim, residual=False):
+        """Initialize the message-passing GNN layer.
+
+        Args:
+            node_dim: Input node feature dimension.
+            edge_dim: Input edge feature dimension.
+            out_dim: Output embedding dimension for both nodes and edges.
+            residual: Whether to add residual skip connections when dimensions match.
+        """
         super().__init__()
         self.node_dim = node_dim
         self.edge_dim = edge_dim
@@ -29,12 +38,16 @@ class GNNLayer(nn.Module):
 
     # ⚠️ 移除了 A，并将 G 改名为 edge_list 以防混淆
     def forward(self, v, e, edge_list, num_nodes):
-        """
-        - v: [N, V, node_dim]      (N: SampleNum, V: TotalNodes)
-        - e: [N, E, edge_dim]      (N: SampleNum, E: TotalEdges)
-        - edge_list: [2, E]        (第0行: source, 第1行: target)
-        - num_nodes: [N]           (每个样本的节点数量)
-        - return: [N, V, out_dim], [N, E, out_dim]
+        """Run one message-passing step over node features ``v`` and edge features ``e``.
+
+        Args:
+            v: Node feature tensor of shape ``[N, V, node_dim]`` or ``[V, node_dim]``.
+            e: Edge feature tensor of shape ``[N, E, edge_dim]`` or ``[E, edge_dim]``.
+            edge_list: Directed edge index tensor of shape ``[E, 2]``.
+            num_nodes: Total number of nodes ``V``.
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor]: Updated ``(node_embeddings, edge_embeddings)``.
         """
         N, V, _ = v.shape
         _, E, _ = e.shape
@@ -76,7 +89,17 @@ class GNNLayer(nn.Module):
 
 
 class GNN(nn.Module):
+    """Multi-layer graph neural network stack with input projections and dropout."""
     def __init__(self, d_emb, n_layers, node_dim, edge_dim, dropout):
+        """Initialize the multi-layer GNN encoder.
+
+        Args:
+            d_emb: Hidden embedding dimension across message-passing layers.
+            n_layers: Number of stacked :class:`GNNLayer` blocks.
+            node_dim: Input node feature dimension.
+            edge_dim: Input edge feature dimension.
+            dropout: Dropout probability applied after each layer.
+        """
         super(GNN, self).__init__()
         self.d_emb = d_emb
         self.n_layers = n_layers
@@ -88,6 +111,17 @@ class GNN(nn.Module):
         self.dropout = nn.Dropout(p=dropout)
 
     def fwd(self, v, e, edge_list, num_nodes):
+        """Run the full GNN stack on a single unchunked batch of node and edge tensors.
+
+        Args:
+            v: Node feature tensor.
+            e: Edge feature tensor.
+            edge_list: Directed edge index tensor of shape ``[E, 2]``.
+            num_nodes: Total number of nodes ``V``.
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor]: Final ``(node_embeddings, edge_embeddings)``.
+        """
         for net in self.GNN_layers:
             v, e = net(v, e, edge_list, num_nodes)
             v = self.dropout(v)
@@ -95,6 +129,18 @@ class GNN(nn.Module):
         return v, e
 
     def forward(self, v, e, edge_list, num_nodes, chunk_size=None):
+        """Run the GNN stack, optionally splitting the batch dimension into chunks of ``chunk_size``.
+
+        Args:
+            v: Node feature tensor.
+            e: Edge feature tensor.
+            edge_list: Directed edge index tensor of shape ``[E, 2]``.
+            num_nodes: Total number of nodes ``V``.
+            chunk_size: Optional mini-batch chunk size along dimension 0 to bound GPU memory.
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor]: Final ``(node_embeddings, edge_embeddings)``.
+        """
         if chunk_size is None or chunk_size >= v.size(0):
             return self.fwd(v, e, edge_list, num_nodes)
         

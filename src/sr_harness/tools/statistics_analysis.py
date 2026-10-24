@@ -1,5 +1,5 @@
 # Copyright (c) 2026-present, Yumeow. Licensed under the MIT License.
-"""数据统计分析工具。计算变量或表达式的基本统计量，包括最小值、最大值、均值、方差等。"""
+"""Summary statistics, domain-sign counts, and histogram analysis tool."""
 import numpy as np
 import sr_harness_engine as engine
 from typing import Dict, Any, List
@@ -8,7 +8,7 @@ from .base_tool import BaseTool, ToolMetadata, is_numeric_array
 
 @BaseTool.register('statistics_analysis')
 class StatisticsTool(BaseTool):
-    """Implementation of the statistics tool."""
+    """Tool for computing summary statistics, sign/domain counts, near-zero fractions, and histograms."""
     metadata = ToolMetadata('statistics_analysis')
 
     def execute(
@@ -17,15 +17,15 @@ class StatisticsTool(BaseTool):
         n_bins: int = 10,
         near_zero_threshold: float = 1e-8,
     ) -> Dict[str, Any]:
-        """Execute statistical analysis.
+        """Compute summary statistics, domain/sign fractions, near-zero counts, and histograms for variables or expressions.
 
         Args:
-            variables: List of variable names to analyze, e.g., ["x1", "x2", "y"].
-                Use all variables (including the target variable) by default.
-                Expressions are also supported, e.g., ["sin(x1)", "(x1-x2)**2", "sin(y+x1)"].
-            n_bins: Number of equal-width histogram bins used to summarize each distribution (1-100).
-            near_zero_threshold: First absolute-value threshold used to count near-zero samples.
-                The output also reports thresholds 1e-6 and 1e-4.
+            variables: List of variable names or expressions to analyze, e.g., ``["x1", "x2", "y"]`` or ``["sin(x1)", "(x1-x2)**2"]``. Analyzes all numeric variables (including the target) by default.
+            n_bins: Number of equal-width histogram bins used to summarize each finite distribution (1-100).
+            near_zero_threshold: Primary absolute-value cutoff ``|x| <= threshold`` for counting near-zero samples (also reports ``1e-6`` and ``1e-4``).
+
+        Returns:
+            Dict[str, Any]: Per-variable statistics dictionary, configuration, and any evaluation warnings.
         """
         data = self.context.data # {str: np.ndarray}, 包括 input variables & target variable
         if variables is None:
@@ -61,13 +61,13 @@ class StatisticsTool(BaseTool):
 
     @classmethod
     def format_result_dict(cls, result: Dict[str, Any]) -> str:
-        """Format a tool result for the language model.
+        """Format per-variable domain counts, quantiles, near-zero fractions, and histograms for the Agent.
 
         Args:
-            result: Result mapping to format or update.
+            result: Result dictionary returned by :meth:`execute`.
 
         Returns:
-            str: The operation result.
+            str: Formatted statistical summary.
         """
         def number(value):
             if value == 0:
@@ -136,13 +136,15 @@ class StatisticsTool(BaseTool):
         n_bins: int = 10,
         near_zero_threshold: float = 1e-8,
     ) -> Dict[str, Any]:
-        """Compute statistics for a single array.
+        """Compute finite-sample summary statistics, sign ratios, near-zero counts, and histogram bins for a 1D array.
 
         Args:
-            arr: Input array.
+            arr: Input numeric array to summarize.
+            n_bins: Number of equal-width histogram bins (1-100, default 10).
+            near_zero_threshold: Primary absolute-value threshold for near-zero sample counting (default 1e-8).
 
         Returns:
-            Dictionary of statistics.
+            Dict[str, Any]: Summary statistics and distribution bins for ``arr``.
         """
         arr = np.asarray(arr).flatten()
         if arr.size == 0:

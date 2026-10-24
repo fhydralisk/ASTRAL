@@ -1,42 +1,44 @@
 # Structured Data and `context.data`
 
-SRHarness stores structured data in a `context.data/` directory. Each variable and each sufficiently long axis is stored as an NPY file, while `manifest.json` describes variables, axes, and graph relationships.
+SRHarness stores prepared datasets in a `context.data/` directory inside the workspace. Each variable (and any long coordinate axis) is saved as a `.npy` array file, while `manifest.json` records variable names, descriptions, axis dimensions, and graph or hypergraph topology.
 
-This page distinguishes three kinds of rules:
+Throughout this guide, rules fall into three categories:
 
-- **hard constraints** cause loading to fail when violated;
-- **semantic conventions** determine how users and Agents interpret the data but may not be fully machine-checkable;
-- **recommendations** improve data quality and experimental interpretability without affecting loading.
+- **Hard constraints**: Strictly enforced by the loader—violating them causes loading to fail;
+- **Semantic conventions**: Define how users and Agents interpret the data (such as column ordering in an edge list) even when not fully verifiable by type checks alone;
+- **Best practices**: Improve data clarity and experimental rigor without blocking data loading.
 
-!!! warning "Do not leak the answer in descriptions"
-    Variable descriptions should not contain the formula to be discovered or hint at its functional form. The loader can verify only that `description` is a string, so this is an experimental-design recommendation rather than a hard constraint.
+!!! warning "Experimental Design Tip: Never Leak the Ground-Truth Formula"
+    Write `description` fields to explain physical meaning, units, or measurement procedures—**never include the target equation to be discovered or give away its functional form** (e.g., avoid descriptions like `"target generated from y = 1 + x**2"` or `"exponential-decay term"`). The loader can only check that `description` is a non-empty string, not whether its wording leaks the answer.
 
-## Directory layout
+## 1. Directory Layout
 
 ```text
 context.data/
-├── manifest.json
-├── x.npy
-├── y.npy
-├── time.npy       # long axes may also be stored as NPY
-└── A.npy          # graph or hypergraph relations are variables
+├── manifest.json  # Manifest declaring variables, axes, and graph relations
+├── x.npy          # Variable array
+├── y.npy          # Variable array
+├── time.npy       # Long coordinate axes can also be stored as .npy files
+└── A.npy          # Graph or hypergraph edge lists are stored as variables too
 ```
 
-- A valid `manifest.json` is required. Every referenced NPY file must be at the directory root and its filename cannot contain a path.
-- Each NPY file must contain a `numpy.ndarray` loadable with `allow_pickle=False`. Object dtype is not allowed; use NumPy Unicode or fixed-width string dtypes for text.
-- Unreferenced `*.npy` files produce warnings rather than errors so that temporary artifacts can remain during preparation. Remove or register them before a production run.
+- **Hard constraint**: A valid `manifest.json` must exist at the root of `context.data/`, and every referenced `.npy` file must live directly in `context.data/` (no subdirectory paths).
+- **Hard constraint**: Every `.npy` file must store a `numpy.ndarray` loadable with `allow_pickle=False`. Python `object` dtypes are rejected; use NumPy Unicode or fixed-width string dtypes for categorical text.
+- **Best practice**: Unreferenced `*.npy` files in `context.data/` trigger warnings rather than errors so temporary scratch files do not break work in progress, but you should clean them up or register them before starting a run.
 
-## Root fields in `manifest.json`
+## 2. Root Fields in `manifest.json`
 
-| Field | Requirement | Meaning |
+The root JSON object accepts only the three fields below (unknown keys, missing required fields, or duplicate keys will fail validation):
+
+| Field | Requirement | Description |
 |---|---|---|
-| `variables` | Required | Non-empty object containing every variable, including relation variables. |
-| `axes` | Required | Object containing every axis referenced by variables; it may be empty. |
-| `num_nodes` | Conditionally required | Positive integer required whenever a `kind: "relation"` variable exists, and forbidden otherwise. |
+| `variables` | **Required** | Non-empty object mapping each variable name to its specification (including relation variables). |
+| `axes` | **Required** | Object mapping each axis name referenced by variables to its specification (may be `{}` if all variables are scalars). |
+| `num_nodes` | **Conditionally required** | Must be a positive integer whenever any variable has `kind: "relation"`, and must be omitted otherwise. |
 
-No other root fields are accepted. Unknown fields, missing required fields, and duplicate JSON keys invalidate the manifest. The target, feature selection, problem description, and Evaluator belong to a research task rather than the data and are therefore not stored in the manifest.
+Note: Choosing the target variable, selecting input features, writing the research question, and picking an Evaluator are **task settings** rather than dataset properties, so they are configured in the task setup rather than stored in `manifest.json`.
 
-## Variables
+## 3. Variables (`variables`)
 
 ```json
 {
@@ -50,14 +52,14 @@ No other root fields are accepted. Unknown fields, missing required fields, and 
 }
 ```
 
-- Every variable requires `file`, `description`, and `axes`; only `kind` and `structure` are accepted as additional fields.
-- A variable name must be non-empty, cannot be `.` or `..`, and cannot contain a path separator or NUL. Its file must be named exactly `<variable>.npy`.
-- `axes` is an array of axis names. Its length must equal the array rank, and each dimension must match the corresponding axis length. Scalars use `[]`.
-- After loading into `AgentContext`, variable names and axis names must be disjoint; together they form `context.data`.
+- **Required and optional keys**: Every variable entry must specify `file`, `description`, and `axes`. The only optional keys allowed are `kind` and `structure`.
+- **Naming rules**: Variable names must be non-empty, cannot be `.` or `..`, and cannot contain path separators or NUL characters. The array file must be named `<variable_name>.npy`.
+- **Axis alignment**: `axes` is a list of axis names. Its length must match the array's number of dimensions (`ndim`), and each array dimension must match the length of the corresponding axis (scalar variables use `[]`).
+- **Disjoint names**: Once loaded into `AgentContext`, variables and axes share the `context.data` namespace, so variable names and axis names must not overlap.
 
-## Axes
+## 4. Coordinate Axes (`axes`)
 
-Every axis requires `description` and exactly one of `values`, `file`, or `size`:
+Every axis entry must provide a `description` and specify its values or length using **exactly one** of `values`, `file`, or `size`:
 
 ```json
 {
@@ -69,13 +71,14 @@ Every axis requires `description` and exactly one of `values`, `file`, or `size`
 }
 ```
 
-- `values` must be a non-empty one-dimensional array of JSON scalars.
-- `file` must be `<axis>.npy`, and the stored array must be one-dimensional.
-- `size` must be a positive integer and produces `0 … size-1`.
-- Every declared axis must be referenced by at least one variable, and variables cannot refer to undeclared axes.
-- Use inline `values` for short axes and meaningful labels; use NPY files for long axes.
+- **`values` (inline array)**: A non-empty 1D JSON array of numbers or strings—ideal for short axes or named node/category labels.
+- **`file` (external NPY)**: Must be named `<axis_name>.npy` and store a 1D array—recommended for long axes such as timestamps.
+- **`size` (length only)**: A positive integer that generates `0, 1, ..., size - 1`—convenient for generic sample or edge indices.
+- **Referential integrity**: Every declared axis must be referenced by at least one variable, and every axis listed in a variable's `axes` must be declared in `axes`.
 
-## Graph and hypergraph relations
+## 5. Graph and Hypergraph Relations (`relation` and `structure`)
+
+For network dynamics or relational data, edge and hyperedge tables are registered as variables:
 
 ```json
 {
@@ -97,21 +100,23 @@ Every axis requires `description` and exactly one of `values`, `file`, or `size`
 }
 ```
 
-- A relation variable must declare `kind: "relation"`; SRHarness does not infer relations from names such as `A` or `T`.
-- Relation arrays must have shape `(E, 2)` or `(H, 3)`, use an integer dtype, and contain endpoints in `[0, num_nodes)`.
-- The semantic column order is `(target, source)` for `(E, 2)` and `(target, source1, source2)` for `(H, 3)`. Declare these labels in endpoint-axis `values` when possible.
-- A variable whose final dimension aligns with relation length `E` or `H` uses `structure` to reference that relation, and the lengths must match.
-- Ordinary node variables omit `structure`, and a relation never references itself. Relations in one manifest share one `num_nodes`.
+- **Explicit `kind: "relation"`**: Relation variables must explicitly set `"kind": "relation"` (SRHarness never guesses whether a variable is a graph from its name).
+- **Shape and node bounds**: Relation arrays must use an integer dtype, have shape `(E, 2)` for directed graphs or `(H, 3)` for ternary directed hypergraphs, and contain node indices strictly within `[0, num_nodes)`.
+- **Endpoint column order (semantic convention)**: Columns in `(E, 2)` are ordered `(target, source)`; columns in `(H, 3)` are ordered `(target, source1, source2)`. We recommend listing these labels explicitly in the endpoint axis `values`.
+- **Edge-aligned variables (`structure`)**: Any variable whose last dimension indexes the `E` edges or `H` hyperedges of a relation (such as time-varying edge weights `weight`) must set `"structure": "<relation_name>"` with a matching length.
+- **Node variables**: Ordinary node-level variables omit `structure`. All relations in a manifest share the root `num_nodes` count.
 
-## Descriptions
+## 6. Writing Effective Descriptions
 
-Every variable and axis requires a string `description`. Document real-world meaning, units, measurement or generation procedures, and material data-quality information. Preserve categorical values as strings unless the user explicitly requests an encoding such as one-hot.
+Every variable and axis requires a non-empty string `description`:
 
-Avoid descriptions such as “target generated by `y = 1 + x**2`” or “exponential-decay coordinate.” Use neutral descriptions such as “response variable,” or state only scientific meaning that is legitimately available to the search.
+- State the scientific meaning, physical units, measurement or derivation method, and any important data characteristics.
+- Keep categorical variables as plain strings rather than one-hot encoding them unless specifically needed—SRHarness Engine natively supports category-specific parameters via `grouped_param`.
+- Use neutral, domain-appropriate wording (e.g., `"observed response variable"`) and avoid hinting at the ground-truth symbolic formula.
 
-## Complete examples
+## 7. Complete Examples
 
-### Tabular data
+### Tabular / Time-Series Data
 
 ```json
 {
@@ -125,7 +130,7 @@ Avoid descriptions such as “target generated by `y = 1 + x**2`” or “expone
 }
 ```
 
-### Network dynamics
+### Network Dynamics Data
 
 ```json
 {
@@ -143,7 +148,7 @@ Avoid descriptions such as “target generated by `y = 1 + x**2`” or “expone
 }
 ```
 
-## Validation and loading
+## 8. Validating and Loading Data in Python
 
 ```python
 from sr_harness.core import inspect_context_data, load_context_data
@@ -158,4 +163,7 @@ else:
     print(loaded["relation_names"], loaded["num_nodes"])
 ```
 
-`inspect_context_data()` reports errors and warnings and is suitable for preparation-time checks. `load_context_data()` raises `ContextManifestError` for invalid data and returns arrays and metadata ready for `AgentContext`. Data Preparation Agent should invoke `validate_context_data` after every modification to `context.data/`.
+- **`inspect_context_data()`** returns a dictionary of `errors` and `warnings` without raising exceptions, making it ideal for self-checks during data preparation.
+- **`load_context_data()`** raises `ContextManifestError` if validation fails, or returns a dictionary of arrays and metadata ready for `AgentContext`.
+
+In the WebUI, the Data Preparation Agent calls the `validate_context_data` tool after updating `context.data/` to verify that the dataset is ready for symbolic regression.

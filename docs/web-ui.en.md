@@ -1,8 +1,10 @@
 # SRHarness WebUI
 
-The WebUI organizes a study into three ordered stages: **Data Preparation → Task Setup → Symbolic Regression**. The left panel manages conversations and files, the center hosts the active workflow, and the right panel shows data previews or search results.
+The SRHarness WebUI guides a symbolic-regression study through three clear stages: **Data Preparation → Task Setup → Symbolic Regression**.
 
-## Launch
+The interface uses a three-column layout: the left sidebar manages conversations and workspace files, the center panel hosts the active stage, and the right panel displays interactive data previews or the live search tree and candidate formulas.
+
+## Launch the Workbench
 
 ```bash
 sr-harness run \
@@ -12,69 +14,89 @@ sr-harness run \
   --save-path ./logs/webui
 ```
 
-Open `http://127.0.0.1:8000/`.
+Open `http://127.0.0.1:8000/` in your browser.
 
-## Layout
+## Interface Overview
 
 ![SRHarness data preparation](https://yuzhthu.github.io/SRHarness/assets/webui-data-preparation.png)
 
 | Area | Purpose |
 |---|---|
-| Header | Conversation name, language, color mode, connection and run status |
-| Left panel | Conversations/workspace switch, file upload and management |
-| Center tabs | Data Preparation, Task Setup, Symbolic Regression |
-| Right panel | Data and relationship previews, or search tree and candidates |
+| **Top header** | Rename the active chat, switch language (`EN` / `中`), toggle light/dark mode, open docs, and check connection/run status |
+| **Left sidebar** | Switch between **Chats** and **Workspace**, create or export chats, and upload, download, or lock workspace files |
+| **Center panel** | Navigate across **Data Preparation**, **Task Setup**, and **Symbolic Regression** (plus **Current Context** inspection) |
+| **Right panel** | Inspect data tables, graph topology, scatter/distribution/heatmap plots during preparation, or explore the live search tree and candidate formulas during a run |
 
-Each conversation owns an Agent workspace, a private session directory, and an `InteractiveSession`. Switching conversations therefore switches data, timelines, settings, and search state. See [Save paths and workspaces](sr-harness.en.md#save-paths-and-workspaces) for the directory layout.
+Every conversation has its own isolated workspace folder, private session settings (including conversation-scoped API keys), and `InteractiveSession`. Switching conversations switches the active dataset, timeline, settings, and search state automatically. See [Save paths and workspaces](sr-harness.md#save-paths-and-workspaces) for how files are organized on disk.
 
-## 1. Data Preparation
+## Stage 1: Data Preparation
 
-Drop a file onto the upload bar or use its icon. The refresh action reloads `context.data/`. Four built-in datasets are available: polynomial regression, grouped parameters, an oscillatory ODE, and Kuramoto dynamics on a 10-node BA network.
+### 1. Upload Files or Load a Built-in Sample Dataset
 
-Uploaded CSV, Excel, or standalone NPY files are preparation inputs and cannot start symbolic regression directly. Before starting, create and load a valid `context.data/manifest.json` and its referenced arrays. The start API neither converts raw files implicitly nor creates a sample dataset automatically.
+Drag and drop CSV, Excel (`.xls`/`.xlsx`), PDF, or `.npy` files into the upload bar, or click the upload button.
 
-The Data Preparation Agent can inspect files, clean data, derive variables, and write structured arrays. For example:
+Note that **raw CSV or Excel files are preparation inputs and cannot start a symbolic-regression run directly**. Before moving to Task Setup, a valid `context.data/manifest.json` and its `.npy` arrays must be created and loaded.
 
-> Read trajectory.csv, estimate dx_dt with central differences, retain t and x, and document meaning and units in the manifest.
+To explore the workflow right away without uploading files, click **sample dataset** to generate one of four built-in benchmarks:
 
-The Agent should run `validate_context_data` after writes. `InteractiveSession` only loads valid files into the shared `AgentContext`.
+1. **Polynomial Regression**: Two continuous inputs with a quadratic target;
+2. **Grouped Parameters**: Exponential decay where a categorical label selects group-specific constants;
+3. **Oscillatory ODE**: A nonlinear 1D oscillator trajectory under multi-frequency periodic forcing;
+4. **Kuramoto Network**: Coupled oscillator dynamics on a 10-node Barabási–Albert directed network.
 
-See [The `context.data` Format](context-data.md) for the complete manifest, NPY, axis, and graph-structure rules.
+Once `context.data/` is loaded, the right panel previews variable shapes, tables, graph structures, and interactive scatter, distribution, and heatmap plots.
 
-Composer shortcuts are `Enter` to send and `Shift+Enter` or `Command+Enter` for a newline. While an Agent is running, the first stop click requests a pause at a safe boundary; a second click interrupts the current stream or tool call to reach that boundary sooner.
+### 2. Use the Data Preparation Agent
 
-### Agent permissions and data safety { #agent-safety }
+Ask the Data Preparation Agent in plain language to inspect uploaded files, clean noisy columns, compute derivatives, and write standardized arrays to `context.data/`. For example:
 
-Data Preparation Agent and Evaluator Construction Agent use model-generated tool calls to read source material, execute restricted code, and modify their workspaces. They do not receive an unrestricted system shell, but some tools can create, overwrite, move, or delete workspace content. Treat an ordinary writable workspace as an area under Agent control.
+> Read trajectory.csv, estimate dx_dt using central differences, keep t, x, and dx_dt, and document their physical meaning and units in the manifest.
 
-!!! warning "Do not place the only copy in a writable workspace"
-    The WebUI lock reduces accidental modification but is not a security boundary against malicious code. Keep an independent backup of irreplaceable data and prefer read-only mounts when supplying it to SRHarness.
+After updating `context.data/`, the Agent runs `validate_context_data` so `InteractiveSession` can reload the verified dataset into the shared `AgentContext`. See [Structured Data and `context.data`](context-data.md) for the full format specification.
 
-Default capabilities have the following effects:
+**Composer shortcuts and stop controls**:
 
-| Tool | Capability and impact |
+- Press `Enter` to send, or `Shift + Enter` / `⌘ + Enter` to insert a newline.
+- While an Agent is running, **clicking the stop button once** requests a clean pause after the current turn finishes; **clicking the red stop button a second time** immediately interrupts the active stream or tool call.
+
+### 3. Output Token Limits and Continuation
+
+Each Agent's **Output Token Limit** defaults to blank (`Auto`), which uses the model provider's default budget rather than a hard 4096-token cap (you can also enter a positive integer to cap single-turn output).
+
+If a model reply hits its output token limit:
+
+- Partial text is preserved with a clear truncation notice, and incomplete tool calls are never executed;
+- For the Data Preparation Agent and Evaluator Construction Agent, sending `"Continue"` resumes from the partial answer;
+- For the Symbolic Regression Agent, the run pauses at the end of the turn by default (configurable via **Pause after truncated output** under Search settings).
+
+### 4. Agent Permissions and Data Safety { #agent-safety }
+
+The Data Preparation Agent and Evaluator Construction Agent use tool calls to inspect files, run sandboxed Python scripts, and write outputs inside the current workspace. While they do not have an unrestricted system shell, they can modify or delete files inside the writable workspace.
+
+!!! warning "Keep Backups of Irreplaceable Data"
+    The **Lock** toggle in the workspace file menu helps prevent accidental overwrites, but it is not an OS security boundary against malicious code. Always keep independent backups of irreplaceable datasets and mount them read-only via `--mount`.
+
+Default Agent tools and their boundaries:
+
+| Tool | Capability and Boundary |
 |---|---|
-| `workspace_shell` | Performs a restricted set of file inspection, copy, move, deletion, creation, and extraction operations inside the workspace. It uses an SRHarness command parser rather than a system shell. |
-| `workspace_code_executor` | Runs restricted Python in a separate process for NumPy, SciPy, pandas, and CSV transformations. It can modify the writable workspace but cannot access paths outside it or read-only mounts. |
-| `web_search` / `web_fetch` | Queries public search services or public HTTP/HTTPS pages. `web_fetch` rejects private-network targets, credential-bearing URLs, and restricted redirects. |
-| `read_pdf` | Reads workspace PDFs or public URLs without modifying the source. |
-| `read_skill` | Reads instructions and supporting files from enabled Skills; a Skill may influence subsequent tool selection and operations. |
-| `validate_context_data` | Validates [`context.data`](context-data.md) and reports actionable errors without directly mutating the loaded `AgentContext`. |
+| `workspace_shell` | Runs a built-in command parser supporting `ls`, `cat`, `grep`, `cp`, `mv`, `rm`, `mkdir`, `gzip`, `unzip`, and `tar` inside the workspace. It **never invokes a system shell** and blocks arbitrary binaries, command substitution, redirection, `..` traversal, and symlinks escaping the workspace. |
+| `workspace_code_executor` | Executes Python (NumPy, SciPy, pandas, etc.) inside an ephemeral OS sandbox enforced by Linux Landlock and seccomp. It can read/write the active conversation workspace and read `--mount` inputs, but networking and child-process creation are blocked and CPU/memory/output are strictly bounded. |
+| `web_search` / `web_fetch` | Queries public search engines or fetches public HTTP/HTTPS pages (`web_fetch` blocks private IP ranges, credentialed URLs, and unsafe redirects). |
+| `read_pdf` | Extracts text from workspace PDFs or public URLs without modifying files. |
+| `read_skill` | Reads instructions and reference files from enabled Skills. |
+| `validate_context_data` | Validates [`context.data`](context-data.md) and reports actionable errors without mutating the live `AgentContext`. |
 
-Disable unneeded tools under **Settings → Capabilities** for each Agent. Custom tools and Skills can expand the effective capabilities beyond this table.
+You can enable or disable individual tools and Skills under **Settings → Capabilities** for each Agent.
 
-`workspace_shell` supports only preimplemented commands such as `ls`, `cat`, `grep`, `cp`, `mv`, `rm`, `mkdir`, `gzip`, `unzip`, and `tar`. It does not support arbitrary program execution, a system shell, command substitution, environment expansion, redirection, or background jobs. Absolute paths, `..` traversal, and symlinks that escape the workspace are rejected.
+During symbolic regression, `code_executor`, `evaluate_code`, custom Tools, and custom Evaluators run under even tighter confinement: they receive only serialized data copies and temporary scratch space, with **no access to the conversation workspace**, API keys, or session internals.
 
-`workspace_code_executor` no longer relies on an AST allowlist to decide whether Python source is safe. Every call starts a short-lived operating-system sandbox that uses Landlock for filesystem confinement and seccomp to deny networking, child-process creation, and host-management system calls. The worker receives a sanitized environment and limits wall time, address space, file size, open files, and captured output. If the kernel cannot provide the required isolation, execution is refused.
+**Two levels of read-only protection**:
 
-`code_executor`, `evaluate_code`, custom Tools, and custom Evaluators receive only the current data and ephemeral scratch space; they cannot access the conversation workspace. Only `workspace_code_executor` additionally receives controlled read-write access to the current conversation workspace and read-only access to explicitly mounted inputs. The Python runtime and installed scientific packages remain visible read-only so NumPy, SciPy, pandas, and similar dependencies can be imported. Data and metadata passed to custom Tools and Evaluators are serialized copies, so in-place changes to the sandboxed `AgentContext` cannot mutate the server-process object. Large arrays are snapshotted once per data revision and reused by later workers through copy-on-write mappings instead of being fully copied on every call. Their `context.args` is allowlisted to data-splitting and evaluation settings; API keys, proxy configuration, model settings, and session internals never enter custom code.
+1. **CLI mounts (`sr-harness run --mount PATH ...`)**: Application-enforced read-only inputs that cannot be unlocked from the WebUI;
+2. **Workspace Lock (`Lock` in the file menu)**: Removes write permission bits to prevent accidental modification by workspace tools.
 
-SRHarness offers two read-only mechanisms:
-
-- paths supplied through `sr-harness run --mount PATH ...` are application-level read-only inputs and cannot be unlocked from the WebUI;
-- manually selecting **Lock** in the workspace removes write permission and adds checks to built-in workspace interfaces. The same operating-system user can in principle restore permissions, so this mechanism primarily prevents accidental modification.
-
-For stronger protection, run SRHarness as a dedicated unprivileged system user and have an administrator expose original data through a kernel-enforced read-only bind mount, read-only container volume, or read-only storage snapshot:
+For kernel-enforced read-only protection on shared servers, run SRHarness under an unprivileged system account and expose source data via a read-only bind mount:
 
 ```bash
 sudo mount --bind /data/original /mnt/srh-original
@@ -85,78 +107,86 @@ sudo -u srharness sr-harness run \
   --mount /mnt/srh-original
 ```
 
-When the SRHarness process has neither root privileges, `CAP_SYS_ADMIN`, nor source-directory write permission, an Agent cannot turn the kernel read-only mount back into a writable one. An offline or immutable backup remains the final safeguard for irreplaceable data.
-
-## 2. Task Setup
+## Stage 2: Task Setup
 
 ![SRHarness task setup](https://yuzhthu.github.io/SRHarness/assets/webui-task-setup.png)
 
-### Variables and problem
+### 1. Variable Roles and Descriptions
 
-Assign the target, features, and unused variables, then edit their descriptions. Descriptions are synchronized with `context.data/manifest.json`. They should document scientific meaning, units, and constraints without leaking the answer.
+In the variable table:
 
-The problem description participates in user-prompt generation, for example:
+- **Click the colored role bar** to switch a variable between **Target** (one per run), **Feature**, and **Excluded**;
+- **Click any description cell** to edit its scientific meaning and units (changes sync automatically with `context.data/manifest.json`);
+- **Drag the `⠿` handle** to reorder variables.
 
-> Find a compact equation for dx_dt using x and t. Prefer a stable, interpretable model.
+### 2. Problem Description
 
-### Evaluation protocol { #evaluator-configuration }
+Describe the scientific goal for the symbolic-regression Agent (for example: *"Find a compact equation for dx_dt using x and t. Prefer a stable, interpretable model."*). There is no need to repeat variable descriptions already listed in the table above.
 
-The selector contains built-in Evaluators and custom scripts from `context.evaluator/`. A script that cannot load remains visible with an error marker and message.
+### 3. Configure Evaluation Protocol (Evaluator) { #evaluator-configuration }
 
-- **Arguments** edits relevant `context.args.*` values, including splitting and ranking.
-- **Test** validates the current Evaluator against the best formula, or a trivial linear formula when no candidate exists.
-- **Save** stores edited source as a custom Evaluator.
-- **Evaluator Construction Agent** creates or repairs an Evaluator from a natural-language request and is collapsed by default.
+Choose a built-in Evaluator (`DefaultEvaluator` or `GraphEvaluator`) or a custom script from `context.evaluator/` (invalid scripts remain listed with a `⚠` badge and error message so you can fix them):
 
-A custom file must define exactly one `DefaultEvaluator` subclass. Its extension points are `split`, `fit`, `evaluate`, `fit_candidate`, and `evaluate_candidate`; candidate-only methods are particularly useful for ODE rollouts.
+- **Parameters (`context.args.*`)**: Configure validation split ratio, split strategy (`random` vs. `ood`), OOD ordering variable, and the candidate `ranking_metric`;
+- **Test**: Run the selected Evaluator against the current best candidate (or a simple baseline formula if no candidates exist yet) to verify that splitting, fitting, and metric calculation succeed;
+- **Save Protocol**: Save edits in the code editor as a custom Evaluator in `context.evaluator/`;
+- **Evaluator Construction Agent**: Expand the assistant drawer below the editor and describe the evaluation metric you need in plain language—the Agent will inspect relevant source files, write a `DefaultEvaluator` subclass, and test it against your active dataset.
 
-## 3. Symbolic Regression
+## Stage 3: Symbolic Regression
 
-Before starting, review variable configuration, the generated editable user prompt, the built-in editable system prompt, and model/search/tool/skill settings. Emptying a prompt does not regenerate it; regeneration happens only through its explicit button.
+Before launching the search, review the variable summary, the generated **User Prompt**, the **System Prompt** (via the bottom toolbar), and the **Settings** panel (models, automatic routing, `R-C-L-K` budget, stop conditions, and enabled tools/Skills). Prompts are never overwritten automatically once edited unless you click **Regenerate**.
 
-Both system and user prompts appear as timeline cards after the search starts.
+Click the send button to start exploring!
 
 ![SRHarness symbolic-regression timeline](https://yuzhthu.github.io/SRHarness/assets/webui-symbolic-regression.png)
 
-### Timeline events
+### 1. Live Timeline Cards
 
-Unless documented otherwise, each backend interaction event is rendered as one card: a prompt added to the buffer, model-context summary, reasoning or assistant response, tool call, tool result, or state/control message. Context cards show message and character counts and link to the full Current Context view. A tool result with `ToolCallResult.ok == false` receives a red error icon but remains a normal wrapped result sent back to the Agent.
+Each interaction event appears as a card in the timeline:
 
-### Messages and pause control
+- **System & User Prompts** added to the conversation buffer;
+- **Sent Context summaries** showing message and character counts (click the `R · C · L` badge to inspect the exact message buffer sent to the model);
+- **Agent replies** with collapsible reasoning traces and a toggle between rendered Markdown/MathML and plain text;
+- **Tool calls & results** with execution time, parameters, formatted output, and expandable raw JSON (failed tool calls show a red error icon while still feeding the error message back to the Agent for self-correction).
 
-- Idle with text: the arrow sends immediately.
-- Running with text: the arrow queues guidance for the next safe boundary.
-- Running without text: the square requests a pause.
-- Pause already requested: the red square interrupts the current stream or tool execution.
+### 2. Mid-Run Guidance and Pause Controls
 
-The Agent can call `finish_search` to request a stop. If the stop-permission setting passes, the tool returns `stopped` and the run pauses at the next safe boundary; otherwise its tool result explains why the Agent must continue. When an assistant response contains no tool call, the backend defaults to sending the latest Agent turn to a separate tool-free request on the same model. A continue decision starts the next turn; a stop decision still has to pass the same permission check. Set **Tool-free review rounds** to 0 to disable implicit stopping, or disable `finish_search` separately under Capabilities.
+The composer button adapts to the current run state:
 
-Stop permission may be unconditional, require `topk_records` to contain one result that strictly beats every other distinct formula on the current `ranking_metric`, require a train/validation metric threshold, or require the L budget to be exhausted. Candidates produced in the same response but not yet persisted to `topk_records` are included in the check, and duplicate records for the same formula are treated as one method.
+- **Idle or paused with text**: Starts or resumes the run;
+- **Running with text**: Queues your guidance message to be injected at the start of the next turn;
+- **Running with empty input (square icon)**: Requests a clean pause after the current turn completes;
+- **Pause already requested (red square icon)**: Force-interrupts the active stream or tool call immediately.
 
-## Search tree and candidates
+For details on how `finish_search`, tool-free stop review rounds, and **Stop Guard** conditions work together, see [SRHarness Agent Workflow: Stopping Controls](agent.md#stopping-controls-in-interactive-search).
 
-The search tree groups nodes by R–C–L coordinates. Candidate views include **Top-k**, ordered by `ranking_metric`, and the **Pareto Front**, normally comparing that metric with complexity. A timeline coordinate or tree node opens the exact buffer used for that model request. New numeric Evaluator metrics enter train/validation results and can be selected for ranking.
+### 3. Search Tree and Candidate Formulas
 
-## End-to-end dynamics example
+The right panel tracks global search progress:
 
-1. Upload a `(t, x)` trajectory.
-2. Ask Data Preparation Agent to estimate `dx_dt` and validate the context.
-3. Preview all three variables.
-4. Set `dx_dt` as target and `x`, `t` as features.
-5. Run an initial search with `DefaultEvaluator`.
-6. Pause and return to Task Setup.
-7. Ask Evaluator Construction Agent for a tested `rollout_rmse` metric. For example:
+- **Search Tree**: Visualizes explored `(R, C, L, K)` nodes colored by performance. Click any node to inspect its prompt context, or click **Full viewer ↗** to open the standalone search-tree analyzer.
+- **Candidate Formulas**: Switch between **Top-k** (sorted by `ranking_metric`) and the **Pareto Front** (balancing accuracy against formula complexity), and toggle between **Raw**, **Formula**, and **LaTeX** display modes.
 
-   > Create a TrajectoryRolloutEvaluator derived from DefaultEvaluator. Keep the default metrics and add rollout_rmse by integrating candidate ODEs in evaluate_candidate.
+## End-to-End Walkthrough: Discovering an ODE from `(t, x)` Data
 
-8. Select `rollout_rmse` as `ranking_metric`.
-9. Return to Symbolic Regression and ask the Agent to continue with the revised evaluation.
+1. Upload a trajectory file containing `t` and `x` in **Data Preparation**.
+2. Ask the Data Preparation Agent to estimate `dx_dt` and validate `context.data/`.
+3. Inspect the time series and phase-space scatter plot in the right panel.
+4. In **Task Setup**, set `dx_dt` as **Target** and `x`, `t` as **Features**.
+5. Start an initial search in **Symbolic Regression** using `DefaultEvaluator`.
+6. Pause the search and return to **Task Setup**.
+7. Ask the **Evaluator Construction Agent** to add a trajectory rollout metric and test it:
 
-The Current Pareto Front and `evaluate_formula` results then include the new metric, allowing the Agent to balance complexity, pointwise error, and trajectory error.
+   > Create a TrajectoryRolloutEvaluator subclassing DefaultEvaluator. Keep the default metrics and add rollout_rmse by integrating candidate ODEs in evaluate_candidate.
 
-## Multi-user and security boundaries
+8. Open **Parameters** (`context.args.*`), set `ranking_metric` to `rollout_rmse`, and uncheck `larger_is_better`.
+9. Return to **Symbolic Regression**, inform the Agent that candidates are now ranked by trajectory rollout error, and resume the search.
 
-`--isolate-users` filters conversation listings by cookie. `--mount` inputs are read-only to Agents, while ordinary workspace files may be modified. Credentials, proxy, tools, and skills are configured separately for each Agent. Public deployment still requires external authentication and network access control.
+Both the Pareto Front and `evaluate_formula` outputs will now report `rollout_rmse`, guiding the Agent toward formulas that remain stable under full trajectory integration.
 
-See [SRHarness](sr-harness.md) for CLI and persistence details.
+## Multi-User Isolation and Deployment Notes
 
+- `--isolate-users` scopes conversation lists per browser via a persistent cookie;
+- `--mount` paths are read-only across all Agents;
+- Model credentials, proxies, tools, and Skills are configured independently per Agent;
+- Always place public deployments behind external authentication and TLS termination. See [SRHarness CLI Reference](sr-harness.md) for full CLI details.

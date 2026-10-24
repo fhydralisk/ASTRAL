@@ -1,9 +1,5 @@
 # Copyright (c) 2026-present, Yumeow. Licensed under the MIT License.
-"""PySR 符号回归工具。
-
-调用 PySR (https://github.com/MilesCranmer/PySR) 进行基于遗传规划的符号回归，
-使用 Julia 后端的 SymbolicRegression.jl 进化搜索简洁的数学表达式。
-"""
+"""Evolutionary symbolic-regression search tool backed by PySR."""
 import re
 import os
 import logging
@@ -20,7 +16,7 @@ MAX_TIMEOUT = 120
 
 @BaseTool.register('call_pysr')
 class PySRTool(BaseTool):
-    """Implementation of the py s r tool."""
+    """Evolutionary symbolic-regression tool powered by PySR (SymbolicRegression.jl)."""
     metadata = ToolMetadata(name="call_pysr")
     UNARY_ALIASES = {
         "acos": "acos",
@@ -44,27 +40,26 @@ class PySRTool(BaseTool):
         max_samples: int = 500,
         show_diagnostics: bool = True,
     ) -> Dict[str, Any]:
-        """Run PySR (genetic programming symbolic regression) to evolve mathematical expressions that fit the data.
-        PySR perform evolutionary search for symbolic formulas.
-        It is powerful for discovering complex nonlinear relationships including trigonometric, exponential, sqrt, and nested functions.
-        However, it is also computationally intensive and requires careful tuning of operators and variables to find good formulas within reasonable time.
-        You MUST specify the binary and unary operators based on your hypothesis about the data.
-        
-        This tool can return candidate formulas for submission when `y` is the target variable and `x` does not depend on the target variable.
+        """Run PySR genetic-programming search to discover nonlinear symbolic formulas.
+
+        Best for discovering nonlinear combinations of algebraic, trigonometric, exponential,
+        logarithmic, and radical terms. Because evolutionary search is computationally intensive,
+        restrict ``binary_operators``, ``unary_operators``, and input features ``x`` to those
+        motivated by your current hypothesis. Returns a submission-eligible candidate when ``y``
+        is the default target variable and ``x`` does not depend on ``y``.
 
         Args:
-            binary_operators: List of binary operators for PySR to use. Choose from: "+", "-", "*", "/", "^".
-                Select operators you believe are relevant to the underlying formula.
-            unary_operators: List of unary operators for PySR to use. Choose from: "sin", "cos", "exp", "log", "sqrt", "square", "cube", "abs", "tanh", "sign". Select operators based on your hypothesis about the data.
-            x: List of input feature names to use. If not specified, all features except target are used.
-                Expressions are also supported, e.g., ["sin(x1)", "(x1-x2)**2"].
-            y: Target variable name. If not specified, the default target variable is used.
-                Expressions are also supported, e.g., "log(y)", "y - x1"
-            timeout: Maximum search time in seconds (default 30, max 120).
-                If PySR did not find a good formula in a previous run, increase timeout (e.g., 60 or 90) to give it more search time.
-            maxsize: Maximum expression complexity in number of nodes (10-40). Larger allows more complex formulas.
-            max_samples: Maximum number of data samples to use for fitting (for speed). Data is subsampled if larger.
-            show_diagnostics: Whether final metrics should include compact residual diagnostics.
+            binary_operators: Binary operators to search over, chosen from ``["+", "-", "*", "/", "^"]``.
+            unary_operators: Unary operators to search over, chosen from ``["sin", "cos", "exp", "log", "sqrt", "square", "cube", "abs", "tanh", "sign"]``.
+            x: Input variable names or expressions, e.g., ``["x1", "(x1 - x2)**2"]``. Defaults to all numeric non-target variables.
+            y: Target variable name or expression, e.g., ``"y"`` or ``"log(y)"``. Defaults to the discovery target.
+            timeout: Search time budget in seconds (10-120, default 30). Increase to 60-120 if an initial run underfits.
+            maxsize: Maximum expression tree node count (10-40, default 25).
+            max_samples: Maximum number of rows subsampled for PySR fitting (default 500).
+            show_diagnostics: Whether to include residual diagnostics in the evaluation output.
+
+        Returns:
+            Dict[str, Any]: Best formula evaluation, Pareto-front alternatives, and search diagnostics.
         """
         data = self.context.train_split.data
         y = y if y is not None else self.context.target
@@ -254,13 +249,13 @@ class PySRTool(BaseTool):
 
     @classmethod
     def format_result_dict(cls, result: Dict[str, Any]) -> str:
-        """Format a tool result for the language model.
+        """Format PySR's best formula, Pareto-front trade-offs, and retry hints for the Agent.
 
         Args:
-            result: Result mapping to format or update.
+            result: Result dictionary returned by :meth:`execute`.
 
         Returns:
-            str: The operation result.
+            str: Human- and LLM-readable summary of the PySR run.
         """
         parts = [
             f"Symbolic-regression backend used: {result['method']}.",

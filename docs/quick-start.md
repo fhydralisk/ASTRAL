@@ -1,21 +1,21 @@
-# Quick Start
+# 快速上手
 
-在开始前，请先完成[安装和模型配置](install.md)。
+在开始之前，请确认已完成 [安装与模型 API Key 配置](install.md)。
 
-## 使用 SRHarness 发现一个已知方程
+## 1. 用命令行还原一个已知公式
 
-SRHarness 提供了方便的测试命令，允许根据指定的公式合成数据，再检查 Agent 从数据中还原公式的能力。
+`sr-harness synthetic` 是体验 SRHarness 最快的方式：它会先按你给定的数学公式生成一批合成数据，然后让 Agent 仅凭这些数据去反推背后的公式。
 
-下面生成包含 `x1`、`x2`、`y` 三列的数据，其中目标变量 `y` 满足
+下面我们生成包含 `x1`、`x2`、`y` 三列的数据，其中因变量 `y` 的真实生成规律为：
 
 $$
-y = 1 + x_1^2 + 2x_1x_2.
+y = 1 + x_1^2 + 2x_1x_2
 $$
 
 !!! tip
-    运行前请配置与 `--llm-provider` 对应的 API Key。下面的示例使用 OpenRouter，因此需要配置 `OPENROUTER_API_KEY`；如果使用其他 Provider 的 API Key，请相应修改 `--llm-provider` 和 `--llm-model`。
+    运行前请先配置与 `--llm-provider` 对应的环境变量。以下示例使用 OpenRouter（需设置 `OPENROUTER_API_KEY`）；如果你使用 DeepSeek 或其他服务商，请同步修改 `--llm-provider` 和 `--llm-model`。
 
-然后以较小搜索预算启动 Agent：
+执行以下命令，以一个较小的搜索预算启动 Agent：
 
 ```bash
 sr-harness synthetic \
@@ -30,24 +30,26 @@ sr-harness synthetic \
   -R 1 -C 1 -L 10 -K 1
 ```
 
-四个预算参数分别是：
+其中 `-R`、`-C`、`-L`、`-K` 四个参数共同控制搜索规模：
 
 | 参数 | 含义 |
 |---|---|
-| `-R` | Restart 次数 |
-| `-C` | 每个 Restart 的独立 Conversation 数 |
-| `-L` | 每条 Conversation 的最大 Refinement 深度 |
-| `-K` | 每一步的模型采样数 |
+| `-R` | **重启次数 (Restart)**：带着历史最优公式重新开启一轮搜索的次数 |
+| `-C` | **并行分支数 (Conversation)**：每次重启同时探索的独立对话分支数 |
+| `-L` | **最大迭代步数 (Refinement Depth)**：每条对话分支最多允许交互的轮数 |
+| `-K` | **单步采样数 (Local Sample)**：每一轮向模型同时采样生成的回复数 |
 
-运行记录写入 `--save-path`，常见文件如下表所示：
+运行结束后，所有过程数据都会保存在 `--save-path`（本例为 `./logs/quick-start`）下：
 
-| 文件 | 内容 |
+| 文件名 | 记录内容 |
 |---|---|
-| `run.json` | 本次运行的唯一标识、启动参数和 Agent 配置 |
-| `nodes.jsonl` | 搜索期间产生的对话节点和节点间关系 |
-| `result.json` | Agent 探索的公式列表，以及构成帕累托前沿和最佳结果的候选公式 |
-| `response.jsonl` | 原始模型响应、token 和费用统计 |
-| `tool_calls.jsonl` | 工具调用记录 |
+| `run.json` | 本次运行的基础信息、命令行参数与 Agent 配置 |
+| `nodes.jsonl` | 搜索树中每个 `(R, C, L, K)` 对话节点及父子继承关系 |
+| `result.json` | 探索过的所有候选公式、帕累托前沿（Pareto Front）及最终最优公式 |
+| `response.jsonl` | 模型原始返回内容、Token 消耗与费用明细 |
+| `tool_calls.jsonl` | 每次工具调用的输入参数与返回结果 |
+
+一次典型的终端运行日志如下：
 
 ```text {.srh-log}
 $ sr-harness synthetic \
@@ -113,11 +115,11 @@ $ sr-harness synthetic \
 [20261009_synthetic_173140_SIM1|synthetic|N|Oct09 17:32:10|0:00:30.102261] Experiment completed. Re-run the script with sr-harness synthetic
 ```
 
-## 使用 WebUI 工作台
+## 2. 使用交互式网页工作台（WebUI）
 
-SRHarness 提供了交互式 WebUI 工作台，允许用户在浏览器中完成数据准备、任务配置和符号回归搜索。
+对于真实的科研数据，通常需要先清洗数据、构造导数或特征，并在搜索过程中随时介入指导。这时可以使用交互式网页工作台。
 
-下面的命令在本机 `8000` 端口启动 WebUI，并将持久化工作区和运行记录分别保存到 `./workspaces` 与 `./logs/webui`：
+运行以下命令在本机 `8000` 端口启动服务，并将工作区和运行日志分别保存在 `./workspaces` 与 `./logs/webui`：
 
 ```bash
 sr-harness run \
@@ -127,19 +129,19 @@ sr-harness run \
   --save-path ./logs/webui
 ```
 
-在浏览器中打开 `http://127.0.0.1:8000/`，并按网页提示进行如下三个阶段的操作：
+浏览器打开 `http://127.0.0.1:8000/` 后，按顶部标签依次完成三个步骤即可：
 
-1. **数据准备**：上传数据（或使用网页提供的样例数据），并在必要时让网页内的 Agent 清洗、补充或检查数据。
-2. **任务配置**：选择变量角色，编辑变量和问题描述，并选择或定义模型评价方案。
-3. **符号回归**：启动符号搜索，并在必要时回到前两步以补充变量或更改评价方案。
+1. **数据准备**：上传原始数据（或一键生成内置样例），让数据准备 Agent 帮你清洗、计算导数或整理成标准格式。
+2. **任务配置**：指定因变量与自变量、补充各变量的物理含义，并选择或定制公式评测方案（Evaluator）。
+3. **符号回归**：启动公式搜索，实时查看推理时间线、搜索树与候选公式；你也可以随时暂停搜索，补充提示词或返回前两步调整变量与评测指标。
 
 ![SRHarness 符号回归工作台](assets/webui-symbolic-regression.png)
 
-完整操作说明见 [SRHarness 网页工作台](web-ui.md)。
+详细功能说明请参阅 [SRHarness 网页工作台](web-ui.md)。
 
-### 使用只读数据挂载
+### 挂载本地大数据集（只读）
 
-如果数据较大，建议通过 `--mount` 将本机数据挂载到工作区：
+如果本地数据集体积较大、或者不希望原始数据被 Agent 改动，可以通过 `--mount` 将本地文件或目录直接挂载到工作区：
 
 ```bash
 sr-harness run \
@@ -147,8 +149,8 @@ sr-harness run \
   --mount ./datasets ./papers/model.pdf
 ```
 
-挂载的数据将以只读链接的形式出现在每个对话的工作区，避免原始数据被 Agent 修改或复制数据占用额外的磁盘空间。如果指定了多个要挂载的目录或文件，不同目录或文件的名称不得相互冲突。
+挂载的文件或文件夹会以只读方式出现在每个对话的工作区中——既省去了重复拷贝占用的磁盘空间，也能防止 Agent 误改原始数据。注意：同时挂载多个路径时，它们的顶层文件或文件夹名称不能重名。
 
-## 使用在线 WebUI 工作台
+## 3. 直接体验在线工作台
 
-如果不希望在本地部署，也可以直接访问我们提供的[在线 WebUI 工作台](http://sim1.fiblab.tech:30000/)，在浏览器中体验数据准备、任务配置和符号回归流程。
+如果你不想在本地安装部署，也可以直接打开我们托管的 [在线 WebUI 工作台](http://sim1.fiblab.tech:30000/)，在浏览器中直接体验完整工作流。

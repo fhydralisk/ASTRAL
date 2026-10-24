@@ -13,7 +13,15 @@ from .expression import Expression, GroupedParameter, Parameter
 
 
 def bind_parameters(expression: Expression, parameters: Mapping[str, Any]) -> Expression:
-    """Return an expression whose parameter nodes contain fitted values."""
+    """Return a copy of ``expression`` with its parameter nodes populated from ``parameters``.
+
+    Args:
+        expression: Symbolic expression containing :class:`Parameter` or :class:`GroupedParameter` nodes.
+        parameters: Mapping of parameter names to fitted scalar or per-category values.
+
+    Returns:
+        Expression: Copy of ``expression`` with bound parameter values.
+    """
     from .tree import transform
 
     def bind(node: Expression) -> Expression:
@@ -30,7 +38,16 @@ def bind_parameters(expression: Expression, parameters: Mapping[str, Any]) -> Ex
 
 @dataclass(frozen=True, slots=True)
 class FitResult:
-    """Result of fitting an expression to target observations."""
+    """Outcome of fitting an expression's free parameters to target observations.
+
+    Attributes:
+        expression: Copy of the input expression with fitted parameter values bound.
+        parameters: Dictionary mapping parameter names to fitted values.
+        loss: Final mean squared error achieved on the training observations.
+        success: Whether the numerical optimizer converged cleanly.
+        message: Optimizer status message.
+        n_iter: Number of optimizer iterations performed.
+    """
     expression: Expression
     parameters: dict[str, Any]
     loss: float

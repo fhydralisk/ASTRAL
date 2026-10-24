@@ -30,15 +30,16 @@ def create_app(
     conversation_registry=None,
     read_only: bool = False,
 ) -> FastAPI:
-    """Create app.
+    """Create and configure the SRHarness FastAPI web application.
 
     Args:
-        log_dir: The log dir value.
-        session: The session value.
-        conversation_registry: Optional persistent conversation registry.
+        log_dir: Directory where run logs and search records are stored.
+        session: Active interactive session (or session proxy) for the workbench.
+        conversation_registry: Optional persistent registry managing multi-conversation state.
+        read_only: Whether to serve existing conversations in read-only mode.
 
     Returns:
-        FastAPI: The operation result.
+        FastAPI: Configured FastAPI application instance.
     """
     version = package_version("astral")
     work_pool = RequestWorkPool()

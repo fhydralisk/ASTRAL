@@ -48,7 +48,13 @@ def evaluator_probe_is_finite(result: Any) -> bool:
 
 
 class EvaluatorConstructionAgent(Agent):
-    """Construct and validate evaluator scripts without mutating live context state."""
+    """Agent that writes, tests, and repairs custom Evaluator subclasses in the workspace.
+
+    Inspects built-in evaluator source code, writes a custom
+    :class:`~sr_harness.evaluator.DefaultEvaluator` subclass under
+    ``context.evaluator/``, and validates it against the active dataset inside
+    the OS sandbox without mutating live search state.
+    """
 
     def __init__(
         self,
@@ -62,6 +68,18 @@ class EvaluatorConstructionAgent(Agent):
         llm_max_tokens: int | None = None,
         max_steps: int = 16,
     ) -> None:
+        """Initialize the evaluator construction agent.
+
+        Args:
+            llm_provider: Name of the LLM provider backend.
+            llm_model: Model identifier requested from the provider.
+            context: Shared runtime context used to validate candidate evaluators.
+            tools: Initialized tool instances exposed to the agent.
+            interaction_manager: Manager handling stop requests and timeline events.
+            tool_parser: Tool-call parser format name (defaults to ``"openai"``).
+            llm_max_tokens: Optional per-response output token cap.
+            max_steps: Maximum number of model-tool turns per user instruction.
+        """
         self.llm_provider = llm_provider
         self.llm_model = llm_model
         self.tool_parser = tool_parser
@@ -145,7 +163,12 @@ class EvaluatorConstructionAgent(Agent):
         return bool(messages)
 
     def queue_runtime_settings(self, settings: dict[str, Any]) -> None:
-        """Queue validated settings for the next safe iteration boundary."""
+        """Queue updated model or tool settings to take effect on the next turn.
+
+        Args:
+            settings: Validated dictionary of model, parser, token-limit, tool,
+                and skill settings.
+        """
         current = self._pending_runtime_settings or {}
         self._pending_runtime_settings = {**current, **settings}
 
@@ -191,17 +214,18 @@ class EvaluatorConstructionAgent(Agent):
         self._force_recorded = True
 
     def run(self, instruction: str) -> dict[str, Any]:
-        """Construct or repair a custom evaluator for one user instruction.
+        """Build or repair a custom evaluator from a natural-language specification.
 
         Args:
-            instruction: Natural-language evaluator requirements.
+            instruction: Natural-language description of the desired evaluation behavior.
 
         Returns:
-            The final assistant response and tool-event records produced during
-            construction.
+            dict[str, Any]: Construction summary including ``status``, ``message``,
+                validated evaluator ``source`` and ``custom_file`` (when validated),
+                and recorded tool events.
 
         Raises:
-            ValueError: If ``instruction`` is empty.
+            ValueError: If ``instruction`` is empty or whitespace-only.
         """
         instruction = instruction.strip()
         if not instruction:

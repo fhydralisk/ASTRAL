@@ -10,9 +10,15 @@ from ..core import APICallSample, ToolCall
 
 @BaseAPI.register("openrouter")
 class OpenRouterAPI(BaseAPI):
-    """OpenRouter adapter accepting text-generation models in its live catalog."""
+    """LLM provider adapter for OpenRouter, supporting live model discovery and streaming tool calls."""
 
     def __init__(self, model: str = "qwen/qwen3.6-plus", **kwargs: Any) -> None:
+        """Initialize the OpenRouter API adapter.
+
+        Args:
+            model: OpenRouter model slug (defaults to ``"qwen/qwen3.6-plus"``).
+            **kwargs: Additional arguments forwarded to :class:`BaseAPI`.
+        """
         super().__init__(model=model, **kwargs)
         self._model_catalog = RemoteModelCatalog(
             lambda url: httpx.Client(proxy=self.proxy_url(url), trust_env=False)
@@ -21,12 +27,25 @@ class OpenRouterAPI(BaseAPI):
     def format_response(
         self, message: dict[str, Any], tool_calls: list[ToolCall], content: str | None = None
     ) -> APICallSample:
-        """Convert one OpenRouter message into the public response contract."""
+        """Convert an OpenRouter completion message into a normalized :class:`~sr_harness.core.APICallSample`.
+
+        Args:
+            message: Raw OpenRouter assistant message dictionary.
+            tool_calls: Normalized tool calls extracted from the message.
+            content: Optional explicit text content override.
+
+        Returns:
+            APICallSample: Normalized assistant response sample.
+        """
         return self._build_response(message, tool_calls, content)
 
     @property
     def model_list(self) -> list[str]:
-        """Return the current OpenRouter text-generation model catalog."""
+        """Fetch and return all text-capable model identifiers from the live OpenRouter catalog.
+
+        Returns:
+            list[str]: Available OpenRouter model slugs.
+        """
         endpoint = self.get_env("OPENROUTER_ENDPOINT", "https://openrouter.ai/api/v1")
 
         def supports_text_output(record: dict[str, Any]) -> bool:

@@ -38,22 +38,16 @@ _configured = False
 
 
 def is_logging_configured() -> bool:
-    """检查 sr_harness 的 logging 是否已配置。
+    """Return whether the ``sr_harness`` package logger has already been configured.
 
     Returns:
-        True 如果已配置过 logging（通过 setup_logging 或 SRAgent.__init__）
+        bool: ``True`` if handlers have been attached to the package logger.
     """
     return _configured
 
 
 class LogFormatter(logging.Formatter):
-    """带颜色的日志格式化器。
-
-    Attributes:
-        exp_name: 实验名称，显示在日志前缀中。
-        colorful: 是否启用彩色输出。
-        start_time: 日志开始时间，用于计算相对时间。
-    """
+    """Custom ``logging.Formatter`` that adds experiment name, level code, timestamp, elapsed time, and optional ANSI colors."""
 
     color_dict = {
         "DEBUG": "\033[0;37m{}\033[0m",
@@ -73,6 +67,15 @@ class LogFormatter(logging.Formatter):
         time_format: str = "%b%d %H:%M:%S",
         show_lineno_for: tuple = ("TRACE", "WARNING", "ERROR", "CRITICAL"),
     ):
+        """Initialize the structured log formatter.
+
+        Args:
+            exp_name: Experiment identifier shown in each log prefix.
+            colorful: Whether to render ANSI color tags via :func:`tag2ansi`.
+            start_time: Unix timestamp used as zero for elapsed-time calculation.
+            time_format: ``strftime`` format for wall-clock timestamps.
+            show_lineno_for: Tuple of level names that include ``filename:lineno`` in the prefix.
+        """
         super().__init__()
         self.exp_name = exp_name
         self.colorful = colorful
@@ -81,6 +84,14 @@ class LogFormatter(logging.Formatter):
         self.show_lineno_for = show_lineno_for
 
     def format(self, record) -> str:
+        """Format a :class:`logging.LogRecord` with the SRHarness prefix and indented multiline body.
+
+        Args:
+            record: Log record to format.
+
+        Returns:
+            str: Formatted log entry.
+        """
         prefixes = [
             self.exp_name,
             record.name.split(".")[-1],  # 显示 logger 名的最后一部分
@@ -109,11 +120,25 @@ class LogFormatter(logging.Formatter):
 
 # 自定义日志级别：NOTE (between INFO and WARNING) 和 TRACE (between DEBUG and INFO)
 def note(self, message, *args, **kwargs):
+    """Log a message at the custom ``NOTE`` level (between ``INFO`` and ``WARNING``).
+
+    Args:
+        message: Log message format string.
+        *args: Format arguments passed to ``Logger._log``.
+        **kwargs: Keyword arguments passed to ``Logger._log``.
+    """
     if self.isEnabledFor(25):
         self._log(25, message, args, **kwargs)
 
 
 def trace(self, message, *args, **kwargs):
+    """Log a detailed diagnostic message at the custom ``TRACE`` level.
+
+    Args:
+        message: Log message format string.
+        *args: Format arguments passed to ``Logger._log``.
+        **kwargs: Keyword arguments passed to ``Logger._log``.
+    """
     if self.isEnabledFor(15):
         self._log(15, message, args, **kwargs)
 
@@ -162,26 +187,21 @@ def setup_logging(
     show_lineno_for_all_levels: bool = False,
     force: bool = False,
 ) -> bool:
-    """配置 sr_harness 包的日志输出。
-
-    这是配置 sr_harness 日志的主要入口。支持控制台彩色输出和文件保存。
+    """Configure console and rotating-file handlers for the ``sr_harness`` logger hierarchy.
 
     Args:
-        info_level: 日志级别，默认 "info"。可选："debug", "trace", "info", "note", "warning", "error", "critical"。
-        exp_name: 实验名称，显示在日志前缀中，默认 "SRHarness"。
-        save_path: 日志文件路径。None 表示不保存到文件。
-        colorful: 是否启用控制台彩色输出，默认 True。
-        file_max_size_MB: 单个日志文件最大大小（MB），默认 50。
-        file_backup_count: 保留的备份文件数量，默认 100。
-        show_lineno_for_all_levels: 是否对所有级别显示行号，默认 False。
-        force: 是否强制重新配置（即使已有配置）。默认 False。
+        info_level: Minimum console log level (``"debug"``, ``"trace"``, ``"info"``,
+            ``"note"``, ``"warning"``, ``"error"``, or ``"critical"``).
+        exp_name: Experiment name displayed in log prefixes.
+        save_path: Optional directory where ``debug.log``, ``info.log``, and ``note.log`` are saved.
+        colorful: Whether console output uses ANSI colors.
+        file_max_size_MB: Maximum size in MiB per rotating log file.
+        file_backup_count: Maximum number of rotated backup log files to retain.
+        show_lineno_for_all_levels: Whether to include source file and line numbers on all log levels.
+        force: If ``True``, replace any existing handlers on the ``sr_harness`` logger.
 
     Returns:
-        True 如果成功配置，False 如果检测到用户自定义 handler 而跳过配置。
-
-    Example:
-        >>> from sr_harness.utils import setup_logging
-        >>> setup_logging(info_level='debug', exp_name='MyExp', save_path='logs/train.log')
+        bool: ``True`` if logging was newly configured, ``False`` if an existing configuration was kept.
     """
     global _configured
 

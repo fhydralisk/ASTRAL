@@ -112,37 +112,37 @@ def _symbol_results(path: Path, source: str, symbol: str, *, implementation: boo
 
 @BaseTool.register("read_source")
 class ReadSourceTool(BaseTool):
-    """Inspect installed source files and locate symbol definitions or references."""
+    """Tool for browsing installed SRHarness source files and querying Python symbol definitions or usages."""
 
     metadata = ToolMetadata(
         name="read_source",
         description=(
-            "List a directory, read a source file, or query a Python symbol's implementation "
-            "and references. Paths are relative to src; omit path to search all SRHarness source."
+            "List source files, read a file, or look up a Python symbol's definition and references "
+            "in the installed SRHarness codebase (paths are relative to `src`)."
         ),
         parameters={
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "Optional path relative to src."},
-                "symbol": {"type": "string", "description": "Optional symbol such as DefaultEvaluator.evaluate."},
-                "include_implementation": {"type": "boolean", "description": "Return matching definitions; defaults to true."},
-                "include_references": {"type": "boolean", "description": "Return matching usages; defaults to false."},
+                "path": {"type": "string", "description": "Optional file or directory path relative to `src`."},
+                "symbol": {"type": "string", "description": "Optional Python symbol name, e.g. `DefaultEvaluator.evaluate`."},
+                "include_implementation": {"type": "boolean", "description": "Include matching class/function definitions (default: true)."},
+                "include_references": {"type": "boolean", "description": "Include matching symbol usages and imports (default: false)."},
             },
             "additionalProperties": False,
         },
     )
 
     def execute(self, path: str | None = None, symbol: str | None = None, include_implementation: bool = True, include_references: bool = False) -> dict[str, Any]:
-        """Read a source path or locate a Python symbol.
+        """List a source directory, read a source file, or locate a Python symbol's definitions and usages.
 
         Args:
-            path: File or directory relative to the installed ``src`` tree.
-            symbol: Qualified or unqualified Python symbol to locate.
-            include_implementation: Whether symbol queries return definitions.
-            include_references: Whether symbol queries return references.
+            path: Optional file or directory path relative to ``src`` (e.g., ``"sr_harness/evaluator"``). Defaults to the ``src`` root.
+            symbol: Optional Python class, function, or method name (e.g., ``"DefaultEvaluator.evaluate"``).
+            include_implementation: Whether symbol queries return matching AST definitions (default ``True``).
+            include_references: Whether symbol queries return matching attribute/name/import references (default ``False``).
 
         Returns:
-            A directory listing, file source, or symbol-query result.
+            dict[str, Any]: Directory listing, file source code, or symbol definitions and references.
         """
         target = _resolve(path)
         if not target.exists():
@@ -187,13 +187,13 @@ class ReadSourceTool(BaseTool):
 
     @classmethod
     def format_result_dict(cls, result: dict[str, Any]) -> str:
-        """Format a source inspection result for a language model.
+        """Format a source file, directory tree, or symbol lookup result for the Agent.
 
         Args:
-            result: Structured result returned by :meth:`execute`.
+            result: Structured dictionary returned by :meth:`execute`.
 
         Returns:
-            Human-readable source text or query matches.
+            str: Formatted source code listing or symbol search results.
         """
         if result["type"] == "directory":
             return "Source tree: " + result["path"] + "\n" + "\n".join(result["entries"])

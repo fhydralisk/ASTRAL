@@ -1,5 +1,5 @@
 # Copyright (c) 2026-present, Yumeow. Licensed under the MIT License.
-"""LLM 调用工具。提供统一的 LLM 调用接口，支持多种 LLM 提供商。"""
+"""Auxiliary tool for querying an external LLM provider directly."""
 
 from typing import Dict, Any, List
 from .base_tool import BaseTool, ToolMetadata
@@ -7,7 +7,7 @@ from .base_tool import BaseTool, ToolMetadata
 
 # @BaseTool.register('call_llm') # 不注册这个工具，因为它用处不大
 class LLMTool(BaseTool):
-    """Implementation of the l l m tool."""
+    """Tool for querying a configured LLM provider and returning its response text and usage."""
     metadata = ToolMetadata(name="call_llm")
 
     def execute(
@@ -16,12 +16,15 @@ class LLMTool(BaseTool):
         llm_model: str,
         messages: List[Dict[str, str]] | str,
     ) -> Dict[str, Any]:
-        """Call LLM API.
+        """Send a prompt or chat message list to an LLM provider and return the completion.
 
         Args:
-            llm_provider: LLM provider name, e.g., "openai", "deepseek", "gemini".
-            llm_model: Model name, e.g., "gpt-4o-mini", "deepseek-chat".
-            messages: List of messages, each as [{"role": "user"|"assistant", "content": "..."}, ...].
+            llm_provider: Provider identifier, e.g., ``"openai"``, ``"deepseek"``, or ``"gemini"``.
+            llm_model: Model identifier, e.g., ``"gpt-4o-mini"`` or ``"deepseek-chat"``.
+            messages: Prompt string or list of ``{"role": "user"|"assistant", "content": "..."}`` dicts.
+
+        Returns:
+            Dict[str, Any]: Dictionary containing ``content``, ``token_usage``, and ``money_usage``.
         """
         from ..api import BaseAPI
 

@@ -15,7 +15,7 @@ from sr_harness_engine.tree import children, with_children, transform
 
 @dataclass(frozen=True)
 class ConstantOptimizerConfig:
-    """Numerical budget and reproducibility controls for ``fit_constants``."""
+    """Configuration controlling multi-start constant fitting budgets, tolerances, and random seeds."""
 
     random_state: int = 0
     n_restarts: int = 3
@@ -146,11 +146,17 @@ def fit_constants(
     config: ConstantOptimizerConfig | None = None,
     num_nodes: int | None = None,
 ) -> engine.Expression:
-    """Return a fitted expression without modifying ``f``.
+    """Optimize free scalar and grouped parameters in ``f`` to fit ``y`` over ``data`` without mutating ``f``.
 
-    This function is an explicit opt-in optimization operation, so numeric
-    literals are temporarily promoted to independent parameters. Outside this
-    function, literals remain fixed and only ``param(...)`` nodes are fitable.
+    Args:
+        f: Symbolic expression containing parameter nodes to optimize.
+        data: Mapping of variable names to NumPy arrays.
+        y: Target NumPy array to approximate.
+        config: Optional :class:`ConstantOptimizerConfig` controlling restarts and tolerances.
+        num_nodes: Optional explicit node count for graph/hypergraph expressions.
+
+    Returns:
+        engine.Expression: Copy of ``f`` with fitted parameter values bound.
     """
     if not isinstance(f, engine.Expression):
         raise TypeError("f must be an sr_harness_engine.Expression")

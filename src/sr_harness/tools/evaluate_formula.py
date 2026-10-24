@@ -1,8 +1,5 @@
 # Copyright (c) 2026-present, Yumeow. Licensed under the MIT License.
-"""公式评估工具。
-
-评估数学公式对数据的拟合能力，返回多种评价指标。
-"""
+"""Formula evaluation and candidate submission tools."""
 from typing import Dict, Any
 
 import numpy as np
@@ -12,7 +9,7 @@ from .base_tool import BaseTool, ToolMetadata
 
 @BaseTool.register('evaluate_formula')
 class EvaluateTool(BaseTool):
-    """Implementation of the evaluate tool."""
+    """Tool for scoring a symbolic formula against a target variable or expression."""
     metadata = ToolMetadata(name="evaluate_formula")
 
     def execute(
@@ -22,18 +19,20 @@ class EvaluateTool(BaseTool):
         fit: bool = False,
         show_diagnostics: bool = True,
     ) -> Dict[str, Any]:
-        """Evaluate formula fit quality to data.
+        """Evaluate how well a symbolic formula ``f`` fits target ``y`` on train and validation splits.
 
-        This tool can return candidate formulas for submission when `y` is the target variable and `f` does not depend on the target variable.
+        Automatically treats unknown variable names in ``f`` as tunable parameters and optimizes
+        them with BFGS. Records a submission-eligible candidate when ``y`` is the default target
+        variable and ``f`` does not reference ``y``.
 
         Args:
-            f: Formula string, e.g., "x1**2 + sin(x2) + 3.5 * tanh(x3)".
-                Common operators like sin, sinh, sec, sech, and sigmoid are all supported; do not use `numpy` or `np`.
-            y: Target variable name. Use target variable by default.
-                Expressions are also supported, e.g., "log(y)", "y - x1"
-            fit: Whether to optimize formula parameters using BFGS algorithm.
-            show_diagnostics: Whether the result should include a compact residual error profile,
-                the worst samples, and the strongest residual-variable correlations.
+            f: Symbolic formula string, e.g., ``"x1**2 + sin(x2) + 3.5 * tanh(x3)"``. Standard math operators (``sin``, ``sinh``, ``sec``, ``sech``, ``sigmoid``, etc.) are supported directly without ``np.`` prefixes.
+            y: Target variable name or expression, e.g., ``"y"``, ``"log(y)"``, or ``"y - x1"``. Defaults to ``context.target``.
+            fit: Whether to optimize scalar parameters in ``f`` on the training split via BFGS.
+            show_diagnostics: Whether to return residual quantiles, worst samples, and residual-feature correlations.
+
+        Returns:
+            Dict[str, Any]: Fit metrics across splits, candidate eligibility, fitted parameters, and residual diagnostics.
         """
         data = self.context.data
         y = y or self.context.target
@@ -66,13 +65,13 @@ class EvaluateTool(BaseTool):
 
     @classmethod
     def format_result_dict(cls, result: Dict[str, Any]) -> str:
-        """Format a tool result for the language model.
+        """Format formula evaluation metrics and parameter-fitting notes for the Agent.
 
         Args:
-            result: Result mapping to format or update.
+            result: Result dictionary returned by :meth:`execute`.
 
         Returns:
-            str: The operation result.
+            str: Formatted evaluation summary.
         """
         text = cls.format_evaluation_result(result, title="Evaluated formula")
         if result.get("parameters_optimized"):
@@ -86,13 +85,12 @@ class EvaluateTool(BaseTool):
 
 @BaseTool.register('submit_formula')
 class SubmitFormulaTool(EvaluateTool):
-    """Implementation of the submit formula tool."""
+    """Tool for evaluating and submitting a candidate formula to the search harness."""
     metadata = ToolMetadata(
         name="submit_formula",
         description=(
-            "Evaluate formula fit quality to data. "
-            "If you are satisfied enough with a formula, use this tool to submit it."
-            "You can submit any formula as many times as you want, but only the best formula will be considered. "
-            "It returns candidate formulas only when `y` is the default target and the formula does not contain the target itself."
+            "Evaluate and submit a candidate formula for the discovery target. "
+            "Call this tool whenever you find a strong formula; you may submit multiple times and the harness retains the best candidate. "
+            "A submission is recorded as a valid candidate only when `y` is the default target variable and `f` does not reference `y`."
         ),
     )

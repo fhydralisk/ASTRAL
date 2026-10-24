@@ -9,13 +9,23 @@ from ..core import APICallSample, ToolCall
 
 @BaseAPI.register("gemini")
 class GeminiAPI(BaseAPI):
-    """Google Gemini adapter for the explicitly listed SDK workflows."""
+    """LLM provider adapter for Google Gemini models via the ``google-genai`` SDK."""
 
     def __init__(self, model: str = "gemini-2.5-pro", **kwargs: Any) -> None:
+        """Initialize the Google Gemini API adapter.
+
+        Args:
+            model: Gemini model identifier (defaults to ``"gemini-2.5-pro"``).
+            **kwargs: Additional arguments forwarded to :class:`BaseAPI`.
+        """
         super().__init__(model=model, **kwargs)
 
     def cancel(self) -> str:
-        """Report that the current synchronous SDK request cannot be preempted."""
+        """Request cancellation and note that synchronous Gemini SDK calls pause after the in-flight HTTP request returns.
+
+        Returns:
+            str: Human-readable notice explaining when the cancellation will take effect.
+        """
         return (
             "GeminiAPI does not support force-interrupting an active non-streaming request. "
             "The Agent will pause at its next safe boundary."
@@ -24,12 +34,25 @@ class GeminiAPI(BaseAPI):
     def format_response(
         self, message: dict[str, Any], tool_calls: list[ToolCall], content: str | None = None
     ) -> APICallSample:
-        """Convert one Gemini message into one API-call sample."""
+        """Convert a Gemini response dictionary into a normalized :class:`~sr_harness.core.APICallSample`.
+
+        Args:
+            message: Normalized Gemini message dictionary.
+            tool_calls: Parsed tool calls from the response.
+            content: Optional explicit text content override.
+
+        Returns:
+            APICallSample: Normalized assistant response sample.
+        """
         return self._build_response(message, tool_calls, content)
 
     @property
     def model_list(self) -> list[str]:
-        """Return the Gemini models explicitly supported by this adapter."""
+        """Return the list of Google Gemini model identifiers supported by this adapter.
+
+        Returns:
+            list[str]: Supported Gemini model names.
+        """
         return [
             "gemini-2.5-pro",
             "gemini-2.5-flash",

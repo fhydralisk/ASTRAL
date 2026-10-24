@@ -66,13 +66,13 @@ _logger = logging.getLogger(f"sr_harness.{SCRIPT_NAME}")
 
 
 def setup_parser(parser: argparse.ArgumentParser | None = None) -> argparse.ArgumentParser:
-    """Configure the command-line argument parser.
+    """Configure CLI arguments for ``sr-harness benchmark`` (LLM-SRBench evaluation).
 
     Args:
-        parser: Argument parser to configure.
+        parser: Optional existing :class:`argparse.ArgumentParser` to populate.
 
     Returns:
-        argparse.ArgumentParser: The operation result.
+        argparse.ArgumentParser: Parser configured with dataset, problem, and algorithm flags.
     """
     if parser is None:
         parser = argparse.ArgumentParser(
@@ -136,15 +136,15 @@ def setup_parser(parser: argparse.ArgumentParser | None = None) -> argparse.Argu
 
 
 def load_problems(dataset_name: str, data_root: str, hf_repo_id = "nnheui/llm-srbench") -> List[Problem]:
-    """Load problems.
+    """Download (if needed) and load benchmark problems for one LLM-SRBench dataset split.
 
     Args:
-        dataset_name: The dataset name value.
-        data_root: The data root value.
-        hf_repo_id: The hf repo id value.
+        dataset_name: Benchmark dataset identifier (e.g., ``"lsrtransform"`` or ``"matsci"``).
+        data_root: Local cache directory where Hugging Face dataset files are stored.
+        hf_repo_id: Hugging Face dataset repository ID (defaults to ``"nnheui/llm-srbench"``).
 
     Returns:
-        List[Problem]: The operation result.
+        List[Problem]: Loaded benchmark problem instances.
     """
     split_name = DATASET_SPLITS[dataset_name]
 
@@ -258,13 +258,16 @@ def load_problems(dataset_name: str, data_root: str, hf_repo_id = "nnheui/llm-sr
 
 
 def anonymize_problem(problem: Problem) -> Problem:
-    """Return an agent-facing anonymized copy of a benchmark problem.
+    """Return a copy of a benchmark problem with variable names and descriptions replaced by generic symbols.
+
+    Numeric arrays remain untouched so the run measures symbolic discovery without
+    domain-specific text hints.
 
     Args:
-        problem: The problem value.
+        problem: Original benchmark :class:`Problem` instance.
 
     Returns:
-        Problem: The operation result.
+        Problem: Anonymized copy of ``problem``.
     """
 
     target = problem.symbols[0]
@@ -304,14 +307,14 @@ def anonymize_problem(problem: Problem) -> Problem:
 
 
 def compute_metrics(y_pred: np.ndarray, y_true: np.ndarray) -> Dict[str, float]:
-    """Compute metrics.
+    """Compute regression accuracy metrics ($R^2$, MSE, NMSE, RMSE, MAE, MAPE, sMAPE, Kendall $\tau$) between predictions and targets.
 
     Args:
-        y_pred: Predicted target values.
-        y_true: Observed target values.
+        y_pred: Model-predicted target values.
+        y_true: Ground-truth target observations.
 
     Returns:
-        Dict[str, float]: The operation result.
+        Dict[str, float]: Dictionary of evaluation metric names and float values.
     """
     mask = ~np.isnan(y_pred) # 原始的 LLM-SRBench 就是这么做的，可能导致潜在的问题，但为了保持一致，我们也采用相同的过滤方式。
     y_pred, y_true = y_pred[mask], y_true[mask]
@@ -335,16 +338,20 @@ def compute_metrics(y_pred: np.ndarray, y_true: np.ndarray) -> Dict[str, float]:
 
 
 def evaluate_problem(args, problem: Problem, sr_fn: Callable, exp_path: Path) -> Dict:
-    """Run the ``evaluate problem`` operation.
+    """Run the selected symbolic-regression algorithm on one benchmark problem and evaluate its discovered formula.
+
+    Computes in-domain and out-of-domain numerical metrics and checks symbolic
+    equivalence against the ground-truth expression.
 
     Args:
-        args: Parsed command-line arguments.
-        problem: The problem value.
-        sr_fn: The sr fn value.
-        exp_path: The exp path value.
+        args: Parsed CLI arguments controlling algorithm and evaluation settings.
+        problem: Benchmark :class:`Problem` to solve.
+        sr_fn: Callable implementing the selected symbolic-regression baseline.
+        exp_path: Output directory where per-problem run artifacts are saved.
 
     Returns:
-        Dict: The operation result.
+        Dict: Per-problem evaluation record including discovered formula, metrics,
+            symbolic accuracy, runtime, and token/cost usage.
     """
     task = problem.create_task()
 
@@ -410,10 +417,10 @@ def evaluate_problem(args, problem: Problem, sr_fn: Callable, exp_path: Path) ->
 
 
 def log_result(result: Dict):
-    """Run the ``log result`` operation.
+    """Format and log the evaluation summary for a single benchmark problem to the console.
 
     Args:
-        result: Result mapping to format or update.
+        result: Per-problem evaluation result dictionary returned by :func:`evaluate_problem`.
     """
     lines = []
     lines.append(f'[gray]{"=" * 50}')
@@ -451,13 +458,14 @@ def log_result(result: Dict):
 
 
 def aggregate_results(results: List[Dict]) -> Dict:
-    """Run the ``aggregate results`` operation.
+    """Aggregate per-problem evaluation records into dataset-level summary statistics.
 
     Args:
-        results: Result records to process.
+        results: List of per-problem evaluation dictionaries.
 
     Returns:
-        Dict: The operation result.
+        Dict: Summary statistics including symbolic accuracy rate, mean/median
+            metrics, runtime, and token/cost totals.
     """
 
     def safe_mean(key, group):
@@ -503,12 +511,12 @@ def aggregate_results(results: List[Dict]) -> Dict:
 
 def conclude_results(results: List[Dict], llmsr_datasets: List[str], save_path: str):
     # 汇总
-    """Run the ``conclude results`` operation.
+    """Write per-dataset and overall benchmark summary tables to ``summary/`` and print them to the console.
 
     Args:
-        results: Result records to process.
-        llmsr_datasets: The llmsr datasets value.
-        save_path: Optional output path.
+        results: Complete list of per-problem evaluation records across datasets.
+        llmsr_datasets: List of evaluated dataset names.
+        save_path: Root experiment directory where ``summary/`` files are written.
     """
     results = [r for r in results if r.get("dataset_identifier") in llmsr_datasets]
     summary = aggregate_results(results)
@@ -556,13 +564,13 @@ def conclude_results(results: List[Dict], llmsr_datasets: List[str], save_path: 
 
 def run_benchmark(args: argparse.Namespace) -> int:
     # 加载问题集
-    """Run the ``run benchmark`` operation.
+    """Execute the full LLM-SRBench evaluation loop across the selected datasets and problems.
 
     Args:
-        args: Parsed command-line arguments.
+        args: Parsed CLI arguments specifying algorithm, datasets, and output path.
 
     Returns:
-        int: The operation result.
+        int: Process exit code (``0`` on success).
     """
     args.datasets = args.datasets or list(DATASET_SPLITS.keys())
     problems = []
@@ -659,13 +667,13 @@ def run_benchmark(args: argparse.Namespace) -> int:
 
 
 def main(args: argparse.Namespace) -> int:
-    """Run LLM-SRBench from CLI arguments.
+    """Entry point for the ``sr-harness benchmark`` subcommand.
 
     Args:
         args: Parsed command-line arguments.
 
     Returns:
-        int: The operation result.
+        int: Process exit code.
     """
     if args.exp_name is None:
         now = datetime.now()

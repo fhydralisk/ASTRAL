@@ -11,10 +11,13 @@ MAX_RESPONSE_DEPTH = 64
 
 
 def check_response_budget(content):
-    """Iterative traversal bounds work before recursive JSON encoding.
+    """Verify iteratively that ``content`` stays within node-count, nesting-depth, and UTF-8 byte limits before JSON encoding.
 
-    Shared references count each time they occur in JSON. Cycles exceed the
-    depth budget without recursive stack overflow or allocating a huge queue.
+    Args:
+        content: Candidate response payload to inspect.
+
+    Raises:
+        HTTPException: With status ``413`` if the payload exceeds size or depth limits.
     """
     stack = [(iter((content,)), 0)]
     nodes = 0
@@ -43,6 +46,14 @@ def check_response_budget(content):
 
 
 def worker_json_response(content):
+    """Validate ``content`` against the response size budget and encode it as a :class:`fastapi.responses.JSONResponse`.
+
+    Args:
+        content: Serializable Python structure to return from an endpoint.
+
+    Returns:
+        JSONResponse: Encoded FastAPI JSON response.
+    """
     check_response_budget(content)
     encoded = jsonable_encoder(content)
     check_response_budget(encoded)
@@ -53,7 +64,15 @@ def worker_json_response(content):
 
 
 def worker_event_response(manager, after_sequence):
-    """Shrink a page to the response budget without skipping any event cursor."""
+    """Fetch a batch of recent timeline events that fits within the 8 MiB response size budget without skipping sequence cursors.
+
+    Args:
+        manager: :class:`~sr_harness.runtime.InteractionManager` owning the event buffer.
+        after_sequence: Last event sequence number already received by the client.
+
+    Returns:
+        JSONResponse: Encoded event batch response.
+    """
     limit = 32
     while True:
         try:

@@ -31,17 +31,20 @@ def _validate_public_url(url: str) -> None:
 
 @BaseTool.register("read_pdf")
 class PDFReadTool(BaseTool):
-    """Implementation of the p d f read tool."""
+    """Tool for extracting text from local workspace PDFs or public HTTP(S) PDF URLs."""
 
     metadata = ToolMetadata(name="read_pdf")
 
     def execute(self, source: str, start_page: int = 1, max_pages: int = 10) -> Dict[str, Any]:
-        """Extract text from selected pages of a local or public PDF.
+        """Extract text from a page range of a workspace PDF file or public HTTP(S) PDF URL.
 
         Args:
-            source: Local PDF path or an absolute public http(s) URL.
-            start_page: First page to read, one-indexed.
-            max_pages: Maximum pages to extract, between 1 and 50.
+            source: Workspace-relative PDF path or an absolute public ``http://`` / ``https://`` URL.
+            start_page: 1-indexed first page to extract (default 1).
+            max_pages: Maximum number of pages to read in one call (1-50, default 10).
+
+        Returns:
+            Dict[str, Any]: Source identifier, total ``page_count``, and extracted ``pages`` list.
         """
         start_page = max(1, int(start_page))
         max_pages = max(1, min(int(max_pages), 50))
@@ -84,13 +87,13 @@ class PDFReadTool(BaseTool):
 
     @classmethod
     def format_result_dict(cls, result: Dict[str, Any]) -> str:
-        """Format a tool result for the language model.
+        """Format extracted PDF pages as Markdown sections for the Agent.
 
         Args:
-            result: Result mapping to format or update.
+            result: Result dictionary returned by :meth:`execute`.
 
         Returns:
-            str: The operation result.
+            str: Page-by-page Markdown text.
         """
         return "\n\n".join(f"## Page {page['page']}\n{page['text']}" for page in result["pages"])
 

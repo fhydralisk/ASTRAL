@@ -9,7 +9,13 @@ from .serialize import serialize
 
 
 def save_args(args: Any, args_path: Path, excluded_keys=("saved_time", "command")) -> None:
-    """Save args to JSON, backing up an existing file and printing meaningful diffs."""
+    """Save CLI or experiment arguments to ``args_path`` as JSON, backing up any prior file and logging diffs.
+
+    Args:
+        args: Namespace, dataclass, or mapping of experiment arguments.
+        args_path: Target JSON file path.
+        excluded_keys: Argument keys ignored when comparing against an existing file.
+    """
     args_path = Path(args_path)
 
     # Serialize args to a dictionary

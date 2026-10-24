@@ -7,7 +7,15 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class ModelRoute:
-    """Selected provider/model route and its rationale."""
+    """Routing decision specifying which provider/model tier to call and why.
+
+    Attributes:
+        tier: Selected tier label (``"base"`` or ``"strong"``).
+        provider: Selected LLM provider name.
+        model: Selected model identifier.
+        score: Complexity score computed for the task and step.
+        reason: Human-readable explanation of the routing decision.
+    """
     tier: str
     provider: str
     model: str
@@ -16,7 +24,12 @@ class ModelRoute:
 
 
 class ModelRouter:
-    """Choose a cheap base model or an optional stronger model per request."""
+    """Policy that dynamically selects between a fast base model and an optional stronger model.
+
+    Evaluates task complexity (such as PDEs, ODEs, graph/network structure,
+    noise, or high feature counts) and current refinement depth ``L`` to route
+    key steps to the strong model when automatic routing is enabled.
+    """
 
     COMPLEX_PATTERNS = {
         r"\b(?:pde|ode|differential equation|network dynamics|graph dynamics)\b": 3,
@@ -35,6 +48,15 @@ class ModelRouter:
         strong_provider: str | None = None,
         strong_model: str | None = None,
     ) -> None:
+        """Initialize the model router with base and optional strong model backends.
+
+        Args:
+            enabled: Whether automatic routing to the strong model is enabled.
+            base_provider: Provider name for the base model.
+            base_model: Model identifier for the base model.
+            strong_provider: Optional provider name for the strong model (defaults to ``base_provider``).
+            strong_model: Optional model identifier for the strong model.
+        """
         for name, value in (("base_provider", base_provider), ("base_model", base_model)):
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{name} must be a non-empty string")
@@ -49,10 +71,10 @@ class ModelRouter:
 
     @property
     def has_strong_backend(self) -> bool:
-        """Run the ``has strong backend`` operation.
+        """Return whether a distinct strong provider/model backend is configured.
 
         Returns:
-            bool: The operation result.
+            bool: ``True`` if ``strong_model`` is set and differs from the base provider/model.
         """
         return bool(
             self.strong_model
@@ -61,14 +83,14 @@ class ModelRouter:
         )
 
     def assess(self, task: str, feature_count: int) -> tuple[int, list[str]]:
-        """Run the ``assess`` operation.
+        """Score the intrinsic difficulty of a discovery task from its description and feature count.
 
         Args:
-            task: The task value.
-            feature_count: The feature count value.
+            task: Natural-language problem description.
+            feature_count: Number of input feature variables.
 
         Returns:
-            tuple[int, list[str]]: The operation result.
+            tuple[int, list[str]]: Pair of ``(complexity_score, matched_reason_tags)``.
         """
         text = task.lower()
         score = max(0, feature_count - 3)
@@ -86,15 +108,15 @@ class ModelRouter:
         task_reasons: list[str],
         refinement_step: int,
     ) -> ModelRoute:
-        """Run the ``route`` operation.
+        """Select the base or strong model backend for a specific refinement step.
 
         Args:
-            task_score: The task score value.
-            task_reasons: The task reasons value.
-            refinement_step: The refinement step value.
+            task_score: Task complexity score returned by :meth:`assess`.
+            task_reasons: Matched difficulty reasons returned by :meth:`assess`.
+            refinement_step: Current one-based refinement step index ``L``.
 
         Returns:
-            ModelRoute: The operation result.
+            ModelRoute: Selected model route and rationale.
         """
         if not self.enabled:
             return self._base(task_score, "automatic routing disabled")

@@ -1,34 +1,39 @@
 # Formula Evaluation and Custom Evaluators
 
-An Evaluator is the shared evaluation protocol used by formula-evaluation tools in SRHarness. It encapsulates how data is split, how expression parameters are fitted, and which numeric metrics are used to evaluate the fitted expression. Tools such as `evaluate_formula`, `submit_formula`, polynomial fitting, and symbolic-search backends can therefore share one evaluation policy.
+In SRHarness, an **Evaluator** defines how candidate formulas are scored. It packages **data splitting (`split`)**, **parameter fitting (`fit`)**, and **metric computation (`evaluate`)** into a single protocol shared across `evaluate_formula`, `submit_formula`, polynomial fitting, and external symbolic-search tools.
 
-The active instance is stored in `AgentContext.evaluator`. SRHarness provides `DefaultEvaluator` for ordinary aligned data and `GraphEvaluator` for graph and hypergraph data. A user-defined Evaluator can inherit `DefaultEvaluator` and override only the behavior required by the task.
+The active Evaluator instance lives at `AgentContext.evaluator`. SRHarness ships with two built-in Evaluators:
 
-!!! info "The role of SRHarness Engine"
-    Evaluators use the [SRHarness Engine](engine.md) `Expression` representation together with its parsing, parameter-fitting, and numerical-evaluation capabilities. The Engine does not decide data splits, candidate eligibility, metric definitions, or ranking policy; those belong to Evaluators and formula-evaluation tools. Keeping mathematical-expression infrastructure in the Engine lets tools and custom Evaluators share one mathematical semantics.
+- **`DefaultEvaluator`**: For standard tabular or time-series datasets where samples are aligned along the first dimension;
+- **`GraphEvaluator`**: For relational datasets containing node arrays, edge/hyperedge arrays, and graph or hypergraph topology tables.
 
-## Evaluation path
+When your task requires domain-specific scoring—such as integrating a candidate differential equation over time to measure trajectory rollout error—you can subclass `DefaultEvaluator` and override only the methods you need.
 
-A formula tool first parses model-provided text into an [SRHarness Engine](engine.md) `Expression`. `BaseTool.evaluate()` then determines whether the formula is a formal candidate:
+!!! info "How Evaluators and SRHarness Engine Work Together"
+    Low-level mathematical operations—parsing strings into expression trees, optimizing free constants, and evaluating arrays with NumPy—live in [SRHarness Engine](engine.md). Evaluators sit one level higher: they decide how to split train and validation data, which formulas qualify as formal candidates, and which metrics to compute and rank by.
 
-- when the left-hand expression is exactly `context.target` and the right-hand side does not depend on the target, it is a candidate and uses `fit_candidate()` and `evaluate_candidate()`;
-- other equalities remain available for relationship exploration, but use the general `fit()` and `evaluate()` path and do not trigger candidate-only behavior.
+## 1. How Formula Evaluation Works
+
+When a formula tool (such as `evaluate_formula`) receives a right-hand side `f` and left-hand side `y`, it parses both into [SRHarness Engine](engine.md) `Expression` objects. `BaseTool.evaluate()` then checks whether the equation is a **formal candidate**:
+
+- **Formal candidate**: The left-hand side `y` is exactly the target variable `context.target`, and the right-hand side `f` does not reference `context.target`. Formal candidates run through **`fit_candidate()` → `evaluate_candidate()`** and are recorded in the global Top-k list and Pareto Front.
+- **General exploratory equality**: Any other equation (for example, checking an implicit relation between input features) runs through the general **`fit()` → `evaluate()`** path. The Agent still receives full train and validation metrics, but the equation is not added to the candidate leaderboard.
 
 ```mermaid
 flowchart TD
-    A[Formula-evaluation tool] --> B[Parse f and y]
-    B --> C[Obtain train and validation contexts]
-    C --> D{Formal candidate?}
-    D -- Yes --> E[fit_candidate]
-    D -- No --> F[fit]
-    E --> G[evaluate_candidate]
-    F --> H[evaluate]
-    G --> I[Train and validation metrics]
+    A[Formula-evaluation tool] --> B[Parse expressions f and y]
+    B --> C[Get train and validation splits via evaluator.split]
+    C --> D{Is y == target and target not in f?}
+    D -- Yes: Formal candidate --> E[fit_candidate on training split]
+    D -- No: Exploratory equality --> F[fit on training split]
+    E --> G[evaluate_candidate on train & validation splits]
+    F --> H[evaluate on train & validation splits]
+    G --> I[Collect train and validation metrics]
     H --> I
-    I --> J[ToolCallResult and candidate ranking]
+    I --> J[Return ToolCallResult and update candidate rankings]
 ```
 
-The following pseudocode summarizes how formula tools use the five entry points:
+In pseudocode, the evaluation flow looks like this:
 
 ```python
 def evaluate_formula(f, y, context, evaluator):
@@ -58,36 +63,40 @@ def evaluate_formula(f, y, context, evaluator):
     }
 ```
 
-When fitting is requested, parameters are determined only on the training split. The same fitted expression is then evaluated on the training and validation splits. On first access, `AgentContext.train_split` or `AgentContext.validation_split` calls `evaluator.split(context)` and caches both context views until the data changes or the cache is explicitly invalidated.
+Two important guarantees hold across every evaluation:
 
-Residual diagnostics, candidate eligibility, result formatting, and error wrapping remain responsibilities of `BaseTool`; individual Evaluators do not need to reimplement them.
+1. **No validation leakage**: Free parameters (`param(...)`) are fitted **exclusively on the training split (`train_context`)**. The resulting parameter-bound expression is then evaluated on both the training and validation splits.
+2. **Cached data splits**: Accessing `AgentContext.train_split` or `AgentContext.validation_split` calls `evaluator.split(context)` once and caches both split views until the underlying dataset changes or the cache is explicitly cleared.
 
-## The `DefaultEvaluator` contract
+Residual diagnostics, output formatting, and error handling remain inside `BaseTool`, so custom Evaluators stay focused purely on splitting, fitting, and scoring.
 
-`DefaultEvaluator` defines five class methods. A custom Evaluator may override any subset:
+## 2. The `DefaultEvaluator` Interface
 
-| Method | Input context | Responsibility |
+`DefaultEvaluator` defines five `@classmethod` entry points that subclasses can override selectively:
+
+| Method | Input `context` | Responsibility |
 |---|---|---|
-| `split(context)` | Complete, unsplit context | Return exactly `{"train": AgentContext, "validation": AgentContext}`. |
-| `fit(f, y, context)` | Training context | Fit parameters in `f` to approximate expression `y`, then return an `Expression` with bound parameters. |
-| `evaluate(f, y, context)` | Training or validation context | Evaluate a general equality `y = f` and return numeric metrics. |
-| `fit_candidate(f, context)` | Training context | Fit a formal candidate; by default this delegates to `fit(f, Symbol(context.target), context)`. |
-| `evaluate_candidate(f, context)` | Training or validation context | Evaluate a formal candidate; by default this delegates to `evaluate(f, Symbol(context.target), context)`. |
+| `split(context)` | Full unsplit `AgentContext` | Split the dataset and return `{"train": AgentContext, "validation": AgentContext}`. |
+| `fit(f, y, context)` | Training `AgentContext` | Fit free parameters in `f` to approximate `y` and return an `Expression` with bound parameter values. |
+| `evaluate(f, y, context)` | Train or validation `AgentContext` | Evaluate a general equality `y = f` and return a dictionary of numeric metrics. |
+| `fit_candidate(f, context)` | Training `AgentContext` | Fit a formal candidate formula (defaults to `fit(f, Symbol(context.target), context)`). |
+| `evaluate_candidate(f, context)` | Train or validation `AgentContext` | Evaluate a formal candidate formula (defaults to `evaluate(f, Symbol(context.target), context)`). |
 
-This layering preserves the Agent's ability to explore general equalities while giving formal candidates a task-specific extension point. For example, a dynamics Evaluator can integrate `dx_dt = f(x, t)` and calculate trajectory error only in `evaluate_candidate()` without trying to integrate every implicit equality used for analysis.
+Why separate `fit/evaluate` from `fit_candidate/evaluate_candidate`?
+Suppose you are discovering an ODE `dx_dt = f(x, t)`. For formal candidates predicting `dx_dt`, you want `evaluate_candidate()` to numerically integrate `f(x, t)` and compute trajectory rollout error (`rollout_rmse`). At the same time, you still want the Agent to freely test algebraic relationships among features using `evaluate()` without triggering an ODE solver on non-differential equations.
 
-An Evaluator must obey these result contracts:
+All Evaluators must follow these return-value rules:
 
-- `fit()` and `fit_candidate()` return `sr_harness_engine.Expression` objects with no unbound parameters at evaluation time;
-- `evaluate()` and `evaluate_candidate()` return `dict[str, float | int]`; booleans, strings, arrays, and nested values are not valid metrics;
-- metric names enter train and validation results unchanged, and any metric can be selected as the candidate-ranking key;
-- `complexity`, like every other metric, is returned by the Evaluator rather than injected separately by the runtime.
+- `fit()` and `fit_candidate()` must return an `sr_harness_engine.Expression` with no unbound parameters remaining;
+- `evaluate()` and `evaluate_candidate()` must return `dict[str, float | int]` (booleans, strings, arrays, and nested structures are not valid metric values);
+- Metric keys returned by the Evaluator appear directly in the train and validation metric dictionaries and can be chosen as the candidate `ranking_metric`;
+- `complexity` is returned by the Evaluator just like any other metric rather than injected externally by the runtime.
 
-## Built-in Evaluators
+## 3. Built-in Evaluators
 
 ### `DefaultEvaluator`
 
-`DefaultEvaluator` assumes sample arrays in `context.data` are aligned along their first dimension. It supports random and OOD splitting, uses SRHarness Engine to fit expression parameters and evaluate predictions, and returns these metrics by default:
+Assumes sample arrays in `context.data` are aligned along axis 0. It supports both random and out-of-distribution (`ood`) splits, fits parameters via SRHarness Engine, and returns 10 standard metrics out of the box:
 
 ```text
 mse, rmse, mae, mape, r2,
@@ -96,28 +105,26 @@ aic, bic, pearson_r, spearman_r, complexity
 
 ### `GraphEvaluator`
 
-`GraphEvaluator` derives from `DefaultEvaluator` and handles data composed of `(..., N)`, `(..., E)`, and `(..., H)` arrays plus graph or hypergraph relation tables. It passes `context.num_nodes` during fitting and evaluation and slices only sample-aligned dimensions, leaving shared edge and hyperedge tables intact.
+Subclasses `DefaultEvaluator` for datasets containing node arrays `(..., N)`, edge arrays `(..., E)`, hyperedge arrays `(..., H)`, and graph/hypergraph relation tables. It automatically passes `context.num_nodes` during fitting and evaluation, and slices only sample/time axes during `split()` so shared edge and hyperedge tables stay intact.
 
-## Evaluator utilities
+## 4. Reusable Evaluator Utilities (`evaluator.utils`)
 
-Reusable metric, splitting, and dynamics infrastructure is available from:
+Common metrics, splitting helpers, and ODE integration routines are available in `sr_harness.evaluator.utils`:
 
 ```python
 from sr_harness.evaluator import utils
 ```
 
-It includes:
+Available helpers include:
 
-- `calc_MSE()`, `calc_RMSE()`, `calc_MAE()`, `calc_MAPE()`, and `calc_R2()`;
-- AIC, BIC, Pearson/Spearman correlation, and expression complexity;
-- random, OOD, and chronological data splitting;
-- `integrate_ODE()` and `calc_trajectory_rollout_RMSE()`.
+- **Error metrics**: `calc_MSE()`, `calc_RMSE()`, `calc_MAE()`, `calc_MAPE()`, and `calc_R2()`;
+- **Information criteria & correlations**: AIC, BIC, Pearson/Spearman correlation, and expression complexity;
+- **Data splitting**: Random, OOD extrapolation, and chronological splits;
+- **Dynamics & ODEs**: `integrate_ODE()` and `calc_trajectory_rollout_RMSE()`.
 
-Keeping these reusable operations in `utils` makes custom Evaluators concise without expanding the Evaluator contract into a general infrastructure layer.
+## 5. Writing a Custom Evaluator
 
-## Custom Evaluators
-
-The safest extension pattern is to inherit `DefaultEvaluator` and override the narrowest entry point that needs to change. This Evaluator preserves every default behavior and adds trajectory rollout RMSE only for formal dynamics candidates:
+The cleanest way to build a custom Evaluator is to subclass `DefaultEvaluator` and override only the specific method you need. For example, `TrajectoryRolloutEvaluator` keeps all default metrics and adds `rollout_rmse` for formal ODE candidates:
 
 ```python
 from . import utils
@@ -137,8 +144,15 @@ class TrajectoryRolloutEvaluator(DefaultEvaluator):
         return metrics
 ```
 
-Override `fit_candidate()` as well when the fitting objective itself should include rollout behavior. Override `fit()` or `evaluate()` only when both general equalities and formal candidates require a different base policy.
+- Override `fit_candidate()` as well if parameter optimization itself should minimize trajectory rollout error;
+- Override `fit()` or `evaluate()` only if both exploratory equalities and formal candidates require custom fitting or scoring.
 
-A custom source file must define exactly one `DefaultEvaluator` subclass. `load_custom_evaluator()` loads and inspects the source in an isolated process, returns a same-named protocol proxy in the main process, and retains source/file provenance. Subsequent `split`, `fit`, and `evaluate` calls also run through the operating-system sandbox; custom source is never executed directly inside the Web service process. The WebUI can save, load, and test scripts in `context.evaluator/`, while the Evaluator Construction Agent can create or repair them; see [SRHarness WebUI](web-ui.md#evaluator-configuration).
+### Sandboxed Loading and Execution
 
-See the [API Reference](https://yuzhthu.github.io/SRHarness/reference/) for complete signatures and [SRHarness Engine](engine.md) for expression syntax, parameters, and graph evaluation rules.
+Each custom Evaluator file must define **exactly one** `DefaultEvaluator` subclass.
+
+`load_custom_evaluator()` validates and loads custom source code inside an isolated child process and returns a lightweight proxy in the main server process. Every subsequent `split`, `fit`, and `evaluate` call executes inside the OS sandbox (Landlock + seccomp) so untrusted user or Agent code never runs directly inside the Web server process.
+
+In the [SRHarness WebUI](web-ui.md#evaluator-configuration), you can edit, save, and test scripts in `context.evaluator/` directly in the browser, or ask the built-in **Evaluator Construction Agent** to write and verify one from a natural-language prompt.
+
+See the [API Reference](https://yuzhthu.github.io/SRHarness/reference/) for complete method signatures and [SRHarness Engine](engine.md) for expression syntax and graph evaluation semantics.

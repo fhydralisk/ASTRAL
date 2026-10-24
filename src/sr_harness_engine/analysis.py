@@ -92,7 +92,14 @@ def count_parameters(
 
 
 def parameter_values(expression: Expression) -> dict[str, Any]:
-    """Collect parameter values already bound into an expression."""
+    """Extract a dictionary of all parameter values already bound on nodes in ``expression``.
+
+    Args:
+        expression: Symbolic expression tree to inspect.
+
+    Returns:
+        dict[str, Any]: Mapping from parameter or grouped-parameter keys to their bound values.
+    """
     values: dict[str, Any] = {}
     for node in iter_preorder(expression):
         if isinstance(node, Parameter) and node.value is not None:
@@ -103,7 +110,14 @@ def parameter_values(expression: Expression) -> dict[str, Any]:
 
 
 def unbound_parameters(expression: Expression) -> list[str]:
-    """Return stable names for parameter nodes that have no fitted value."""
+    """Return the names of all parameter nodes in ``expression`` that do not yet have bound values.
+
+    Args:
+        expression: Symbolic expression tree to inspect.
+
+    Returns:
+        list[str]: Unique unbound parameter names in preorder appearance order.
+    """
     names = []
     for node in iter_preorder(expression):
         if isinstance(node, Parameter) and node.value is None:

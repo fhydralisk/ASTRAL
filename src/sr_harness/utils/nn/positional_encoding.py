@@ -6,7 +6,15 @@ from math import log
 
 class PositionalEncoding(nn.Module):
     # batch_first=True
+    """Sinusoidal positional encoding module for sequence and transformer models."""
     def __init__(self, d_emb, dropout=0.2, max_len=5000):
+        """Initialize the sinusoidal positional encoding table.
+
+        Args:
+            d_emb: Embedding dimension.
+            dropout: Dropout probability applied after adding positional encodings.
+            max_len: Maximum sequence length precomputed in the lookup buffer.
+        """
         super(PositionalEncoding, self).__init__()
         self.dropout = nn.Dropout(p=dropout)
         pe = torch.zeros(max_len, d_emb)
@@ -18,5 +26,13 @@ class PositionalEncoding(nn.Module):
         self.register_buffer('pe', pe)
 
     def forward(self, x):
+        """Add sinusoidal positional encodings to input tensor ``x``.
+
+        Args:
+            x: Input sequence tensor of shape ``[seq_len, batch_size, d_emb]``.
+
+        Returns:
+            torch.Tensor: Position-encoded tensor of the same shape.
+        """
         x = x + self.pe[:, :x.shape[1], :]
         return self.dropout(x)
