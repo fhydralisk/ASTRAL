@@ -1,21 +1,21 @@
 # Quick Start
 
-Before starting, complete [installation and provider configuration](install.md).
+Before starting, make sure you have completed [installation and provider configuration](install.md).
 
-## Use SRHarness to discover a known equation
+## 1. Recover a Known Equation from the CLI
 
-SRHarness provides a convenient test command that synthesizes data from a specified formula and checks whether the Agent can recover that formula from the data.
+The fastest way to see SRHarness in action is `sr-harness synthetic`. It generates synthetic data from a formula you provide, then challenges the Agent to rediscover that formula from the data alone.
 
-The following example generates data with three columns, `x1`, `x2`, and `y`, where the target variable `y` satisfies
+The command below generates 200 samples with columns `x1`, `x2`, and `y`, where the true relationship is:
 
 $$
-y = 1 + x_1^2 + 2x_1x_2.
+y = 1 + x_1^2 + 2x_1x_2
 $$
 
 !!! tip
-    Before running the command, configure the API key required by `--llm-provider`. The example below uses OpenRouter and therefore requires `OPENROUTER_API_KEY`. If you configured a different provider, update both `--llm-provider` and `--llm-model` accordingly.
+    Make sure you have configured the API key matching `--llm-provider`. The example below uses OpenRouter (`OPENROUTER_API_KEY`). If you use another provider such as DeepSeek or OpenAI, update `--llm-provider` and `--llm-model` accordingly.
 
-Then start the Agent with a small search budget:
+Run the Agent with a small search budget:
 
 ```bash
 sr-harness synthetic \
@@ -30,28 +30,30 @@ sr-harness synthetic \
   -R 1 -C 1 -L 10 -K 1
 ```
 
+The four budget flags control the shape of the search:
+
 | Option | Meaning |
 |---|---|
-| `-R` | Number of restart loops |
-| `-C` | Independent conversations per restart |
-| `-L` | Maximum refinement depth per conversation |
-| `-K` | Model samples at each step |
+| `-R` | **Restarts**: Number of restart loops seeded with the best formulas found so far |
+| `-C` | **Conversations**: Number of independent parallel branches per restart |
+| `-L` | **Refinement Depth**: Maximum number of iterative turns per branch |
+| `-K` | **Local Samples**: Number of model responses sampled at each turn |
 
-Run artifacts are written below `--save-path`. Common files are listed below:
+All run logs and results are saved under `--save-path` (`./logs/quick-start`):
 
 | File | Contents |
 |---|---|
-| `run.json` | Unique run identifier, startup arguments, and Agent configuration |
-| `nodes.jsonl` | Conversation nodes created during the search and the relationships between them |
-| `result.json` | Formulas explored by the Agent, including the candidates that form the Pareto Front and the best result |
-| `response.jsonl` | Raw model responses, token usage, and cost accounting |
-| `tool_calls.jsonl` | Tool-call records |
+| `run.json` | Run ID, CLI arguments, and Agent configuration |
+| `nodes.jsonl` | Every `(R, C, L, K)` conversation node and its parent links in the search tree |
+| `result.json` | All evaluated formulas, the Pareto Front, and the final best candidate |
+| `response.jsonl` | Raw LLM responses, token counts, and estimated cost |
+| `tool_calls.jsonl` | Detailed records of every tool invocation and its return value |
 
-## Use the WebUI workbench
+## 2. Use the Interactive WebUI Workbench
 
-SRHarness provides an interactive WebUI workbench for preparing data, configuring a task, and running a symbolic-regression search in the browser.
+For real-world datasets—where you often need to clean raw tables, compute derivatives, customize evaluation metrics, or steer the Agent mid-run—use the interactive WebUI workbench.
 
-The following command starts the WebUI locally on port `8000` and stores persistent workspaces and run records in `./workspaces` and `./logs/webui`, respectively:
+Start the server on port `8000` and store persistent workspaces and run logs in `./workspaces` and `./logs/webui`:
 
 ```bash
 sr-harness run \
@@ -61,19 +63,19 @@ sr-harness run \
   --save-path ./logs/webui
 ```
 
-Open `http://127.0.0.1:8000/` in a browser and follow the page through these three stages:
+Open `http://127.0.0.1:8000/` in your browser and follow the three workflow tabs at the top:
 
-1. **Data preparation:** upload data (or use one of the provided sample datasets), and ask the in-page Agent to clean, extend, or inspect it when needed.
-2. **Task setup:** assign variable roles, edit the variable and problem descriptions, and select or define an evaluation scheme.
-3. **Symbolic regression:** start the symbolic search and return to the first two stages when variables need to be extended or the evaluation scheme needs to change.
+1. **Data Preparation**: Upload raw files (or pick a built-in sample dataset) and ask the Data Preparation Agent to clean, transform, or validate your variables.
+2. **Task Setup**: Choose the target and input features, describe their scientific meaning, and select or customize an Evaluator.
+3. **Symbolic Regression**: Launch the search, watch the live reasoning timeline and search tree, and pause anytime to inject guidance or refine your variables and evaluation metric.
 
 ![SRHarness symbolic-regression workbench](https://yuzhthu.github.io/SRHarness/assets/webui-symbolic-regression.png)
 
-See [SRHarness WebUI](web-ui.md) for complete operating instructions.
+For a full walkthrough, see [SRHarness WebUI](web-ui.md).
 
-### Mount read-only inputs
+### Mount Read-Only Local Datasets
 
-For large datasets, use `--mount` to mount local data into the workspace:
+If your datasets are large or you want to ensure the Agent never modifies the original files, mount them with `--mount`:
 
 ```bash
 sr-harness run \
@@ -81,9 +83,8 @@ sr-harness run \
   --mount ./datasets ./papers/model.pdf
 ```
 
-Mounted data appears as read-only links in every conversation workspace. This prevents Agents from modifying the source data and avoids consuming additional disk space by copying it. If multiple files or directories are mounted, their names must not conflict.
+Mounted files and folders appear as read-only links inside every conversation workspace, saving disk space and protecting your source data. When mounting multiple paths, make sure their top-level filenames or directory names do not collide.
 
-## Use the hosted WebUI workbench
+## 3. Try the Hosted WebUI
 
-If you prefer not to deploy SRHarness locally, you can use our [hosted WebUI workbench](http://sim1.fiblab.tech:30000/) to try the data-preparation, task-setup, and symbolic-regression workflow directly in your browser.
-
+If you want to try SRHarness without installing anything locally, open our [hosted WebUI workbench](http://sim1.fiblab.tech:30000/) directly in your browser.

@@ -1,10 +1,12 @@
 # SRHarness Engine
 
-`sr_harness_engine` is the symbolic expression layer of SRHarness. It provides restricted parsing, canonical rendering, tree traversal, NumPy evaluation, parameter fitting, constant folding, and syntax for graphs, hypergraphs, and delays.
+`sr_harness_engine` is the symbolic expression layer of SRHarness. It safely parses mathematical strings into expression trees and provides canonical rendering, NumPy evaluation, parameter optimization, constant folding, and expressive syntax for **graphs**, **hypergraphs**, and **time delays**.
 
-The Engine describes mathematics only. Train/validation splits, candidate ranking, and task-specific rollout metrics belong to Evaluators and the SRHarness runtime.
+The Engine focuses purely on mathematical expressions and their numerical evaluation; dataset splitting, candidate ranking, and task-specific metrics (such as ODE trajectory rollouts) live in [Evaluators](evaluator.md) and the SRHarness runtime.
 
-## Quick start
+## 1. Quick Start
+
+Parse a parameterized formula, fit its constants to data, and evaluate predictions in a few lines of Python:
 
 ```python
 import numpy as np
@@ -15,17 +17,17 @@ target = 2.5 * np.sin(x) - 0.4
 model = engine.parse("param('a') * sin(x) + param('b')")
 fit = model.fit({"x": x}, target)
 
-print(fit.expression)          # expression with bound parameters
-print(fit.parameters)
+print(fit.expression)          # expression with fitted parameter values bound
+print(fit.parameters)          # {'a': ..., 'b': ...}
 print(fit.loss)
 print(fit.evaluate({"x": x})[:3])
 ```
 
-`parse()` uses a restricted Python AST. It does not call `eval` or execute arbitrary Python from a formula.
+Safety by design: `engine.parse()` validates a strict allowlist of Python AST nodes—it **never calls `eval()`** or executes arbitrary Python code.
 
-## Basic syntax
+## 2. Basic Syntax
 
-### Values, variables, and operators
+### Numbers, Variables, and Operators
 
 ```text
 1.5
@@ -38,9 +40,14 @@ x ** 2
 -x
 ```
 
-The language supports `+`, `-`, `*`, `/`, `**`, and unary minus. Use `**`, not Python's bitwise-XOR operator `^`, when calling `engine.parse()` directly.
+Supported operators are `+`, `-`, `*`, `/`, `**` (exponentiation), and unary minus `-`.
 
-Built-in elementwise functions are:
+!!! tip "Use `**` for Exponentiation"
+    In Python, `^` is bitwise XOR rather than exponentiation. While higher-level formula tools automatically normalize `^` to `**` when parsing model output, always use `**` when calling `engine.parse()` directly.
+
+### Built-in Mathematical Functions
+
+Built-in elementwise functions:
 
 ```text
 sin cos tan sinh cosh tanh
@@ -49,25 +56,34 @@ exp log log10 log2 sqrt abs
 sigmoid sign sec sech csc cot inv
 ```
 
-`log(x)` and its alias `ln(x)` are natural logarithms; `log10(x)` and its alias `lg(x)` are base-10 logarithms; `log2(x)` is the base-2 logarithm. Inverse trigonometric functions accept `arcsin`/`asin`, `arccos`/`acos`, and `arctan`/`atan`. Parsing always uses the former canonical names so aliases do not create duplicate candidates.
+Common aliases are normalized automatically so equivalent formulas do not create duplicate candidates:
 
-Expressions can also be constructed through Python:
+- Natural logarithm: `log(x)` and `ln(x)` (canonicalized to `log`);
+- Base-10 logarithm: `log10(x)` and `lg(x)` (canonicalized to `log10`);
+- Base-2 logarithm: `log2(x)`;
+- Inverse trigonometric functions: `arcsin`/`asin`, `arccos`/`acos`, and `arctan`/`atan` (canonicalized to `arcsin`, `arccos`, `arctan`).
+
+You can also build expressions programmatically in Python:
 
 ```python
 x = engine.Symbol("x")
 expression = engine.exp(-x) * engine.sin(2 * x)
 ```
 
-## Parameters
+## 3. Fitted Parameters
 
-### Named parameters
+### Named Scalar Parameters (`param`)
+
+Declare free constants to be optimized with `param('name')`:
 
 ```text
 param('slope') * x + param('bias')
 param('a', value=0.3) * x
 ```
 
-Occurrences with the same name refer to one parameter. `value` is both a default and an optimization initial value. `FitResult.expression` contains bound parameter values after fitting.
+- Repeated occurrences of `param('a')` with the same name refer to **the same shared parameter**;
+- `value` serves both as the default value before fitting and as the initial guess during optimization;
+- You can also supply initial guesses via the `initial` dictionary in `engine.fit()`:
 
 ```python
 fit = engine.fit(
@@ -78,13 +94,15 @@ fit = engine.fit(
 )
 ```
 
-### Grouped parameters
+### Category-Grouped Parameters (`grouped_param`)
+
+When a dataset includes a categorical variable (such as `label` indicating different experimental groups or materials) where each group follows the same formula structure with its own constant, use `grouped_param`:
 
 ```text
 grouped_param(label, name='rate') * x
 ```
 
-Samples in one category share a parameter, while categories receive separate values. Initial mappings and a default are supported:
+Each unique category receives its own fitted parameter value. You can also provide initial per-category values and a fallback default:
 
 ```text
 grouped_param(
@@ -95,7 +113,9 @@ grouped_param(
 ) * x
 ```
 
-## Parsing, rendering, and round trips
+## 4. Parsing, Rendering, and Safety Boundaries
+
+Expressions render cleanly to canonical strings or LaTeX and round-trip losslessly through `engine.parse()`:
 
 ```python
 expression = engine.parse("x ** (4 / 3) + sqrt(2)")
@@ -104,38 +124,40 @@ latex = engine.render(expression, latex=True)
 assert str(engine.parse(str(expression))) == str(expression)
 ```
 
-Attribute access, slicing, comprehensions, lambdas, arbitrary calls, and non-literal keyword arguments are rejected. Examples of invalid input are `np.sin(x)`, `__import__('os')`, `x[0:10]`, and `custom_python_function(x)`.
+To prevent code injection, the parser rejects attribute access (`.`), slicing (`[a:b]`), comprehensions, lambdas, arbitrary function calls, and non-literal keyword arguments (for example, `np.sin(x)`, `__import__('os')`, `x[0:10]`, and `custom_python_function(x)` are all rejected).
 
-## Evaluation
+## 5. Numerical Evaluation
 
 ```python
 expression = engine.parse("sin(x) + y ** 2")
 value = expression.evaluate({"x": x, "y": y})
 ```
 
-Variables follow NumPy broadcasting. Parameter values can be supplied separately:
+Input arrays follow standard NumPy broadcasting rules. Unbound parameter values can also be passed at evaluation time via `parameters`:
 
 ```python
 expression.evaluate({"x": x}, parameters={"a": 2.0, "b": -0.5})
 ```
 
-The equivalent module function is `engine.evaluate(expression, values)`.
+(The module-level helper `engine.evaluate(expression, values)` is equivalent.)
 
-## Expression trees
+## 6. Expression Trees and Traversal
 
-All nodes derive from `Expression`:
+Every AST node inherits from `Expression`:
 
-| Node | Meaning |
+| Node Class | Meaning |
 |---|---|
-| `Number` | Fixed numeric literal |
-| `Symbol` / `Variable` | Data variable |
-| `Parameter` | Named parameter |
-| `GroupedParameter` | Category-dependent parameter |
-| `Unary` / `Binary` | Arithmetic operation |
-| `Function` | Function call |
-| `Indexed` | Variable with free indices |
-| `Reduction` | Index reduction |
-| `Gather` / `Aggregate` / `RelationLift` | Relation operation |
+| `Number` | Numeric constant |
+| `Symbol` / `Variable` | Dataset variable |
+| `Parameter` | Named scalar parameter (`param`) |
+| `GroupedParameter` | Category-grouped parameter (`grouped_param`) |
+| `Unary` / `Binary` | Unary or binary arithmetic operation |
+| `Function` | Built-in mathematical function call |
+| `Indexed` | Variable with free indices (e.g., `x[i]`, `A[i, j]`) |
+| `Reduction` | Index reduction (e.g., `sum[j](...)`) |
+| `Gather` / `Aggregate` / `RelationLift` | Graph and hypergraph operations |
+
+Tree traversal and transformation helpers:
 
 ```python
 for node in expression.iter_preorder():
@@ -146,68 +168,72 @@ simplified = expression.fold_constants()
 parameter_count = expression.count_parameters()
 ```
 
-`operands` exposes direct children, while `replace(old, new)` creates a tree with identity-based replacement.
+`operands` returns direct child nodes, and `replace(old, new)` returns a new tree with identity-based node replacement.
 
-## Graph and hypergraph indices
+## 7. Graph and Hypergraph Index Syntax
 
-Relation arrays use target-first ordering:
+Relation arrays use **target-first** column ordering:
 
-- graph `A.shape == (E, 2)`: `(target, source)` rows;
-- ternary hypergraph `T.shape == (H, 3)`: `(target, source1, source2)` rows.
+- **Directed graph `A.shape == (E, 2)`**: Each row is `(target, source)`;
+- **Ternary directed hypergraph `T.shape == (H, 3)`**: Each row is `(target, source1, source2)`.
 
-### Message aggregation
+### Neighbor Message Aggregation (`sum`)
+
+To sum messages from source neighbors `j` into target node `i`:
 
 ```text
 sum[j](A[i, j], x[i] * x[j])
 ```
 
-`A[i, j]` binds column 0 to target index `i` and column 1 to source index `j`. `sum[j]` eliminates the source index and aggregates by the remaining `i`. Supply `num_nodes` so isolated nodes remain represented:
+Here `A[i, j]` binds column 0 to target index `i` and column 1 to source index `j`, while `sum[j]` reduces over `j` and aggregates results by `i`. Pass `num_nodes` during evaluation so isolated nodes with no incoming edges are preserved in the `(..., N)` output:
 
 ```python
 prediction = expression.evaluate(data, num_nodes=10)
 ```
 
-Node variables normally have shape `(..., N)`, edge fields `(..., E)`, and hyperedge fields `(..., H)`. Leading dimensions broadcast under NumPy rules; the final dimension is structural.
+Shape convention: node variables have shape `(..., N)`, edge fields `(..., E)`, and hyperedge fields `(..., H)`. Leading sample/time dimensions broadcast under NumPy rules, while the final dimension is structural.
 
-Hypergraph aggregation uses the same language:
+Hypergraph aggregation uses the exact same notation by reducing over both source indices `j, k`:
 
 ```text
 sum[j, k](T[i, j, k], x[i] * x[j] * x[k])
 ```
 
-### Gather and relation fields
+### Edge-Level `gather` and Relation Fields
 
-`gather` evaluates at nonzero relation coordinates and returns edge- or hyperedge-aligned output:
+Use `gather` to evaluate an expression on each edge or hyperedge without summing (returning shape `(..., E)` or `(..., H)`):
 
 ```text
 gather(A[i, j], x[i] + x[j])
 gather(T[i, j, k], x[i] * x[j] * x[k])
 ```
 
-An edge field can participate in aggregation:
+Edge-aligned variables `w` of shape `(E,)` or `(..., E)` can also participate directly in indexed sums:
 
 ```text
 sum[j](A[i, j], w[i, j] * x[i] * x[j])
 ```
 
-`w` may have shape `(E,)` or `(..., E)`. When multiple relations are present, `RelationField(w, relation="A")` identifies the matching coordinate table.
+(When multiple relations exist in the same context, `RelationField(w, relation="A")` explicitly binds `w` to relation `A`.)
 
-### Convenience syntax
+### Shorthand Syntax (`aggr` / `targ` / `sour`)
 
 ```text
 aggr(A * targ(x) * sour(x))
 aggr(A, targ(x) * sour(x))
 ```
 
-Both desugar to `sum[j](A[i, j], x[i] * x[j])`. Canonical rendering therefore emits index syntax rather than preserving the original sugar.
+Both shorthands desugar automatically into the canonical indexed form `sum[j](A[i, j], x[i] * x[j])`.
 
-## Delays
+## 8. Time Delays (`delay`)
+
+For delay differential equations (DDEs) or systems with memory, `delay(x, delta)` evaluates $x(t - \delta)$:
 
 ```text
 x + delay(x, delta)
 ```
 
-The default evaluator interpolates along the first axis to obtain `x(t - delta)` and returns `NaN` outside available history:
+By default, the evaluator interpolates linearly along axis 0 and returns `NaN` for times prior to the start of the trajectory:
 
 ```python
 prediction = engine.parse("delay(x, delta)").evaluate(
@@ -216,19 +242,19 @@ prediction = engine.parse("delay(x, delta)").evaluate(
 )
 ```
 
-ODE/DDE Evaluators can provide a custom `delay_resolver` backed by their own history representation.
+Custom ODE/DDE Evaluators can pass a custom `delay_resolver` to plug in their own history buffer or interpolation scheme.
 
-## Simplification and complexity
+## 9. Constant Folding and Complexity
 
 ```python
 assert str(engine.parse("(2 + 3) * x")) == "5 * x"
 ```
 
-Constant folding preserves readable fractions, powers, and named functions. `count_parameters()` counts fitted parameters; `len(expression)` counts expression nodes. The default Evaluator uses node count as `complexity`.
+Constant folding simplifies constant subexpressions while keeping fractions, powers, and named functions readable. `count_parameters()` counts free parameters, and `len(expression)` counts AST nodes (used by `DefaultEvaluator` as the default `complexity` metric).
 
-## Engine and Evaluators
+## 10. Integration with Evaluators
 
-`DefaultEvaluator` exposes five extension points:
+`DefaultEvaluator` connects the Engine to the rest of SRHarness through five methods:
 
 ```python
 split(context)
@@ -238,16 +264,14 @@ fit_candidate(f, context)
 evaluate_candidate(f, context)
 ```
 
-A general equality uses `fit/evaluate`; a target-eligible formula uses the candidate-specific entry points. An ODE Evaluator can therefore add integration and rollout metrics only for a formal `dx_dt = f(x, t)` candidate without treating every implicit equality as integrable dynamics.
+General equalities use `fit/evaluate`, whereas formal target candidates use `fit_candidate/evaluate_candidate`. Combined with `sr_harness.evaluator.utils`, this makes it straightforward to add ODE integration or domain-specific metrics. See [Formula Evaluation and Custom Evaluators](evaluator.md) and the [API Reference](https://yuzhthu.github.io/SRHarness/reference/).
 
-Metrics, random/OOD/chronological splitting, and ODE integration infrastructure are available from `sr_harness.evaluator.utils`. See [Formula Evaluation and Custom Evaluators](evaluator.md) for the Evaluator design and extension workflow, and the [API Reference](https://yuzhthu.github.io/SRHarness/reference/) for signatures.
+## 11. Behavior Test Suite
 
-## Executable specification
-
-Behavior tests provide runnable examples for basic expressions, parameters, relations, gather, delay, simplification, and custom Evaluators:
+Runnable examples covering basic expressions, parameters, graph/hypergraph relations, gather, delays, constant folding, and custom Evaluators live in `tests/behavior/`:
 
 ```bash
 pytest tests/behavior
 ```
 
-See the [API Reference](https://yuzhthu.github.io/SRHarness/reference/) for every public type and function.
+See the [API Reference](https://yuzhthu.github.io/SRHarness/reference/) for every public class and function.
