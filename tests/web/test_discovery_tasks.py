@@ -1,4 +1,5 @@
 import copy
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -26,6 +27,8 @@ def test_catalog(setup):
     assert next(t for t in tasks if t['name']=='Chen_NatureAstronomy2023')['available']
     assert not next(t for t in tasks if t['name']=='Feng_Science2022')['available']
     assert all(t['relation_zh'] for t in tasks)
+    assert all(t['description_zh'] and t['description_en'] for t in tasks)
+    assert all('preparation' not in t and 'evaluation' not in t for t in tasks)
 
 def test_readonly_and_prompts(setup):
     client, session, source = setup
@@ -48,7 +51,7 @@ def test_readonly_and_prompts(setup):
     assert all(data['prompts'].values())
     assert '-173' not in str(data['prompts'])
     assert '0.745' not in str(data['prompts'])
-    assert '可选' in data['prompts']['evaluator_agent']
+    assert '构建' in data['prompts']['evaluator_agent']
     assert client.post('/api/data/discovery-tasks/load', json={'name':'Chen_NatureAstronomy2023'}).status_code == 200
 
 def test_invalid_unavailable_busy_collision(setup):
@@ -118,14 +121,24 @@ def test_browser_transient_promotion_preserves_readonly_input(tmp_path, monkeypa
 
 def test_case_specific_selection_without_reference_answers():
     for case in discovery.CASES:
-        drafted=discovery.prompts(case,[], 'Generic system instructions')
-        assert case['task'] in drafted['data_agent']
-        assert case['task'] not in drafted['system_prompt']
+        drafted=discovery.prompts(case,[Path('sample-observations.dat')], 'Generic system instructions')
+        assert 'sample-observations.dat' in drafted['data_agent']
+        assert '系统接受的数据格式' in drafted['data_agent']
+        assert '记录' in drafted['data_agent'] or '包含' in drafted['data_agent']
+        assert '{inputs}' not in drafted['data_agent']
+        assert drafted['problem_description'] == drafted['user_prompt'] == case['task']
+        assert drafted['evaluator_agent'] == case['evaluation']
+        assert drafted['system_prompt'] == 'Generic system instructions'
         assert case['relation_zh'] not in str(drafted)
-        assert '审阅观测交接' not in str(drafted)
-        assert '启用观测准备工具' not in str(drafted)
-        assert '可复制' in drafted['data_agent']
-    chen=next(c for c in discovery.CASES if c['name']=='Chen_NatureAstronomy2023')['task']
-    assert 'SDSS' in chen and 'LAMOST' in chen and '重复' in chen
-    xiang=next(c for c in discovery.CASES if c['name']=='Xiang_Nature2022')['task']
-    assert '实际应用筛选' in xiang and '拟合得好不好' in xiang
+        assert len(drafted['data_agent']) < 300
+        assert len(drafted['problem_description']) < 80
+        for term in ['公式', '符号回归', '交接', '评测', '训练', '验证', '候选', 'objective',
+                     '只读输入', '不要修改原文件', 'context.data']:
+            assert term not in drafted['data_agent'], (case['name'], term)
+        for term in ['训练', '验证', '评分', 'SDSS', 'LAMOST']:
+            assert term not in drafted['problem_description'], (case['name'], term)
+    chen=next(c for c in discovery.CASES if c['name']=='Chen_NatureAstronomy2023')
+    assert all(term in chen['evaluation'] for term in ['SDSS', 'LAMOST', '独立检验', '重复', '金属丰度误差'])
+    xiang=next(c for c in discovery.CASES if c['name']=='Xiang_Nature2022')
+    assert '筛选条件' in xiang['preparation']
+    assert '族群选择边界' in xiang['evaluation']

@@ -103,7 +103,7 @@
 :root[data-theme="dark"] .primary,:root[data-theme="dark"] .data-agent-send:not(.stop),:root[data-theme="dark"] .workflow-next-button:not(:disabled),:root[data-theme="dark"] #data-ingest #data-upload{background:#1F2C7E;border-color:#1F2C7E;color:#fff}
 :root[data-theme="dark"] .primary:hover,:root[data-theme="dark"] .data-agent-send:not(.stop):hover,:root[data-theme="dark"] .workflow-next-button:not(:disabled):hover,:root[data-theme="dark"] #data-ingest #data-upload:hover{background:#2B3CA2;border-color:#2B3CA2}
 
-.demo-picker{width:min(980px,calc(100vw - 32px));max-height:88vh;overflow:auto}.demo-picker-header{position:sticky;top:0;z-index:1;background:var(--interactive-surface)}#demo-picker-status{padding:8px 18px;color:var(--muted);font-size:12px}#demo-picker-status:empty{display:none}.demo-option{gap:7px;min-height:260px;border:1px solid var(--line)}.demo-option b{font-size:14px}.demo-option .discovery-topic{font-size:11px;font-weight:700;color:var(--accent);letter-spacing:.08em}.discovery-paper{font-size:11px;color:var(--muted);line-height:1.5}.demo-option .discovery-stage{font-size:11px;color:var(--accent)}.discovery-conclusion-label{margin-top:5px;font-size:11px}.discovery-conclusion{margin:0;font-size:12px;line-height:1.6;overflow-wrap:anywhere}.demo-option .discovery-caveat{font-size:11px;line-height:1.6}.discovery-load{margin-top:auto;align-self:stretch}.discovery-load:disabled{opacity:.55;cursor:not-allowed}
+.demo-picker{width:min(980px,calc(100vw - 32px));max-height:88vh;overflow:auto}.demo-picker-header{position:sticky;top:0;z-index:1;background:var(--interactive-surface)}#demo-picker-status{padding:8px 18px;color:var(--muted);font-size:12px}#demo-picker-status:empty{display:none}.demo-option{gap:9px;min-height:0;border:1px solid var(--line)}.demo-option[aria-disabled="false"]{cursor:pointer}.demo-option[aria-disabled="true"]{cursor:default}.demo-option:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.demo-option b{font-size:14px}.discovery-card-header{display:flex;align-items:baseline;justify-content:space-between;gap:10px;width:100%}.demo-option .discovery-topic{flex-shrink:0;font-size:11px;font-weight:700;color:var(--accent);letter-spacing:.08em}.discovery-description{margin:0;font-size:11px;color:var(--muted);line-height:1.65}.discovery-citation{margin-left:auto;font-size:10px;color:var(--muted);line-height:1.5;text-align:right;text-decoration:none}.discovery-citation:hover,.discovery-citation:focus-visible{color:var(--accent);text-decoration:underline;text-underline-offset:2px}.discovery-summary{width:100%;font-size:12px;line-height:1.65}.discovery-summary p{margin:0}.discovery-summary .markdown-math{margin:8px 0 0;font-size:12px}.discovery-summary math{max-width:100%;margin:0}.discovery-unavailable{font-size:10px;color:var(--muted)}
 
 .agent-output{min-width:0;max-width:100%;width:100%;box-sizing:border-box}
 .reasoning-block{display:block;min-width:0;width:100%}
@@ -353,7 +353,7 @@ function renderDataApiKeyLabel(provider=$('data-provider').value,envVar=dataApiK
 function renderDataApiKeyVisibility(){const button=$('data-api-key-visibility'),visible=$('data-api-key').type==='text',label=_(visible?'apiKeyHide':'apiKeyShow');button.innerHTML='<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.2 10s2.8-5 7.8-5 7.8 5 7.8 5-2.8 5-7.8 5-7.8-5-7.8-5Z"/><circle cx="10" cy="10" r="2.2"/><path class="visibility-slash" d="m4 4 12 12"/></svg>';button.classList.toggle('is-visible',visible);button.title=label;button.setAttribute('aria-label',label);button.setAttribute('aria-pressed',String(visible))}
 function renderDemoPickerLanguage(){
   $('demo-picker-title').textContent=currentLocale==='en'?'Scientific discovery tasks':'选择科学发现任务';
-  $('demo-picker-help').textContent=currentLocale==='en'?'Read-only data mounts and editable agent prompts. Paper conclusions are for comparison only.':'只读加载数据并填入可编辑提示词；论文结论仅供对照，不自动发送给 Agent。';
+  $('demo-picker-help').textContent=currentLocale==='en'?'Choose a study to begin.':'选择一项研究，开始探索。';
   $('demo-picker-close').setAttribute('aria-label',_('settingsClose'));$('create-demo').title=$('demo-picker-title').textContent;
 }
 function applyLanguage(){
@@ -1679,14 +1679,31 @@ for(const slot of document.querySelectorAll('.plot-slot')){slot.ondragover=event
 document.addEventListener('click',event=>{if(!event.target.closest('.role-picker'))for(const picker of document.querySelectorAll('.role-picker[open]'))picker.open=false;if(!event.target.closest('.file-actions'))for(const menu of document.querySelectorAll('.file-actions[open]'))menu.open=false;if(!event.target.closest('.conversation-item-actions'))for(const menu of document.querySelectorAll('.conversation-item-actions[open]'))menu.open=false;if(!event.target.closest('.candidate-number-format'))$('candidate-number-format').open=false});
 let discoveryTasks=[],discoveryLoading=false;
 function renderDiscoveryTasks(){
+  const references={
+    Chen_NatureAstronomy2023:{citation:'(Chen et al., Nature Astronomy, 2023)',summary:String.raw`基于双模 RR Lyrae 的周期与 SDSS 光谱金属丰度数据，得到金属丰度标定公式：
+$$[\mathrm{Fe}/\mathrm{H}]=-173\operatorname{log}_{10}\!\left(\frac{P_{1\mathrm{O}}/P_{\mathrm{F}}}{0.745}\right)-6.62\operatorname{log}_{10}\!\left(\frac{P_{1\mathrm{O}}}{0.37}\right)-1.76$$`},
+    Xiang_Nature2022:{citation:'(Xiang & Rix, Nature, 2022)',summary:String.raw`基于恒星年龄、化学丰度与轨道参数目录，得到厚盘族群的窄年龄—金属丰度序列，可近似描述为：
+$$⟨τ⟩\approxτ_0+a[\mathrm{Fe}/\mathrm{H}]$$`},
+    Li_Nature2023:{citation:'(Li et al., Nature, 2023)',summary:String.raw`基于恒星质量、金属丰度及动力学族群数据，得到初始质量函数的幂律描述，其斜率随丰度与时代变化：
+$$\frac{dN}{dM}∝ M^{-\alpha},\quad\alpha=\alpha([\mathrm{Fe}/\mathrm{H}],t)$$`},
+    Feng_Science2022:{citation:'(Feng et al., Science, 2022)',summary:String.raw`基于校准射电爆发的频率分辨偏振数据，得到退偏振关系，并约束磁离子环境的变化：
+$$\frac{p}{p_0}=\operatorname{exp}\!\left(-2\sigma_{\mathrm{RM}}^2\lambda^4\right)$$`},
+    Li_Nature2021:{citation:'(Li et al., Nature, 2021)',summary:String.raw`基于 1652 次重复 FRB 的爆发表，得到由对数正态与广义柯西分量组合描述的能量分布：
+$$N(E)=\frac{N_0}{\sqrt{2\pi}\sigma_E E}\operatorname{exp}\!\left[-\frac{(\operatorname{log} E-\operatorname{log} E_0)^2}{2\sigma_E^2}\right]+\frac{\epsilon_E}{1+(E/E_0)^{\alpha_E}}$$`},
+    Chiang_NatureAstronomy2026:{citation:'(Chiang, Nature Astronomy, 2026)',summary:String.raw`基于宇宙谱线背景统计与气体转换模型，得到宇宙平均分子气体密度随红移演化的拟合：
+$$\Omega_{\mathrm{H}_2}(z)\approx\frac{1.9\times10^{-4}(1+z)^{2.3}}{1+[(1+z)/2.8]^{6.5}}$$`},
+    Kainulainen_Science2014:{citation:'(Kainulainen et al., Science, 2014)',summary:String.raw`基于分子云消光图重建的体密度统计（本例提供论文观测表），得到密度分布及恒星形成阈值的约束：
+$$p(s)∝\operatorname{exp}\!\left[-\frac{(s-\mu)^2}{2\sigma_s^2}\right],\quad n_{\mathrm{crit}}\approx(5\pm2)\times10^3\,\mathrm{cm}^{-3}$$`},
+  };
   const options=document.querySelector('#demo-picker .demo-options');options.replaceChildren();
   for(const task of discoveryTasks){
-    const card=el('article',undefined,'demo-option');card.dataset.discoveryTask=task.name;
-    const topic=el('span',task.topic,'discovery-topic'),title=el('b',task.subject_zh),paper=el('a',task.title,'discovery-paper');
-    paper.href=task.publisher_url;paper.target='_blank';paper.rel='noopener noreferrer';
-    const stage=el('span',task.data_stage,'discovery-stage'),heading=el('strong',currentLocale==='en'?'Paper conclusion':'论文主要结论','discovery-conclusion-label'),conclusion=el('p',task.relation_zh,'discovery-conclusion'),caveat=el('span',task.caveat_zh,'discovery-caveat');
-    const button=el('button',task.available?(currentLocale==='en'?'Load task':'加载任务'):(currentLocale==='en'?'Data unavailable':'数据尚未就绪'),'primary discovery-load');button.type='button';button.disabled=!task.available||discoveryLoading;
-    button.onclick=()=>loadDiscoveryTask(task.name);card.onclick=event=>{if(task.available&&!event.target.closest('a,button'))loadDiscoveryTask(task.name)};card.append(topic,title,paper,stage,heading,conclusion,caveat,button);options.append(card);
+    const reference=references[task.name],card=el('article',undefined,'demo-option'),enabled=task.available&&!discoveryLoading;card.dataset.discoveryTask=task.name;card.tabIndex=enabled?0:-1;card.setAttribute('aria-disabled',String(!enabled));card.setAttribute('aria-label',(currentLocale==='en'?'Load study: ':'加载研究：')+task.subject_zh);
+    const header=el('div',undefined,'discovery-card-header'),topic=el('span',task.topic,'discovery-topic'),citation=el('a',reference.citation,'discovery-citation'),title=el('b',task.subject_zh);
+    citation.href=task.publisher_url;citation.target='_blank';citation.rel='noopener noreferrer';citation.title=task.title;header.append(topic,citation);
+    const description=el('p',currentLocale==='en'?task.description_en:task.description_zh,'discovery-description'),summary=el('div',undefined,'discovery-summary markdown-rendered');summary.append(markdownFragment(reference.summary));
+    card.onclick=event=>{if(enabled&&!event.target.closest('a'))loadDiscoveryTask(task.name)};
+    card.onkeydown=event=>{if(enabled&&event.target===card&&['Enter',' '].includes(event.key)){event.preventDefault();loadDiscoveryTask(task.name)}};
+    card.append(header,title,description,summary);if(!task.available)card.append(el('span',currentLocale==='en'?'Data unavailable':'数据尚未就绪','discovery-unavailable'));options.append(card);
   }
 }
 async function openDiscoveryPicker(){
@@ -1697,15 +1714,30 @@ function applyDiscoveryPrompts(p){
   clearTimeout(promptRefreshTimer);promptRefreshToken+=1;
   promptEdited={user:true,system:true};promptDefaults={...promptDefaults,problem_description:p.problem_description,system_prompt:p.system_prompt,user_prompt:p.user_prompt};
   $('data-agent-input').value=p.data_agent;$('problem-description').value=p.problem_description;$('evaluator-agent-input').value=p.evaluator_agent;$('system-prompt').value=p.system_prompt;$('prompt').value=p.user_prompt;
+  const evaluatorAgent=document.querySelector('.evaluator-agent'),evaluatorToggle=$('evaluator-agent-toggle'),open=Boolean(p.evaluator_agent?.trim());if(evaluatorAgent&&evaluatorToggle){evaluatorAgent.hidden=!open;evaluatorToggle.setAttribute('aria-expanded',String(open))}
   renderDataAgentControl();renderEvaluatorAgentControl();renderComposerControl();renderWorkflowNextControls();requestAnimationFrame(fitProblemDescription);
 }
 async function loadDiscoveryTask(name){
   if(discoveryLoading)return;discoveryLoading=true;renderDiscoveryTasks();$('demo-picker-status').textContent=currentLocale==='en'?'Mounting read-only inputs…':'正在只读加载数据…';
   try{
-    const result=await api('/api/data/discovery-tasks/load',{name});const p=result.prompts;
-    applyDiscoveryPrompts(p);
+    const generation=serverSessionGeneration,available=await api('/api/session/capabilities',undefined,'GET');
+    if(generation!==serverSessionGeneration)return;
+    const result=await api('/api/data/discovery-tasks/load',{name});
+    if(generation!==serverSessionGeneration)return;
+    const data=session.data_agent_settings,searchOnly=['prepare-discovery-handoff','fit-before-ranking','stable-observational-search'];
+    const prepared=await api('/api/data/agent/settings',{tools:data.tools.filter(name=>!['validate_discovery_contract','calibrate_observation_scatter'].includes(name)),skills:(data.skills||[]).filter(name=>!searchOnly.includes(name))},'PUT');
+    if(generation!==serverSessionGeneration)return;syncSession(prepared);
+    const configured=await api('/api/session/settings',{tools:available.default_tools,skills:available.default_skills.filter(name=>![...searchOnly,'validate-observational-discovery'].includes(name)),force_initial_diagnostics:false,ranking_metric:'mse',larger_is_better:false});
+    if(generation!==serverSessionGeneration)return;syncSession(configured);
+    const evaluator=await api('/api/evaluator?selected=default',undefined,'GET');
+    if(generation!==serverSessionGeneration)return;
+    await api('/api/evaluator',{selected:'default',source:evaluator.source},'PUT');
+    if(generation!==serverSessionGeneration)return;
+    await loadEvaluatorConfiguration();await syncSettingsForm();
+    if(generation!==serverSessionGeneration)return;
+    applyDiscoveryPrompts(result.prompts);
     $('demo-picker').close();filesSignature='';await refreshFiles();selectCenterTab('prepare');
-    notice(currentLocale==='en'?'Read-only data loaded. Review and send the preparation prompt; evaluator construction is optional.':'已只读加载数据并填入提示词。确认后发送给数据处理 Agent；评测器构建 Agent 可跳过。');
+    notice(currentLocale==='en'?'Read-only inputs and stage-specific prompts are ready. Prepare the data, then build and confirm the evaluator before searching.':'已只读加载数据并填入各阶段提示词。请先整理数据，再构建并确认评测器。');
   }catch(error){$('demo-picker-status').textContent=error.message}
   finally{discoveryLoading=false;renderDiscoveryTasks()}
 }
