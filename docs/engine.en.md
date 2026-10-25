@@ -23,7 +23,7 @@ print(fit.loss)
 print(fit.evaluate({"x": x})[:3])
 ```
 
-Safety by design: `engine.parse()` validates a strict allowlist of Python AST nodes—it **never calls `eval()`** or executes arbitrary Python code.
+Safety boundary: `engine.parse()` validates an allowlist of Python AST nodes—it **does not call `eval()`** or execute arbitrary Python code.
 
 ## 2. Basic Syntax
 

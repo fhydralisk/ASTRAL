@@ -1,21 +1,18 @@
-"""
-LLM-SRBench 评估脚本 (浓缩版)
+"""Command-line entry point for evaluating symbolic-regression algorithms on LLM-SRBench.
 
-将 benchmark 评估流程整合为单个脚本:
-  1) 数据读取与预处理
-  2) 调用符号回归函数 (placeholder)
-  3) 评估结果
-  4) 汇总多次运行的结果
+Loads benchmark datasets and ground-truth equations, runs the selected algorithm
+on each problem, computes in-domain (ID), out-of-domain (OOD), and symbolic-equivalence
+metrics, and writes per-dataset and overall summary reports.
 
-Usage:
-    # 测试单个问题
-    astral benchmark --exp_name test_my_algorithm --datasets lsrtransform --problem_names II.6.15b_1_0
-    # 测试单个数据集
-    astral benchmark --exp_name test_my_algorithm --datasets bio_pop_growth
-    # 测试一系列问题
-    astral benchmark --problem_names MatSci2 MatSci19 CRK28 BPG1 PO6
-    # 测试特定算法
-    astral benchmark --algorithm linear --exp_name test_linear_fitting
+Examples:
+    # Evaluate SRHarness on a single problem
+    astral benchmark --algorithm sr_harness --datasets lsrtransform --problem_names II.6.15b_1_0
+
+    # Evaluate on an entire domain split
+    astral benchmark --algorithm sr_harness --datasets bio_pop_growth
+
+    # Evaluate across selected problem IDs
+    astral benchmark --algorithm sr_harness --problem_names MatSci2 MatSci19 CRK28 BPG1 PO6
 """
 
 from __future__ import annotations
@@ -108,19 +105,19 @@ def setup_parser(parser: argparse.ArgumentParser | None = None) -> argparse.Argu
         "Enable debug mode (verbose + raise caught exceptions)."
     ))
     parser.add_argument("--data_root", type=str, default=str(Path("data") / "llm-srbench-data"), help=(
-        "HDF5 数据文件所在目录"
+        "Directory containing LLM-SRBench Parquet metadata and HDF5 sample files."
     ))
     parser.add_argument("--datasets", type=str, default=None, nargs="+", choices=list(DATASET_SPLITS.keys()), help=(
-        "数据集名称, 默认评估全部数据集"
+        "Benchmark dataset splits to evaluate. Evaluates all splits by default."
     ))
     parser.add_argument("--problem_names", type=str, default=None, nargs="+", help=(
-        "仅评估指定问题（方程）ID, 默认评估全部问题"
+        "Specific problem (equation) IDs to evaluate. Evaluates all problems by default."
     ))
     parser.add_argument("--skip_existing", action=argparse.BooleanOptionalAction, default=False, help=(
-        "如果结果文件已存在则跳过评估"
+        "Skip problems that already have a saved result record."
     ))
     parser.add_argument("--skip_successful", action=argparse.BooleanOptionalAction, default=True, help=(
-        "如果结果文件已存在且成功则跳过评估"
+        "Skip problems that already have a successful saved result record."
     ))
     parser.add_argument("--anonymize", action=argparse.BooleanOptionalAction, default=False, help=(
         "Anonymize agent-facing variables as x1..xn and target as y."

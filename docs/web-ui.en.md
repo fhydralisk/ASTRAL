@@ -80,7 +80,7 @@ Default Agent tools and their boundaries:
 
 | Tool | Capability and Boundary |
 |---|---|
-| `workspace_shell` | Runs a built-in command parser supporting `ls`, `cat`, `grep`, `cp`, `mv`, `rm`, `mkdir`, `gzip`, `unzip`, and `tar` inside the workspace. It **never invokes a system shell** and blocks arbitrary binaries, command substitution, redirection, `..` traversal, and symlinks escaping the workspace. |
+| `workspace_shell` | Runs a built-in command parser supporting `ls`, `cat`, `grep`, `cp`, `mv`, `rm`, `mkdir`, `gzip`, `unzip`, and `tar` inside the workspace. It **does not invoke a system shell** and blocks arbitrary binaries, command substitution, redirection, `..` traversal, and symlinks escaping the workspace. |
 | `workspace_code_executor` | Executes Python (NumPy, SciPy, pandas, etc.) inside an ephemeral OS sandbox enforced by Linux Landlock and seccomp. It can read/write the active conversation workspace and read `--mount` inputs, but networking and child-process creation are blocked and CPU/memory/output are strictly bounded. |
 | `web_search` / `web_fetch` | Queries public search engines or fetches public HTTP/HTTPS pages (`web_fetch` blocks private IP ranges, credentialed URLs, and unsafe redirects). |
 | `read_pdf` | Extracts text from workspace PDFs or public URLs without modifying files. |
@@ -96,7 +96,7 @@ During symbolic regression, `code_executor`, `evaluate_code`, custom Tools, and 
 1. **CLI mounts (`sr-harness run --mount PATH ...`)**: Application-enforced read-only inputs that cannot be unlocked from the WebUI;
 2. **Workspace Lock (`Lock` in the file menu)**: Removes write permission bits to prevent accidental modification by workspace tools.
 
-For kernel-enforced read-only protection on shared servers, run SRHarness under an unprivileged system account and expose source data via a read-only bind mount:
+For kernel-enforced read-only protection on shared servers, have an administrator create a read-only bind mount first, then run SRHarness under a dedicated unprivileged account (without `sudo` or `CAP_SYS_ADMIN` privileges):
 
 ```bash
 sudo mount --bind /data/original /mnt/srh-original

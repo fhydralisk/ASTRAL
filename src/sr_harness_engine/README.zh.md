@@ -1,21 +1,21 @@
 # SRHarness Engine 符号模型语言规范
 
-> 网页版长文档（含快速开始、完整示例和自动生成的 API Reference）：[`docs/engine.md`](../../docs/engine.md)
+> 网页版完整指南与自动生成的 API Reference 请参阅 [`docs/engine.md`](../../docs/engine.md)。
 
-`sr_harness_engine` 是 SRHarness 的底层符号模型引擎。它负责用结构化表达式描述数学模型，提供安全解析、规范渲染、数值求值和参数优化，并为后续的复杂度、EIC、TopK、Pareto Front、等价判断和模型变换提供统一的表达式树。
+`sr_harness_engine` 是 SRHarness 的底层符号表达式引擎，负责将数学公式字符串安全地解析为结构化语法树（AST），并提供规范化字符串/LaTeX 渲染、NumPy 向量化求值、常数优化拟合以及面向**有向图**、**超图**与**时延（Delay）**的扩展下标语法。
 
-本引擎描述模型的右端项（RHS）。`y = f(x)`、`dx/dt = f(x)`、节点动力学或轨迹积分等左端项和实验含义由 SRHarness 的问题定义与评估器负责。评估器同时负责数据划分、参数拟合协议、积分方式和评价指标。
+在职责划分上，本引擎专注于描述和计算方程的**右端项（RHS）**；至于左端目标变量（如 `y = f(x)`、`dx/dt = f(x)`）、数据集切分、ODE 轨迹积分以及评价指标汇总，则由上层的 [Evaluator](../../docs/evaluator.md) 与 SRHarness 运行时负责。
 
-## 设计原则
+## 1. 核心设计原则
 
-1. 正式候选模型必须拥有结构化表达式，不能用任意 Python 代码代替。
-2. 表层语法应接近人类书写的数学表达式，底层节点必须具有明确且可检查的语义。
-3. 网络、超图和更高阶关系共用“指标绑定与缩并”机制，不分别引入互不兼容的专用语言。
-4. 变量、待拟合参数和字面数值是不同节点。引擎不会把拼错或缺失的变量自动解释成参数。
-5. 字符串解析只接受本规范列出的语法，不调用 `eval`，也不执行任意 Python 代码。
-6. 表达式的输出形状由自由指标和输入值共同决定；被 `sum[...]` 消去的指标不再出现在结果中。
+1. **结构化表示优先**：所有正式候选公式都必须表示为可遍历、可分析的结构化表达式树（`Expression`），而非黑盒 Python 函数。
+2. **贴近直觉且语义严格**：表层写法尽量贴近日常数学与 Python 算术习惯，同时每个语法树节点都具备明确、可静态检查的计算语义。
+3. **统一的指标缩并机制**：图（二元关系）、超图（三元及更高阶关系）共用同一套“显式下标绑定 + 求和归约（`sum`）”模型，无需引入互不兼容的专用 DSL。
+4. **严格区分变量、参数与常数**：数据集变量（`Symbol`/`Variable`）、待拟合自由参数（`param`/`grouped_param`）与字面数值（`Number`）是三类截然不同的节点；引擎本身不会把拼写错误的变量名悄悄当成待拟合参数。
+5. **安全解析边界**：字符串解析基于受限 AST 白名单，不调用 `eval()`，也不执行任何任意 Python 代码。
+6. **由自由下标决定输出维度**：表达式求值结果的末尾结构维度由尚未被 `sum[...]` 归约消去的自由下标按首次出现顺序决定。
 
-## Python API
+## 2. Python 快速示例
 
 ```python
 import numpy as np
@@ -29,12 +29,12 @@ fit = expression.fit(
     2 * np.arange(10, dtype=float) + 1,
 )
 
-print(expression)             # 规范化字符串
-print(fit.parameters)         # 命名参数及其拟合值
+print(expression)             # 规范化公式字符串
+print(fit.parameters)         # 拟合得到的命名参数字典 {'alpha': ..., 'beta': ...}
 prediction = fit.predict({"x1": np.array([10.0, 11.0])})
 ```
 
-也可以直接构造表达式：
+除了从字符串解析，也可以使用 `Symbol` 在 Python 中直接组合表达式：
 
 ```python
 x1 = engine.Symbol("x1")
@@ -42,16 +42,16 @@ x2 = engine.Symbol("x2")
 expression = 2.0 * engine.sin(x1) + x2
 ```
 
-`Symbol` 可以携带默认值，但通常推荐在 `evaluate()` 时显式传入数据：
+`Symbol` 支持绑定默认数组（测试时很方便），但在正式工具与 Evaluator 中建议始终在 `evaluate(data)` 时显式传入数据字典：
 
 ```python
 x = engine.Symbol("x", value=np.array([1.0, 2.0]))
 assert np.allclose((x + 1).evaluate(), [2.0, 3.0])
 ```
 
-## 标量、变量与非线性函数
+## 3. 标量运算、初等函数与常量折叠
 
-普通算术表达式使用 Python 风格的 `+`、`-`、`*`、`/` 和 `**`：
+基础算术使用标准的 Python 运算符 `+`、`-`、`*`、`/` 和乘方 `**`：
 
 ```text
 x1 + x2
@@ -59,45 +59,55 @@ x1 + x2
 x1 ** 2 + exp(-x2)
 ```
 
-当前支持以下逐元素函数：
+内置支持的逐元素（Elementwise）初等函数包括：
 
 ```text
-abs  sin  cos  tan  tanh  exp  log  log10  log2  sqrt  sigmoid
+abs  sin  cos  tan  sinh  cosh  tanh
+arcsin  arccos  arctan
+exp  log  log10  log2  sqrt
+sigmoid  sign  sec  sech  csc  cot  inv
 ```
 
-其中 `log`（别名 `ln`）为自然对数，`log10`（别名 `lg`）为十进制对数，`log2` 为二进制对数。反三角函数支持 `arcsin`/`asin`、`arccos`/`acos` 和 `arctan`/`atan`，并在解析时规范化为 `arc*` 名称。
+常用函数别名会在解析时自动归一为标准名称：
 
-字面数字是固定常数，不参与参数优化。
+- 自然对数：`log`（别名 `ln`）；
+- 常用对数（以 10 为底）：`log10`（别名 `lg`）；
+- 二进制对数：`log2`；
+- 反三角函数：`arcsin`（别名 `asin`）、`arccos`（别名 `acos`）、`arctan`（别名 `atan`）。
 
-解析器会折叠不依赖变量或待拟合参数的加、减、乘法子表达式，但不会调整符号项的顺序。除法、幂和函数调用保留原结构，以免 `2 / 3`、`4 / 3` 或 `sqrt(2)` 这类精确且有意义的常量退化为浮点小数：
+公式中的字面数字（如 `2.0`、`3`）视为固定常数，不参与参数优化。解析器会自动折叠不依赖变量和待拟合参数的纯常数加、减、乘法子表达式，但会刻意保留除法、幂次和函数调用形式（如 `2 / 3`、`x ** (4 / 3)`、`sqrt(2)`），避免有意义的精确有理数或根式退化为近似浮点数：
 
 ```python
 expression = engine.parse("y + (2 * 3) * x")
 assert str(expression) == "y + 6 * x"
 ```
 
-## 命名参数
+## 4. 待拟合参数（`param` 与 `grouped_param`）
 
-待拟合参数必须用 `param` 显式声明：
+### 命名标量参数：`param`
+
+需要由数值优化器拟合的自由标量参数必须用 `param` 显式声明：
 
 ```text
 param('alpha', value=0.3) * x1 / (1 - param('alpha')) + param('beta')
 ```
 
-同名 `param` 表示同一个参数。任意一次声明可以提供 `value` 作为求值默认值和优化初值；同一表达式中不能为同名参数提供冲突的初值。没有值的参数在拟合前不能求值，拟合时默认以 `1.0` 初始化，也可以通过 `initial` 指定：
+- 同一表达式中多次出现的同名 `param('alpha')` 共享同一个参数值；
+- 可选的 `value` 同时作为未拟合时的默认求值初值和优化器的初始猜测值（同一表达式内对同名参数声明冲突的 `value` 会直接报错）；
+- 未指定 `value` 的参数在拟合前不能直接求值；拟合时默认以 `1.0` 作为初值，也可通过 `initial` 字典传入自定义初值：
 
 ```python
 fit = expression.fit(data, target, initial={"beta": 0.0})
 value = fit.expression.evaluate(data)
 ```
 
-拟合目前以均方误差为目标，并通过 `scipy.optimize.minimize` 优化。`fit()` 返回 `FitResult`，不会修改原表达式；其中的 `fit.expression` 已绑定全部拟合参数，可直接求值。如果上下文包含 `data`、`target` 和可选的 `num_nodes`，也可以直接写 `expression.fit(context).expression` 与 `expression.evaluate(context)`。
+`expression.fit(...)` 默认最小化均方误差（MSE，基于 `scipy.optimize.minimize`），返回包含已绑定参数新表达式 `fit.expression` 的 `FitResult` 对象，不会原地修改原表达式。若传入的对象自带 `data`、`target` 和可选的 `num_nodes`（如 `AgentContext`），也可简写为 `expression.fit(context)` 与 `expression.evaluate(context)`。
 
-`expression.count_parameters(data)` 返回模型中独立待拟合数值的数量。同名 `param` 只计一次，固定数值不计入；`grouped_param` 在类别数据可用时按不同类别的数量计数。
+`expression.count_parameters(data)` 用于统计表达式中独立待拟合参数的总数（同名 `param` 只计一次，字面常数不计入；`grouped_param` 在传入数据时按实际离散类别数计入）。
 
-## 分组参数
+### 按类别分组参数：`grouped_param`
 
-类别字段可以决定参数取值：
+当数据集中包含离散分组或类别变量 `s`（如不同实验批次、不同材料）时，可用 `grouped_param` 为每个类别分别拟合一个专属参数：
 
 ```text
 grouped_param(s) * x
@@ -105,82 +115,69 @@ grouped_param(s, name='slope', default=0.0) * x
 grouped_param(s, name='slope', value={'A': 1.0, 'B': 2.0}) * x
 ```
 
-同一类别的样本共享一个参数，不同类别分别优化。未指定名称时，简单分组变量 `s` 对应的参数键为 `grouped:s`。没有已知值或 `default` 的分组参数必须先拟合才能求值。
+同一类别下的样本共享同一个系数值，不同类别各自独立优化。省略 `name` 时，分组变量 `s` 的默认参数键名为 `grouped:s`。
 
-## 网络与超图的显式指标语法
+## 5. 图与超图的显式下标语法
 
-关系使用整数表表示。`A.shape == (E, 2)` 表示二元关系，各列依次为 `(target, source)`；`T.shape == (H, 3)` 表示三元关系，各列依次为 `(target, source1, source2)`。表达式中的指标按照关系表的列顺序绑定：
+网络与高阶交互关系通过整数端点表表示，约定**目标节点（Target）在第 0 列、源节点（Source）在后续列**：
+
+- **二元有向图 `A.shape == (E, 2)`**：每行依次为 `(target, source)`；
+- **三元有向超图 `T.shape == (H, 3)`**：每行依次为 `(target, source1, source2)`。
+
+表达式中的下标按关系表的列顺序依次绑定：
 
 ```text
 x[i] + sum[j](A[i, j], x[i] * x[j])
 ```
 
-含有指标的表达式必须显式传入 `num_nodes`，它不会从关系表的最大编号推断，因此孤立节点也会被保留：
+求值含下标的表达式时必须显式传入节点总数 `num_nodes`（引擎不会仅从边表中的最大节点编号猜测总节点数，从而保证没有任何入边的孤立节点也能完整保留）：
 
 ```python
 prediction = expression.evaluate(data, num_nodes=10)
 ```
 
-求值过程为：
+上面公式的求值过程分为五步：
 
-1. `A[i, j]` 将目标指标 `i`、源指标 `j` 绑定到 `A` 的第 0、1 列；
-2. `x[i]` 和 `x[j]` 根据相应列收集节点值；
-3. `sum[j]` 对 `j` 缩并，按仍然自由的 `i` 聚合；
-4. 输出重新排列为节点轴，孤立节点位置保留为零；
-5. 外部的 `x[i]` 是具有自由节点指标的完整节点数组。
+1. `A[i, j]` 将目标下标 `i` 绑定到 `A` 的第 0 列，源下标 `j` 绑定到第 1 列；
+2. `x[i]` 与 `x[j]` 按各条边的端点索引收集对应的节点状态；
+3. `sum[j]` 沿源下标 `j` 求和归约，将结果按自由目标下标 `i` 聚合到各个目标节点；
+4. 聚合结果排列为长度为 `num_nodes` 的节点轴（孤立节点处取值为 `0`）；
+5. 与外层的节点项 `x[i]` 按相同的自由下标 `i` 对齐相加。
 
-变量的最后一维是结构维。节点变量为 `(..., N)`，边字段为 `(..., E)`，超边字段为 `(..., H)`，其余前导维使用 NumPy 广播。所有非单例结构变量都必须显式写出指标；例如，含有 `x[i]` 的公式不能同时使用未索引的 `x`。
+**维度与广播约定**：结构化变量的最后一维固定为结构维——节点变量形状为 `(..., N)`，边属性为 `(..., E)`，超边属性为 `(..., H)`，前面的样本或时间维遵循标准 NumPy 广播规则。同一公式中凡是涉及结构维的变量都必须显式写出下标（例如已使用 `x[i]` 的公式中不能混用不带下标的 `x`）。
 
-最终表达式可以保留多个自由指标。自由指标按首次出现顺序成为结果末尾的稠密结构轴：`x[i] + x[j]` 返回 `(..., N, N)`，`x[i] * x[j] * x[k]` 返回 `(..., N, N, N)`。这类结果需要枚举全部 `N^r` 个指标组合。
+如果最终表达式保留了多个自由下标，它们会按首次出现顺序展开为结果末尾的稠密维度（例如 `x[i] + x[j]` 输出形状为 `(..., N, N)`，`x[i] * x[j] * x[k]` 输出形状为 `(..., N, N, N)`）。
 
-`sum` 的第一个参数在数学上是稀疏数值因子，第二个参数是被求和的表达式。`sum[j](A[i, j], eq)` 等价于 `sum[j](A[i, j] * eq)`，但前一种写法允许求值器只请求关系坐标覆盖的 `eq` 分量。更高阶关系采用相同规则：
+在 `sum[j](A[i, j], eq)` 中，第一个参数 `A[i, j]` 是稀疏关系掩码/权重因子，第二个参数 `eq` 是仅需在存在边的位置求值的被加数。三元超图及全局节点求和也可自然组合：
 
 ```text
 x[i]
 + sum[j](A[i, j], x[i] * x[j])
 + sum[j, k](T[i, j, k], x[i] * x[j] * x[k])
++ sum[j](A[i, j], x[i] * sum[k](x[k]) * x[j])
 ```
 
-求和指标不必来自当前关系。下面的内层 `sum[k]` 对 `x` 的完整节点轴做全局求和，然后将结果广播到外层边关系：
+关系项自身也支持代数运算（如 `A1[i, j] + A2[i, j]` 表示边叠加，`A1[i, j] * A2[i, j]` 表示边交集）。即使对关系做平移或非线性变换（如 `A[i, j] + 1`、`exp(A[i, j])`），求值器依然通过记录背景默认值 `fill_value` 与稀疏偏离坐标来计算，避免构造稠密的 $N \times N$ 矩阵。同一关系表内的重复边按集合语义自动去重；若需表示重边权重，请使用独立的边属性变量。
+
+### `gather`：提取边级或超边级特征
+
+当需要在每条边或超边上计算特征而不立即对邻居求和时，使用 `gather`：
 
 ```text
-x[i] + sum[j](A[i, j], x[i] * sum[k](x[k]) * x[j])
+gather(A[i, j], x[i] + x[j])          # 输出形状: (..., E)
+gather(T[i, j, k], x[i] * x[j] * x[k]) # 输出形状: (..., H)
 ```
 
-关系参数可以进行普通代数运算，例如 `A1[i, j] + A2[i, j]` 在重叠边处取值 2，而 `A1[i, j] * A2[i, j]` 表示交集。`A[i, j] + 1` 和 `exp(A[i, j])` 也保持稀疏表示：求值器保存一个非零 `fill_value` 以及偏离它的坐标，不会据此构造稠密的 `N × N` 数组。
-
-同一关系表中的重复坐标按二元关系的集合语义去重，不会把一条重复记录解释成权重 2。若需要重边强度，应使用单独的边字段。
-
-### `gather` 与关系条目字段
-
-`gather` 将结构表达式在关系的非零坐标上取值，并乘以对应的关系值：
+`gather` 的结果与普通边属性数组完全一样，可以直接参与四则运算、初等函数调用，或者再次附加上标 `[i, j]` 放回 `sum` 中聚合：
 
 ```text
-gather(A[i, j], x[i] + x[j])
-gather(T[i, j, k], x[i] * x[j] * x[k])
-```
-
-若 `A.shape == (E, 2)`，第一个结果为 `(..., E)`；若 `T.shape == (H, 3)`，第二个结果为 `(..., H)`。操作数可以只使用关系指标的子集，因此 `gather(A[i, j], x[i])` 会沿 `j` 自然广播。直接关系保留坐标表的行顺序；复合关系按坐标字典序输出其非零元素。
-
-`gather` 的结果像普通关系字段一样支持算术和函数：
-
-```text
-2 * gather(A[i, j], x[i] + x[j])
-sin(gather(A[i, j], x[i] + x[j]))
-gather(A[i, j], x[i] + x[j]) + w
-```
-
-也可以重新附加完整的关系指标，将条目字段提升回结构表达式：
-
-```text
+2 * gather(A[i, j], x[i] + x[j]) + w
 sum[i](A[i, j], gather(A[i, j], x[i] + x[j])[i, j] * x[i] * x[j])
 ```
 
-关系表达式具有非零 `fill_value` 时，其非零支持可能覆盖全部 `N^r` 个坐标；此时 `gather` 的输出也相应变成稠密条目轴。
+### `aggr / targ / sour` 简写语法糖
 
-## `aggr/targ/sour` 便捷语法
-
-为了表达常见的有向边消息传递，引擎保留与 nd2py 接近的写法：
+对于常见的二元有向图消息传递，引擎兼容类似 `nd2py` 的简写语法：
 
 ```text
 aggr(A * targ(x) * sour(x))
@@ -188,36 +185,27 @@ aggr(A, targ(A, x) * sour(A, x))
 aggr(A, targ(x) * sour(x))
 ```
 
-`aggr(A * expression)` 是推荐写法；双参数形式作为等价便捷写法保留。在这套语法中，`targ` 收集第 0 列目标节点，`sour` 收集第 1 列源节点，`aggr` 按目标节点求和。省略 `targ/sour` 中的关系时，它们继承最近一层 `aggr` 的关系。解析后这些节点立即编译成统一的指标表达式，例如：
+其中 `targ` 取第 0 列目标节点，`sour` 取第 1 列源节点，`aggr` 对入边邻居求和。解析器在读取这三种写法后会立即将其展开（Desugar）为标准下标形式 `sum[j](A[i, j], x[i] * x[j])`，因此 `str(expression)` 会统一渲染为显式下标表达式。
 
-```text
-aggr(A * targ(x) * sour(x))
-    -> sum[j](A[i, j], x[i] * x[j])
-```
+### 边属性字段（Relation Fields）
 
-因此，字符串渲染只会输出指标表达式，不保留原始的 `aggr/targ/sour` 拼写。
-
-### 关系字段与权重
-
-在关系缩并内部，带有完整关系指标的普通 Symbol 表示按关系行对齐的字段：
+在关系求和内部，带完整关系下标的普通变量代表按边/超边行顺序对齐的属性字段（如边权重 `w`，形状为 `(E,)` 或 `(..., E)`）：
 
 ```text
 sum[j](A[i, j], w[i, j] * x[i] * x[j])
 ```
 
-若 `A.shape == (E, 2)`，则 `w.shape == (E,)` 表示每条边一个权重；`w.shape == (..., E)` 表示前导样本或通道上的每条边权重。关系字段的最后一维必须与 `E` 相等。只有一个同元数、同长度关系时，引擎可以自动推断它；存在歧义时使用 `RelationField(w, relation="A")` 明确关联。这里不要求构造形状为“节点数 × 节点数”的稠密权重矩阵。
+当上下文中仅有一个同元数、同长度的关系表时，引擎会自动将 `w[i, j]` 关联到该关系；若存在多个同尺寸关系表，可通过 `RelationField(w, relation="A")` 显式指定，无需把边权展开成 $N \times N$ 稠密矩阵。
 
-显式写出的嵌套求和不能重复绑定尚未退出作用域的指标；`sum[j](... sum[j](...) ...)` 会报错，应将内层改为 `sum[k]`。嵌套 `aggr` 会在编译语法糖时自动生成互不冲突的指标名。
+注意：显式编写嵌套 `sum` 时，内层不能重复使用外层尚未归约的同名下标（即 `sum[j](... sum[j](...) ...)` 会报错，内层应改用 `sum[k]`）。
 
-引擎按指标从左到右绑定关系表各列；本规范约定目标指标在前、源指标在后。新模型应优先使用显式指标语法；便捷语法适合简短的二元消息传递表达式。
-
-## 时延
+## 6. 时延表达式（`delay`）
 
 ```text
 x + delay(x, delta)
 ```
 
-`delay(value, delta)` 表示在当前采样时刻读取 `value(t - delta)`。默认求值器沿数组首轴进行线性插值；`delta` 可以是标量，也可以与时间轴等长。超出已有历史范围的位置返回 `NaN`：
+`delay(value, delta)` 表示读取状态序列在 $t - \delta$ 时刻的历史值。默认求值器沿数组第 0 轴（时间维）进行一维线性插值，`delta` 可以是正标量或与时间轴等长的数组，早于初始时刻的位置返回 `NaN`：
 
 ```python
 expression.evaluate(
@@ -226,48 +214,37 @@ expression.evaluate(
 )
 ```
 
-ODE/DDE 评估器可以通过 `delay_resolver` 提供自己的历史缓冲和插值策略：
+自定义 ODE/DDE 评估器也可以通过 `delay_resolver` 参数接入外部积分器的历史状态查询函数：
 
 ```python
 expression.evaluate(data, delay_resolver=my_history_lookup)
 ```
 
-时延节点只描述 RHS 中的历史引用，不决定积分器、初始历史函数或轨迹损失。
+## 7. 字符串往返（Round-trip）与安全边界
 
-## 字符串往返与安全边界
+任何合法表达式均满足 `parse(str(expression))` 结构等价：渲染器会自动补齐保持运算优先级所需的最小括号，并完整保留命名参数的名称与初值。
 
-`parse(str(expression))` 应生成结构等价的表达式。渲染器会补充保证运算优先级所需的括号，并保留参数的名字和初值。
+解析器严格拒绝属性访问（`.`）、切片（`x[0:10]`）、推导式、`lambda`、未注册函数调用及非常量关键字参数，确保所有表达式树都能被安全遍历、求值与比较。
 
-解析器拒绝属性访问、下标切片、推导式、lambda、任意函数调用和非字面关键字参数。例如以下内容都不属于符号模型语言：
+## 8. 引擎边界与后续演进方向
 
-```text
-np.sin(x)
-__import__('os')
-x[0:10]
-custom_python_function(x)
-```
+当前版本的 `sr_harness_engine` 已完整支持算术与初等函数解析、规范化与 LaTeX 渲染、NumPy 广播求值、命名参数与分组参数优化、二元关系语法糖、任意元关系的显式下标缩并、`gather` 边特征提取以及基础时延插值。
 
-这些限制既提供安全边界，也保证每个模型都能被遍历、渲染、比较和诊断。
+为了保持底层引擎精简可靠，以下能力有的由上层 `sr_harness` 运行时与工具层提供，有的作为后续演进方向：
 
-## 尚未实现的规范部分
+- **已由上层运行时与工具层提供**：
+  - 子树级数值稳定性诊断（由 `src/sr_harness/tools/eic.py` 中的 `EICTool` 基于本引擎的树遍历与路径替换接口实现）；
+  - 数据切分、常微分方程轨迹积分与任务级指标评测（由 `sr_harness.evaluator` 中的 `DefaultEvaluator`、`GraphEvaluator` 与 `evaluator.utils` 实现）；
+  - 任意 Python 代码沙箱评估（由 `EvaluateCodeTool` 在操作系统沙箱中实现，不属于本符号模型语言）。
+- **后续引擎演进方向**：
+  - 量纲、物理单位与输出形状的静态类型检查；
+  - 跨代数变形的规范化（Canonicalization）与结构哈希等价判定；
+  - 多方程联立（多 RHS）的具名系统模型表示；
+  - 可选的 JAX / PyTorch 自动微分求值后端，以及支持参数上下界约束与鲁棒损失的优化器选项。
 
-当前版本已经实现本文件中的解析、渲染、NumPy 求值、命名参数拟合、分组参数拟合、二元关系便捷语法、任意元关系的显式指标缩并以及基础时延插值。以下能力需要在稳定核心语义后继续添加：
+## 9. 与 SRHarness `Evaluator` 的对接方式
 
-- 维度、单位和输出签名的静态类型检查；
-- 多关系连接与关系权重的专用节点；
-- 表达式规范化、结构哈希和代数等价判断；
-- 可配置且带版本的结构复杂度；
-- 子表达式替换和 EIC 接口；
-- 多个 RHS 组成的具名模型文档；
-- JAX、PyTorch 或其他可微后端；
-- 参数边界、约束、鲁棒损失和多种优化器；
-- 由 ODE、DDE、网络系统评估器提供的积分与拟合协议。
-
-任意代码求值工具属于 SRHarness 的实验与诊断层，不属于本符号语言，也不应默认产生可进入 TopK 或 Pareto Front 的正式候选模型。
-
-## SRHarness 评估器接口
-
-符号引擎负责表达式，`DefaultEvaluator` 提供普通 `(N,)` 数据的默认实验协议。用户可以继承它，按需改写候选公式的拟合和评价方法：
+在 SRHarness 中，`DefaultEvaluator` 与 `GraphEvaluator` 接收本引擎的 `Expression` 对象，负责数据切分、参数拟合与指标打分。用户只需继承 `DefaultEvaluator` 即可定制候选公式的评测协议：
 
 ```python
 from sr_harness import DefaultEvaluator
@@ -281,4 +258,4 @@ class MyEvaluator(DefaultEvaluator):
         return metrics
 ```
 
-`fit/evaluate` 处理一般的 `y = f` 等式，`fit_candidate/evaluate_candidate` 只处理可提交的目标公式。Evaluator 返回仅含数值的扁平指标字典；复杂度、诊断和格式化由工具层统一添加。
+其中 `fit` / `evaluate` 处理一般探索等式 `y = f`，`fit_candidate` / `evaluate_candidate` 处理预测目标变量的正式候选公式；复杂度统计、残差诊断与文本格式化由工具层统一完成。

@@ -1,10 +1,10 @@
-# 工具开发指南
+# 工具开发指南 (`src/sr_harness/tools`)
 
-> 完整的 SRHarness 使用文档和 API Reference：[`docs/index.md`](../../../docs/index.md)
+> 完整的 SRHarness 使用文档与 API Reference 请参阅 [`docs/index.md`](../../../docs/index.md)。
 
-本目录包含可供 `SRAgent` 调用的工具。新工具需继承 `BaseTool`，注册一个稳定的工具名，并实现 `execute()` 方法和可选的 `format_result_dict()` 类方法。
+本目录包含可供 `SRAgent` 及辅助 Agent 调用的全部工具。每个工具均继承自 `BaseTool`，通过 `@BaseTool.register(...)` 注册稳定的工具名称，并实现核心的 `execute()` 方法与可选的 `format_result_dict()` 类方法。
 
-## 最小示例
+## 1. 最小实现示例
 
 ```python
 from typing import Any, Dict
@@ -14,147 +14,117 @@ from .base_tool import BaseTool, ToolMetadata
 
 @BaseTool.register("my_tool")
 class MyTool(BaseTool):
+    """One-line summary of the tool class."""
+
     metadata = ToolMetadata(name="my_tool")
 
     def execute(self, value: str, limit: int = 10) -> Dict[str, Any]:
-        """简短描述工具的功能。
+        """Concise description shown to the Agent as metadata.description.
 
         Args:
-            value: value 的描述。
-            limit: limit 的描述。
+            value: Description of value for the parameter JSON Schema.
+            limit: Maximum number of items to process (default 10).
+
+        Returns:
+            Dict[str, Any]: Structured result dictionary.
         """
         return {"value": value, "limit": limit}
 ```
 
-## 必要组件
+## 2. 开发规范与元数据推断
 
-- 继承 `BaseTool`。
-- 添加 `@BaseTool.register("tool_name")` 使工具被发现。
-- 设置 `metadata = ToolMetadata(name="tool_name")`。
-- 实现 `execute()`。
-  - 其参数由 Agent 生成，因此应当尽量简单、且可序列化。
-  - `execute()` 的返回值必须是一个 `Dict[str, Any]`，且不宜过长（会浪费 token）
-  - 如果返回的结果字典较大，建议同时重写 `format_result_dict(cls, result)` 类方法，将字典格式化为一段较短的文本供 Agent 阅读，从而节省 token。
-- 设置 `metadata`
-  - `metadata.name` 是工具的唯一标识符，必须与 `@BaseTool.register(...)` 中的名称一致。
-  - `metadata.description` 和 `metadata.parameters` 可选，如果不设置，会自动从 `execute()` 的 docstring 和签名推断。
-    - `metadata.description` 从 docstring 中 `Args:` 之前的部分提取。
-    - `metadata.parameters` 从 `execute()` 的签名、类型提示、默认值和 `Args:` 描述推断。
-    - 如果 Agent 调用工具的成功率过低，建议检查自动推断的 `description` 和 `parameters` 是否准确反映了工具的功能和参数要求。
-    - 当自动推断不够精确时（例如需要更严格的 JSON Schema 约束、枚举说明、嵌套对象或特殊格式），可以手动设置 `ToolMetadata(description=..., parameters=...)`。手动指定的元数据不会被 `BaseTool` 覆盖。
+1. **继承与注册**：
+   - 继承 `BaseTool`，并在类定义上添加 `@BaseTool.register("tool_name")`。
+   - 设置类属性 `metadata = ToolMetadata(name="tool_name")`，确保 `metadata.name` 与注册名完全一致。
+   - **仅注册成熟稳定的工具**：凡是通过 `@BaseTool.register(...)` 注册的工具都会进入全局注册表。若某个实验性工具尚未测试完善，请注释掉装饰器暂不注册，以免降低 Agent 调用成功率或浪费 Token。
+2. **实现 `execute()` 方法**：
+   - `execute()` 的参数由大模型直接生成，因此应保持扁平、简洁，只使用 JSON 可序列化的基础类型（`str`、`int`、`float`、`bool`、`list`、`dict`），并补齐类型标注。
+   - 返回值必须是 `Dict[str, Any]`，用于运行日志记录与候选公式提取。
+3. **自动推断与显式指定 `metadata`**：
+   - 若未显式传入 `metadata.description` 和 `metadata.parameters`，`BaseTool` 会在子类定义时自动从 `execute()` 的 Google-style docstring 与函数签名推断：
+     - `Args:` 之前的段落会作为工具的 `metadata.description`；
+     - 函数签名、类型标注、默认值以及 `Args:` 下各参数的说明会自动组装为 JSON Schema。
+   - 因为这些文本直接面向大模型 Agent，请务必写得**简练、准确、边界清晰**（例如写明取值范围、支持的表达式写法以及何时会返回可提交的候选公式）。
+   - 如果需要更复杂的 JSON Schema 约束，也可以在 `ToolMetadata(name=..., description=..., parameters=...)` 中显式声明，手动指定的字段不会被自动推断覆盖。
+4. **重写 `format_result_dict(cls, result)`（推荐）**：
+   - 默认实现直接将 `execute()` 返回的字典转为字符串。
+   - 当返回字典包含大量中间字段或长数组时，请重写 `format_result_dict()`，将其精炼为结构清晰、高信噪比的短文本（`result_str`）发回给 Agent，既节省上下文窗口，也便于模型抓住重点。
 
-## 运行时上下文
+## 3. 读取运行时上下文 (`self.context`)
 
-工具实例化时传入的上下文可通过 `self.context` 访问，用于存放数据、模型、缓存等不应放在参数列表中由 Agent 生成的值。目前包含以下字段：
-- `self.context.data`: 原始数据，格式为 `{变量名: np.ndarray}`。
-- `self.context.target`: 目标变量名称字符串。除目标变量外的其他非轴变量都可以作为公式中的自变量。
-- `self.context.train_split` / `self.context.validation_split`: Evaluator 首次切分并缓存的只读上下文属性。
+数据集数组、评测器与工作区状态统一保存在工具实例的 `self.context`（类型为 `AgentContext`）中，无需让模型通过参数传入：
 
-## 公式处理
+- `self.context.data`：当前数据集字典 `{name: np.ndarray}`，包含所有观测变量与坐标轴。
+- `self.context.target`：当前任务的目标因变量名称字符串。
+- `self.context.train_split` / `self.context.validation_split`：由当前 `Evaluator` 首次切分后自动缓存的只读训练集与验证集上下文视图。
+- `self.context.workspace`：当前对话绑定的隔离工作区对象（`Workspace`）。
 
-在 `execute()` 中处理公式时，应使用 `sr_harness_engine`（如 `engine.parse()`、`Expression.fit()` 等）而非手动解析或计算。
-它是项目中公式表示、求值与参数优化的标准方式，与 `BaseTool.evaluate()` 及候选记录紧密集成。
+## 4. 公式解析与统一评估协议
 
-## 公式与指标约定
+### 使用 `sr_harness_engine` 处理公式
 
-如果工具会产生公式（例如拟合、评估、变换、搜索），应直接使用 `self.evaluate()` 返回统一候选字典：
-- `formula` 是一个字符串，表示工具产生的公式。
-- `metrics` 包含该公式的评估指标。
-- `is_candidate` 表示是否可参与 best formula 排名。
-- `diagnostics` 包含可选的残差诊断；关闭时为空字典。
+在工具内部解析或操作数学公式时，请统一调用 `self.parse_formula(expr_str)` 或直接使用 `sr_harness_engine`（如 `engine.parse()`、`Expression.eval()`），不要手写 `eval()` 或私自拼接字符串求值。
 
-示例如下：
-```python
-return self.evaluate(
-    f=formula_symbol,
-    y=target_symbol,
-)
-```
+### 调用 `self.evaluate()` 返回标准候选结构
 
-`BaseTool.evaluate()` 会在目标恰为 `self.context.target` 且公式不包含目标变量时自动设置 `is_candidate=True`。
-特殊工具可在获得结果后覆盖字段，例如公式展示文本不是 `f.to_str()` 时：
+凡是会生成、拟合或评估数学公式的工具（如多项式拟合、幂律拟合、有理函数拟合、PySR/SINDy 搜索等），都应调用 `self.evaluate(f=..., y=...)` 生成标准化的评估字典：
 
 ```python
-result = self.evaluate(
-    f=formula_symbol,
-    y=target_symbol,
+evaluation = self.evaluate(
+    f=formula_expression,
+    y=target_expression,
+    show_diagnostics=show_diagnostics,
 )
-result["formula"] = custom_formula_text
-return result
+return {
+    **evaluation,
+    "custom_field": extra_info,
+}
 ```
 
-`f` 和 `y` 必须是 `sr_harness_engine.Expression`。`evaluate()` 会分别在训练集和验证集上调用
-`f.eval(data)` 与 `y.eval(data)`（不存在的验证集不会返回）。训练集和验证集结果统一保存在
-`data_split_results["train"]` 与 `data_split_results["validation"]` 中，各自包含 `metrics`，以及可选的
-`diagnostics`；不存在验证集时不返回 `validation` 字段。
-代码模型如果已经在沙箱中得到预测数组，应调用 `BaseTool.calculate_metrics()` 复用相同的指标定义。
-复杂度固定为 `len(f)`，不能由调用方覆盖。
-残差诊断默认开启；内部候选筛选可显式传入 `show_diagnostics=False`，最终入选公式应保留诊断。
+`self.evaluate()` 的核心行为约定：
 
-## 错误处理
+- `f` 与 `y` 必须是 `sr_harness_engine.Expression` 实例。
+- 当左端项 `y` 恰好等于 `self.context.target`、右端项 `f` 不依赖目标变量且在各数据切分上产生有限 MSE 时，`self.evaluate()` 会自动将 `is_candidate` 设为 `True`，使其自动进入 `SRAgent` 的全局 Top-k 榜单与帕累托前沿。
+- 训练集与验证集的评测指标分别保存在 `data_split_results["train"]["metrics"]` 和 `data_split_results["validation"]["metrics"]` 中（当未划分验证集时不包含 `"validation"` 键）。
+- 默认开启残差诊断（`show_diagnostics=True`），在 `data_split_results["train"]["diagnostics"]` 中附上误差分位数、最大残差样本及残差相关性最强的变量；工具内部在做网格筛选或 Pareto 备选评估时可传入 `show_diagnostics=False`，仅对最终选出的主公式保留完整诊断。
+- 若像 `EvaluateCodeTool` 那样在沙箱中直接得到了数值预测数组，可调用 `self.calculate_metrics(f, y_true, y_pred)` 与 `self.residual_diagnostics(...)` 复用一致的指标计算逻辑。
 
-- **不影响正常运行的警告**：将警告信息汇总到结果字典的 `exceptions` 字段，以供 Agent 参考。
-  - 例如某些输入变量解析失败但其余变量仍可用时，将失败信息追加到 `exceptions` 中即可。
-- **导致无法正常运行的错误**：直接 `raise` 抛出异常即可。
-  - 抛出时可将已积累的警告信息一并包含在错误消息中，方便 Agent 理解上下文。例如：
-    ```python
-    if some_error_condition:
-        error_message = f"Error occurred due to XXX. Previous warnings: {exceptions}"
-        raise RuntimeError(error_message)
-    ```
-  - `BaseTool.__call__()` 会接住工具 `execute()` 方法中抛出的异常，将其格式化为错误信息返回给 Agent。
+## 5. 异常处理与警告约定
 
-## 工具注册
+- **不阻塞主流程的局部警告**：将警告字符串收集到返回字典的 `"exceptions": list[str]` 字段中（例如多个输入特征中某一个表达式求值失败，但其余特征仍可正常拟合），并在 `format_result_dict()` 中展示给 Agent。
+- **无法继续执行的错误**：直接抛出 `ValueError` 或 `RuntimeError`（可将已收集的 `exceptions` 附在报错信息中）。`BaseTool.__call__()` 会自动捕获常规异常，将其格式化为 `ok=False` 的工具结果返回给模型，引导模型在下一轮修正参数；只有需要立刻中断整场运行的致命控制流异常才抛出 `ToolRunAbort`。
 
-- `@BaseTool.register("tool_name")` 会使工具出现在 Agent 可用的工具列表中。
-- 因此，**尚未实现完善或测试不充分的工具不应注册** —— Agent 调用这类工具的成功率太低，不注册即可确保 Agent 无法使用它，避免浪费调用次数和 token。
-- 可以将 `@BaseTool.register(...)` 注释掉来暂时取消注册，待工具成熟后再启用。
+## 6. 运行时创建与编辑自定义工具 (`create_skill` / `edit_tool`)
 
-## 自定义工具
-
-`create_skill` 可创建说明型 skill，也可在 skill 目录中同时创建自定义工具；
-`edit_tool` 用于修改已有的自定义工具：
+Agent 可以在搜索过程中将复用的数据分析脚本或公式提议逻辑沉淀为 Skill 及配套的自定义工具：
 
 ```text
 skills/<skill-name>/SKILL.md
 skills/<skill-name>/tool.py
 ```
 
-`tool.py` 必须定义一个继承 `BaseTool` 的类，并设置唯一的 `metadata.name`。
-自定义工具不要使用 `@BaseTool.register(...)`，加载器会根据 `metadata.name` 统一注册。
-创建或编辑成功后，工具会立即尝试加载并注册到 `BaseTool`；重名工具会被拒绝。
+### 通过 `create_skill` 生成技能或工具
 
-## 创建 Skill
+调用 `create_skill(request="...")` 时，工具会将当前 Agent 的对话上下文（可通过 `history_messages=N` 限制最近消息条数）与本次需求一并发送给配置的 LLM，由模型自动判断应创建哪一类 Skill 并完成内部多轮校验：
 
-调用 `create_skill(request="...")` 表达要沉淀的可复用经验；工具默认把当前 Agent 的
-system prompt、全部历史 messages 和本次工具调用消息传给配置的同一 provider/model；
-也可以用 `history_messages=N` 只提供最近 N 条消息。内部
-完成若干轮澄清和草稿生成后才写入文件。
+- **`instructions`**：仅生成说明文档 `SKILL.md`，不包含 `tool.py`。
+- **`data_analysis`**：同时生成 `SKILL.md` 与用于数据特征分析的 `tool.py`（继承 `BaseTool`，从 `self.context.data` 读取数据并返回分析字典）。
+- **`formula_proposer`**：同时生成 `SKILL.md` 与用于提出候选公式的 `tool.py`（必须在 `execute()` 中调用并返回/合并 `self.evaluate(...)` 的结果，以保留 `formula`、`is_candidate` 与 `data_split_results`）。
 
-LLM 会选择一种类型：
+默认不会覆盖已存在的同名 Skill；若传入 `force=True`，可替换非只读 Skill 下的 `SKILL.md` 与 `tool.py`（保留目录中的其他附件文件）。
 
-- `instructions`：只创建说明性 `SKILL.md`。
-- `data_analysis`：创建返回普通数据分析结果的 `tool.py`。
-- `formula_proposer`：创建公式提议工具；必须把 `self.evaluate(...)` 的结果直接
-  返回或合并进返回字典，保留 `formula`、`is_candidate` 和 `data_split_results` 等字段。
+### 自定义 `tool.py` 的安全沙箱约定
 
-默认不覆盖已有 skill；传入 `force=true` 可替换可编辑 skill 的 `SKILL.md` 和
-`tool.py`，但不会修改目录中的其他文件，也不能覆盖只读 skill。自定义 `tool.py`
-不得写 `@BaseTool.register(...)`，加载器会根据 `metadata.name` 注册工具。
+- `tool.py` 必须且只能定义一个继承自 `BaseTool` 的子类，并声明唯一的 `metadata.name`。
+- **禁止在自定义 `tool.py` 中使用 `@BaseTool.register(...)`**：加载器会在独立沙箱进程中静态检查并提取 `metadata`，在主进程中自动生成 `SandboxedCustomTool` 代理类并以 `metadata.name` 完成注册。
+- 需要修改已创建的自定义工具时，调用 `edit_tool` 传入 Skill 目录名与精确匹配的 `SEARCH/REPLACE` 补丁块即可完成热更新与重新加载。
 
-## 自定义评估器与数据划分
+## 7. 自定义 Evaluator 与数据划分
 
-SRHarness 提供普通一维数据实现 `sr_harness.DefaultEvaluator` 和图数据实现
-`sr_harness.GraphEvaluator`。用户可以用类方法覆盖 `fit()` 与 `evaluate()`，或只覆盖候选公式专用的 `fit_candidate()` 与 `evaluate_candidate()`，从
-`context.args` 提取所需参数后，再通过 `SRAgent(evaluator=...)` 注入自己的参数优化、
-数值积分或评价协议。
-评估器直接接收结构化 `Expression` 和当前数据划分的上下文；`fit()` 返回已绑定参数、
-可直接求值的 `Expression`，`evaluate()` 返回仅含数值的扁平 metrics 字典。复杂度和格式化由工具层负责。
-它适合 ODE 轨迹积分、网络动力学和其它不能用逐点回归评价的任务。
+SRHarness 内置了面向常规数据的 `DefaultEvaluator` 和面向图/超图数据的 `GraphEvaluator`。如需针对特定科学问题（如常微分方程轨迹积分、网络动力学演化）定制拟合或评价标准，可继承 `DefaultEvaluator` 并按需重写类方法：
 
-内置公式工具仍通过 `BaseTool.evaluate()` 复用统一的 train/validation 指标与残差诊断。
-`SRAgent` 的 `validation_fraction`、`split_by` 和 `split_random_state` 决定 Agent 可见数据内部的
-训练/验证划分；该划分不得接触 Benchmark 的隐藏测试集。自定义评估器可读取相同的
-`AgentContext` 数据，但应在自己的实现中清楚区分拟合数据、选择指标与最终报告指标。
+- 重写 `fit_candidate(cls, f, context)` / `evaluate_candidate(cls, f, context)`：仅改变正式候选公式的参数拟合或指标计算方式（推荐）；
+- 重写 `fit(cls, f, y, context)` / `evaluate(cls, f, y, context)`：同时改变普通探索等式与正式候选公式的拟合或评测方式；
+- 重写 `split(cls, context)`：自定义训练集与验证集的切分方式（如按时间先后顺序切分）。
 
-完整示例见 [`docs/index.md` 的“自定义评估协议”](../../../docs/index.md)。
+注意：`fit*` 必须返回所有参数均已绑定数值的 `Expression`；`evaluate*` 必须返回仅含 `float` 或 `int` 数值的扁平字典。详细说明与代码示例请参阅 [`docs/evaluator.md`](../../../docs/evaluator.md)。

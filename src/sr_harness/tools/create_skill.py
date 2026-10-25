@@ -60,20 +60,32 @@ class SquareFormulaProposer(BaseTool):
 '''
 
 _TYPE_GUIDANCE = {
-    "instructions": "Create an instruction-only skill. Leave tool_code empty and write reusable SKILL.md guidance.",
-    "data_analysis": "Create a data-analysis BaseTool. Inspect self.context.data and return a normal analysis dictionary. Demo:\n" + _DATA_ANALYSIS_DEMO,
-    "formula_proposer": "Create a formula-proposal BaseTool. Return or merge self.evaluate(...) output, preserving formula, is_candidate, and data_split_results. Demo:\n" + _FORMULA_PROPOSER_DEMO,
+    "instructions": (
+        "Author an instruction-only skill (`SKILL.md`). Leave `tool_code` empty and write "
+        "concise, generalizable guidance."
+    ),
+    "data_analysis": (
+        "Author a data-analysis custom tool (`tool.py`) plus `SKILL.md`. Read arrays from "
+        "`self.context.data` and return a structured analysis dict. Example:\n"
+        + _DATA_ANALYSIS_DEMO
+    ),
+    "formula_proposer": (
+        "Author a formula-proposal custom tool (`tool.py`) plus `SKILL.md`. Return or merge "
+        "`self.evaluate(...)` so `formula`, `is_candidate`, and `data_split_results` are "
+        "preserved. Example:\n"
+        + _FORMULA_PROPOSER_DEMO
+    ),
 }
 
-_AUTHORING_PROMPT = '''Create a reusable Agent Skill from the conversation buffer and the current create_skill request.
-First decide skill_type as exactly one of instructions, data_analysis, or formula_proposer.
-Use the selected type guidance and its demo. Ask only questions that cannot be resolved from context; on later internal rounds resolve them using your best supported judgment.
-Do not preserve one-off answers, secrets, or unsupported guesses.
-Custom tool code must import BaseTool and ToolMetadata from sr_harness.tools, define exactly one BaseTool subclass with unique metadata.name, avoid @BaseTool.register(...), and return a dict.
+_AUTHORING_PROMPT = '''Distill a reusable Agent Skill from the conversation history and the `create_skill` request.
 
-Return exactly one JSON object:
-{"status":"needs_input" or "ready", "skill_type":"instructions" or "data_analysis" or "formula_proposer", "questions":["question"], "draft":{"name":"lowercase-hyphenated", "description":"trigger description", "content":"Markdown without frontmatter", "tool_code":"Python source or empty", "readonly":false}}
-Use status=ready only when the draft is complete and questions is empty.'''
+1. Choose `skill_type` as one of `'instructions'`, `'data_analysis'`, or `'formula_proposer'`, following its type guidance and demo.
+2. Generalize the workflow or tactic: never hard-code dataset-specific answers, credentials, or unverified guesses.
+3. When `tool_code` is included, import `BaseTool` and `ToolMetadata` from `sr_harness.tools`, define exactly one `BaseTool` subclass with a unique `metadata.name`, do NOT use `@BaseTool.register(...)`, and return a `dict` from `execute()`.
+4. Ask clarifying `questions` only if essential details are missing; on subsequent internal rounds, resolve open questions using your best evidence-backed judgment.
+
+Respond with a single JSON object (set `'status': 'ready'` only when the draft is complete and `questions` is empty):
+{"status":"needs_input" or "ready", "skill_type":"instructions" or "data_analysis" or "formula_proposer", "questions":["question"], "draft":{"name":"lowercase-hyphenated", "description":"when to use this skill", "content":"Markdown body without YAML frontmatter", "tool_code":"Python source or empty", "readonly":false}}'''
 
 
 @BaseTool.register("create_skill")

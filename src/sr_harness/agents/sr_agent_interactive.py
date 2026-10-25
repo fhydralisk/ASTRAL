@@ -1,8 +1,5 @@
 # Copyright (c) 2026-present, Yumeow. Licensed under the MIT License.
-"""人机协同符号回归 Agent。
-
-继承自 SRAgent，以 L（对话轮次）为搜索主体，支持人类实时干预和工作区文件操作。
-"""
+"""Interactive human-in-the-loop symbolic-regression agent with live timeline events."""
 
 from __future__ import annotations
 import json

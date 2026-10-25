@@ -47,11 +47,11 @@ class ExampleTool(BaseTool):
 - **结构化返回与文本展示分离**：
   - `execute()` 应返回一个结构化的 Python `dict`，供程序记录日志和提取候选公式；
   - `format_result_dict()` 负责把这个 `dict` 转换成简洁易读的文本（`result_str`）反馈给大模型。你可以按需重写 `format_result_dict()` 来优化模型看到的提示文本，而不会影响底层保存的机器可读数据。
-- **统一的调用封装**：外部调用工具时统一走 `BaseTool.__call__()`，它会自动统计耗时并返回 `ToolCallResult(ok, result, result_str, meta_data)`。其中 `result` 保留完整结构化数据，而 `result_str` 会做长度截断保护，防止超长输出撑爆模型上下文。
+- **统一的调用封装**：外部调用工具时统一走 `BaseTool.__call__()`，它会自动统计耗时并返回 `ToolCallResult(ok, result, result_str, meta_data)`。其中 `result` 保留完整结构化数据，而 `result_str` 会做长度截断保护，避免超长输出占用过多模型上下文。
 - **异常自愈与中断传播**：工具内部抛出的常规异常（包括执行超时）会被自动捕获并包装为 `ok=False` 的 `ToolCallResult` 返回给模型，让模型能够看到报错原因并自行修正参数重试；而用于终止整轮运行的控制流异常 `ToolRunAbort` 则会正常向上抛出，不会被当作普通工具报错吞掉。
 - **支持中途取消**：耗时较长的工具可以实现可选的 `cancel()` 方法，并在循环或阻塞操作中检查运行时的取消信号，以便用户在网页端点击“强制停止”时能及时退出。
 
-此外，涉及数学公式的工具可以直接调用 `BaseTool` 内置的公式规范化、语法解析、调用 Evaluator 评估以及结果格式化等辅助方法，无需重复造轮子。
+此外，涉及数学公式的工具可以直接调用 `BaseTool` 内置的公式规范化、语法解析、调用 Evaluator 评估以及结果格式化等辅助方法，无需重复实现底层逻辑。
 
 ## 工具调用解析器：`BaseParser` { #tool-call-parser }
 
