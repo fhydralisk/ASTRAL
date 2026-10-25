@@ -49,7 +49,7 @@ SRHarness 会在 `--workspace-dir` 目录下管理所有对话的工作区文件
 关于存储与会话生命周期，有以下几个实用细节：
 
 - **工作区与隐私隔离**：`workspaces/` 下的文件可供 Agent 工具读写；而 `sessions/` 下保存的 `.env`（API Key、代理配置）和会话快照完全独立，不会暴露给 Agent，导出对话压缩包时也会自动剔除 `.env`。对话的显示名称只记录在 `conversations.json` 中，因此重命名对话不会改变底层目录路径。
-- **按需持久化（防空目录垃圾）**：刚打开网页或点击“新建对话”时，系统只会创建一个内存中的临时会话，不会立即写入 `conversations.json` 或在磁盘上创建空文件夹。只有当你真正上传/修改了工作区文件、重命名了对话，或实际调用了 Agent 之后，该对话才会正式落盘。
+- **延迟创建磁盘目录**：刚打开网页或点击“新建对话”时，系统仅在内存中创建临时会话，不会立即更新 `conversations.json` 或在 `workspaces/`、`sessions/`、`runs/` 下创建空目录。只有当上传或修改了工作区文件、重命名了对话，或实际调用了 Agent 后，会话才会写入磁盘。
 - **访客统计与闲置恢复**：每次创建临时会话时，系统会在 `conversation-visits.jsonl` 中追加一条 `visit_started` 事件；当会话正式落盘时，再追加一条记录触发原因的 `conversation_persisted` 事件（方便按 `visitor_id` 统计只浏览未操作的访客）。临时会话连续闲置 1 小时后，服务端会释放其内存对象与系统临时目录；但只要用户未清理浏览器 Cookie，哪怕隔几天再回来继续操作，服务端也会用同一个会话 ID 自动重建环境，无需刷新页面。
 - **断点恢复**：只要显式指定了 `--save-path`（或 `--save-dir`），SRHarness 就会将每次搜索的运行日志写入 `{SAVE_PATH}/runs/{CONVERSATION_ID}`，并定期在 `sessions/` 中保存会话快照。服务重启后，只要传入相同的 `workspace-dir` 和 `save-path`，之前的时间线、数据集、任务设置、自定义 Evaluator 和搜索进度都会自动恢复。
 - **只读浏览模式**：如果只想查看或向他人展示已有的实验记录，可以同时传入 `--save-path`、`--workspace-dir` 和 `--read-only`（要求目录和 `conversations.json` 已存在，且不能与 `--mount` 混用）。`--read-only` 可以与 `--isolate-users` 自由组合。在容器环境中部署只读展示服务时，建议同时将宿主机目录以只读方式（`:ro`）挂载进容器，实现应用层与操作系统层的双重只读保护：

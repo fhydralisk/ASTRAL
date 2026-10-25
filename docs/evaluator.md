@@ -65,7 +65,7 @@ def evaluate_formula(f, y, context, evaluator):
 
 这里有两个关键设计细节：
 
-1. **严格防数据泄露**：所有待拟合参数（`param(...)`）都**只在训练集（`train_context`）上拟合**；拟合完成后，带着固定参数的同一个表达式会分别在训练集和验证集上计算指标。
+1. **避免验证集信息泄露**：所有待拟合参数（`param(...)`）都**仅在训练集（`train_context`）上拟合**；拟合完成后，绑定了固定参数的同一个表达式会分别在训练集和验证集上计算指标。
 2. **切分结果自动缓存**：首次访问 `AgentContext.train_split` 或 `AgentContext.validation_split` 时会调用一次 `evaluator.split(context)` 并将切分后的两个视图缓存起来，直到数据集发生更新或缓存被主动清空。
 
 至于残差诊断分析、结果文本格式化以及异常捕获封装，则统一由 `BaseTool` 处理，编写自定义 Evaluator 时无需关心。
@@ -90,7 +90,7 @@ def evaluate_formula(f, y, context, evaluator):
 - `fit()` 与 `fit_candidate()` 必须返回 `sr_harness_engine.Expression` 对象，且其中不能残留未绑定数值的参数；
 - `evaluate()` 与 `evaluate_candidate()` 必须返回 `dict[str, float | int]`（指标值只能是浮点数或整数，不能放布尔值、字符串、数组或嵌套字典）；
 - 返回字典中的键名会原样出现在训练集和验证集结果中，并且可以直接在设置中选作候选公式排序指标（`ranking_metric`）；
-- 公式复杂度 `complexity` 与其他指标一样由 Evaluator 返回（运行时不会在外部硬编码塞入额外指标）。
+- 公式复杂度 `complexity` 与其他指标一样由 Evaluator 返回（运行时不会在外部额外注入硬编码指标）。
 
 ## 3. 内置评估器一览
 
@@ -153,7 +153,7 @@ class TrajectoryRolloutEvaluator(DefaultEvaluator):
 
 每个自定义 Evaluator 脚本必须定义**且仅定义一个** `DefaultEvaluator` 的子类。
 
-为了保障安全，SRHarness 通过 `load_custom_evaluator()` 在独立受限进程中解析并校验自定义脚本，在主进程中仅保留一个同名代理对象；后续每次调用 `split`、`fit`、`evaluate` 也都在操作系统沙箱（Landlock + seccomp）中隔离执行，绝不会在 Web 服务主进程内直接运行不受信任的自定义代码。
+为了保障安全，SRHarness 通过 `load_custom_evaluator()` 在独立受限进程中解析并校验自定义脚本，在主进程中仅保留一个同名代理对象；后续每次调用 `split`、`fit`、`evaluate` 也都在操作系统沙箱（Landlock + seccomp）中隔离执行，不在 Web 服务主进程内直接运行自定义代码。
 
 在 [SRHarness 网页工作台](web-ui.md#evaluator-configuration) 中，你可以直接在代码编辑器里编写、保存并一键测试 `context.evaluator/` 下的脚本，也可以直接用自然语言让内置的**评测器构建 Agent** 帮你生成和调试代码。
 

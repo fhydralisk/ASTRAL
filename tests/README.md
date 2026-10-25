@@ -1,126 +1,105 @@
-# 测试指南
+# 测试指南 (`tests/`)
 
-> 使用示例也可参见 [`tests/behavior/`](behavior/) 和 [`docs/`](../docs/index.md)。
+> 符号引擎的可执行行为示例另见 [`tests/behavior/README.zh.md`](behavior/README.zh.md)，完整项目文档见 [`docs/index.md`](../docs/index.md)。
 
-## 运行测试
+## 1. 运行测试命令
 
 ```bash
-# 默认：只运行快速单元测试
-./venv/python -m pytest tests/ -v
+# 默认：仅运行快速单元测试（自动排除 slow 和 paid）
+./venv/bin/python -m pytest tests/ -v
 
-# 运行所有测试（包括集成测试和付费测试）
-./venv/python -m pytest tests/ -v -m ""
+# 运行全部测试（包含慢速集成测试与付费 API 测试）
+./venv/bin/python -m pytest tests/ -v -m ""
 
-# 只运行集成测试
-./venv/python -m pytest tests/ -v -m integration
+# 仅运行慢速/集成测试
+./venv/bin/python -m pytest tests/ -v -m slow
 
-# 只运行付费测试
-./venv/python -m pytest tests/ -v -m paid
+# 仅运行需要真实 LLM API 额度的付费测试
+./venv/bin/python -m pytest tests/ -v -m paid
 ```
 
-## 离线浏览器回归
+## 2. 浏览器端前端回归测试（离线）
 
-安装 Node.js 的 `playwright` 包及其 Chromium 后，在仓库根目录运行：
+安装 Node.js 的 `playwright` 包及 Chromium 浏览器后，可在仓库根目录运行前端流式渲染与交互回归测试：
 
 ```bash
 node tests/web/stream_rendering.cjs
 ```
 
-若 Playwright 安装在仓库外，可通过 `NODE_PATH` 指向包含该包的 `node_modules`；`CHROMIUM_EXECUTABLE` 可指定已有 Chromium。测试拦截所有网络请求，覆盖停止按钮、未完成的 Markdown、流式节点和滚动位置、推理分片、截断收尾，以及不同屏幕宽度下的公式布局，不调用真实模型。
+- 若 `playwright` 安装在仓库外部目录，可通过环境变量 `NODE_PATH` 指定 `node_modules` 路径，并通过 `CHROMIUM_EXECUTABLE` 指定本地 Chromium 可执行文件。
+- 该测试脚本会拦截所有外部网络请求，在离线环境下验证停止按钮状态切换、未闭合 Markdown 与数学公式的流式渲染、滚动跟随、推理折叠块、输出截断恢复以及响应式宽度布局，不会调用真实的模型服务。
 
-## 测试分类与标记
+## 3. 测试分类与 Pytest 标记
 
-所有测试通过 pytest marker 分为三类：
+测试套件通过 `pyproject.toml` 中的 pytest marker 分为三类：
 
-| 标记 | 含义 | 默认是否运行 |
-|------|------|:---:|
-| （无标记） | 快速单元测试，不依赖外部服务 | 是 |
-| `@pytest.mark.slow` | 集成测试，较慢，可能依赖本地资源但不产生费用 | 否 |
-| `@pytest.mark.paid` | 付费测试，会调用真实 LLM API 并产生费用 | 否 |
+| 标记 | 适用范围 | 默认是否执行 |
+|---|---|:---:|
+| （无标记） | 快速单元测试：纯本地逻辑，不依赖外部网络或真实 API | **是** |
+| `@pytest.mark.slow` | 慢速/集成测试：涉及较重的本地计算、子进程或端到端流程，但不产生 API 费用 | 否 |
+| `@pytest.mark.paid` | 付费 API 测试：需要连接真实大模型服务商并消耗 Token 额度 | 否 |
 
-默认配置下，`slow` 和 `paid` 标记的测试被排除。这是通过 `pyproject.toml` 中的 `markers` 和 `addopts` 实现的。
+`pyproject.toml` 默认配置了 `addopts = "--quiet -m 'not slow and not paid'"`，因此日常执行 `pytest` 时会自动跳过 `slow` 和 `paid` 测试。
 
 ```python
-# 快速单元测试 —— 无需标记
+# 1. 快速单元测试 —— 无需添加标记
 def test_parse_single_action():
     parser = TextParser(tool_list=None)
     actions = parser.parse_response("Action: foo(x=1)")
     assert len(actions) == 1
 
-# 集成测试
+
+# 2. 慢速或端到端集成测试
 @pytest.mark.slow
 def test_format_then_parse_roundtrip():
     ...
 
-# 付费测试
+
+# 3. 调用真实大模型接口的付费测试
 @pytest.mark.paid
 def test_llm_generates_parseable_action():
     ...
 ```
 
-## 测试编写风格
+## 4. 测试编写规范
 
-**优先使用函数式测试**（独立函数 + 装饰器），而非类式测试：
-
-```python
-# 推荐 ✓
-def test_infer_tool_description():
-    assert UnitSampleTool.metadata.description == "Run a sample tool."
-
-# 不推荐 ✗
-class TestToolMetadata:
-    def test_infer_tool_description(self):
-        assert UnitSampleTool.metadata.description == "Run a sample tool."
-```
-
-使用 `@pytest.fixture` 共享测试前置条件：
+1. **优先使用函数式测试**：除需要共享大量复杂初始化状态的场景外，优先编写独立的 `test_*` 函数配合 `@pytest.fixture` 和 `@pytest.mark.parametrize`，保持测试简明直观：
 
 ```python
+import numpy as np
+import pytest
+from sr_harness.core import AgentContext
+from sr_harness.tools.statistics_analysis import StatisticsTool
+
+
 @pytest.fixture
-def sample_data():
-    return {"x1": np.array([1.0, 2.0, 3.0]), "y": np.array([2.0, 4.0, 6.0])}
+def sample_context():
+    data = {"x1": np.array([1.0, 2.0, 3.0]), "y": np.array([2.0, 4.0, 6.0])}
+    return AgentContext(data=data, target="y")
 
-def test_execute_analyzes_selected_variables(sample_data):
-    tool = StatisticsTool(data=sample_data)
+
+def test_execute_analyzes_selected_variables(sample_context):
+    tool = StatisticsTool(context=sample_context)
     result = tool.execute(variables=["x1"])
     assert "x1" in result["statistics"]
 ```
 
-使用 `@pytest.mark.parametrize` 覆盖多种输入：
+2. **文件命名与目录对应**：测试文件统一命名为 `test_<模块名>.py`，并放在与 `src/` 对应的子目录中：
 
-```python
-@pytest.mark.parametrize("annotation, schema", [
-    (str, {"type": "string"}),
-    (int, {"type": "integer"}),
-])
-def test_parse_args_typehints(annotation, schema):
-    assert BaseTool.parse_args_typehints(annotation) == schema
-
-```
-
-注：如果一组测试共享较多的 setup 逻辑且函数式写法显得冗余，也可以使用类式测试。
-
-
-## 目录结构
-
-```
+```text
 tests/
-├── conftest.py          # pytest 全局配置（sys.path 等）
-├── test_xxx.py          # SRHarness 测试
-├── tools/               # 工具测试
-│   ├── test_xxx.py
-├── parser/              # 解析器测试
-│   ├── test_xxx.py
-├── api/                 # API 测试
-│   └── test_xxx.py
-└── xxx/                 # 更多模块测试
+├── conftest.py          # pytest 全局固件与环境配置
+├── behavior/            # sr_harness_engine 行为规范测试
+├── core/                # AgentContext、context.data 等核心数据结构测试
+├── tools/               # 内置科学工具与自定义 Skill/Tool 测试
+├── parser/              # 工具调用解析器测试
+├── api/                 # 模型 API 客户端测试
+├── cli/                 # 命令行入口测试
+├── web/                 # FastAPI 网页工作台与会话恢复测试
+└── deploy/              # 部署与发布脚本测试
 ```
 
-## 编写新测试
-
-1. **测试文件命名**：`test_<模块名>.py`，放在 `tests/` 下对应子目录中。
-2. **为每个测试函数添加适当的标记**
-   - 无标记：确保可以在无网络、无 API key 的环境下快速运行。
-   - 集成测试标记 `@pytest.mark.slow`：用于端到端冒烟测试（如 parser 的 format→parse 往返测试）。
-   - 付费测试标记 `@pytest.mark.paid`：用于调用真实 LLM API 的测试。这类测试应做好容错处理（如 API 不可用时 `pytest.skip()`），避免因网络或额度问题导致 CI 失败。
-3. **避免依赖注册表状态**：如果测试中需要注册临时工具，使用唯一的名称前缀（如 `unit_`）避免与其他测试冲突。
+3. **隔离全局状态**：
+   - 无标记单元测试必须能在无外网、无 API Key 的环境下稳定通过。
+   - 若测试中需要向 `BaseTool` 动态注册临时工具，请使用带唯一前缀的名称（如 `unit_sample_tool`）并在测试结束后还原注册表，避免污染其他测试。
+   - `@pytest.mark.paid` 测试在缺少对应 API Key 或遇到网络异常时应调用 `pytest.skip()` 平稳跳过。

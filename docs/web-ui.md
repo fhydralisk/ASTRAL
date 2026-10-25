@@ -50,7 +50,7 @@ sr-harness run \
 
 ### 2. 使用数据准备 Agent
 
-你可以直接用自然语言吩咐数据准备 Agent 帮你检查原始文件、处理缺失值、用数值差分估计导数，并生成符合规范的 `context.data/`。例如：
+你可以直接用自然语言指示数据准备 Agent 检查原始文件、处理缺失值、用数值差分估计导数，并生成符合规范的 `context.data/`。例如：
 
 > 读取工作区里的 trajectory.csv，用中心差分计算 x 对时间 t 的导数 dx_dt；将 t、x 和 dx_dt 保存到 context.data，并在 manifest 中写明各变量的物理含义与单位。
 
@@ -75,15 +75,15 @@ Agent 每次修改 `context.data/` 后都会自动调用 `validate_context_data`
 
 数据准备 Agent 和评测器构建 Agent 在工作时会读取工作区文件、运行 Python 数据处理脚本并写入结果。虽然它们没有不受限制的系统 Shell，但仍能修改或删除当前工作区内的可写文件。
 
-!!! warning "重要数据请勿只留孤本在可写工作区中"
+!!! warning "请为重要原始数据保留独立备份"
     左侧文件菜单中的“锁定”功能主要用于防止 Agent 误删误改，不能替代操作系统级的安全隔离。对于不可替代的珍贵原始数据，请务必保留独立备份，并优先使用 `--mount` 以只读方式挂载进工作区。
 
 各内置工具的权限边界如下表所示：
 
 | 工具名称 | 功能与安全边界 |
 |---|---|
-| `workspace_shell` | 在当前工作区内执行受限的文件查看、复制、移动、删除、新建目录和解压操作。它由 SRHarness 自带的命令解析器直接实现（仅支持 `ls`、`cat`、`grep`、`cp`、`mv`、`rm`、`mkdir`、`gzip`、`unzip`、`tar`），**绝不调用系统 Shell**，也不支持执行外部程序、命令替换、重定向或越出工作区的路径访问。 |
-| `workspace_code_executor` | 在短生命周期的操作系统沙箱（Linux Landlock + seccomp）中运行 Python 数据处理代码（支持 NumPy、SciPy、pandas 等）。仅允许读写当前对话的工作区、只读访问 `--mount` 挂载目录；完全禁止联网、禁止创建子进程，并严格限制运行时间、内存与文件大小。 |
+| `workspace_shell` | 在当前工作区内执行受限的文件查看、复制、移动、删除、新建目录和解压操作。它由 SRHarness 内置的命令解析器实现（仅支持 `ls`、`cat`、`grep`、`cp`、`mv`、`rm`、`mkdir`、`gzip`、`unzip`、`tar`），**不调用系统 Shell**，也不支持执行外部程序、命令替换、重定向或越出工作区的路径访问。 |
+| `workspace_code_executor` | 在短生命周期的操作系统沙箱（Linux Landlock + seccomp）中运行 Python 数据处理代码（支持 NumPy、SciPy、pandas 等）。仅允许读写当前对话的工作区、只读访问 `--mount` 挂载目录；禁止联网与创建子进程，并限制运行时间、内存与输出大小。 |
 | `web_search` / `web_fetch` | 搜索公开网页或抓取公开的 HTTP/HTTPS 页面内容（`web_fetch` 会自动拦截内网 IP、带账号密码的 URL 及危险重定向）。 |
 | `read_pdf` | 只读提取工作区或公开 URL 中的 PDF 文本内容，不会修改原文件。 |
 | `read_skill` | 读取已启用 Skill 的指导文档与参考资料。 |
@@ -91,14 +91,14 @@ Agent 每次修改 `context.data/` 后都会自动调用 `validate_context_data`
 
 你可以在每个 Agent 的 **设置 → 能力** 面板中按需勾选或关闭特定工具与 Skill。
 
-此外，符号回归阶段使用的 `code_executor`、`evaluate_code` 以及自定义 Tool / Evaluator 拥有更严格的隔离：它们**连当前对话的工作区都无法访问**，只能读取传入的数据副本并在临时目录中计算；大数组采用按版本生成的只读快照与写时复制（Copy-on-Write）机制共享，且 `context.args` 严格过滤掉了 API Key、代理配置等敏感信息。
+此外，符号回归阶段使用的 `code_executor`、`evaluate_code` 以及自定义 Tool / Evaluator 采用更严格的隔离：它们**不挂载当前对话的工作区**，仅能读取传入的数据副本并在临时目录中计算；大数组采用按版本生成的只读快照与写时复制（Copy-on-Write）机制共享，且传入沙箱的 `context.args` 会过滤掉 API Key、代理配置等敏感字段。
 
 **两种只读保护方式对比**：
 
 1. **启动时通过 `sr-harness run --mount PATH ...` 挂载**：属于应用层强制只读输入，网页端不提供解锁按钮；
 2. **在网页左侧文件列表中手动点击“锁定”**：会移除文件的操作系统写权限位并由内置工具拦截写入，适合防止 Agent 在整理数据时意外覆盖文件。
 
-如果你在多用户服务器上部署，想要获得操作系统内核级的绝对只读保障，建议以独立的低权限用户运行 SRHarness，并由管理员先用 Linux 内核只读绑定挂载（Read-only Bind Mount）准备好数据目录：
+在多用户或共享服务器上部署时，若需要由操作系统内核强制保护原始数据目录不被修改，管理员可先创建只读绑定挂载（read-only bind mount），再以不具备挂载管理与提权权限（如无 `sudo` 和 `CAP_SYS_ADMIN` 权限）的独立非特权系统账号运行 SRHarness：
 
 ```bash
 sudo mount --bind /data/original /mnt/srh-original
@@ -165,7 +165,7 @@ sudo -u srharness sr-harness run \
 - **输入框有文字时（上箭头图标）**：点击即可将你的新指导意见排队，在当前轮次结束后的安全边界处自动注入下一轮对话；
 - **输入框为空时（方块图标）**：点击第 1 次请求平稳暂停（跑完当前这轮后暂停）；当处于“暂停已请求”状态时，方块会变为红色，**点击第 2 次即可强制中止当前轮次**。
 
-关于 Agent 如何通过 `finish_search` 工具或无工具回复自动请求暂停，以及如何配置“允许停止的条件”，请参阅 [智能体工作流：交互式搜索的停止机制](agent.md#3-refinement-step)。
+关于 Agent 如何通过 `finish_search` 工具或无工具回复自动请求暂停，以及如何配置“允许停止的条件”，请参阅 [智能体工作流：交互式搜索的停止机制与停止条件](agent.md#stopping-controls)。
 
 ### 3. 搜索树与候选公式榜
 

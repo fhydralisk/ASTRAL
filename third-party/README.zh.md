@@ -1,11 +1,10 @@
-这个目录用于存放仍然保持独立项目身份的第三方源码。例如：
-- 依赖库可以安装，但还在开发或调试阶段，需要本地 editable install。
-- 依赖库是外部项目，我们希望保留源码供阅读、调试或打补丁。
+# 外部独立仓库目录 (`third-party/`)
 
-本目录中的项目需要通过 editable install 的方式进行安装，例如：
-```bash
-pip install -e ./third-party/nd2py
-```
-直接通过 `import package_name` 导入这些第三方源码。不要把整个 `third-party/` 目录加入 `PYTHONPATH`，也不要通过 `import third-party.<project>` 导入其中的代码。
+本目录用于存放保持独立仓库结构的外部依赖或可选科研后端（如 `ND2`、`SR4MDL` 等），便于在本地阅读源码、调试或以可编辑模式安装。
 
-对于不能直接安装、或者需要调整源代码以适应 `sr_harness` 的第三方库，应将它放到 `src/sr_harness/` 中。
+- 若外部项目本身具备标准的 `pyproject.toml` 或 `setup.py`，建议在虚拟环境中以可编辑模式安装：
+  ```bash
+  pip install -e ./third-party/<project>
+  ```
+- 导入时请直接使用该包自身的顶层包名（或通过 `ND2_HOME`、`SR4MDL_HOME` 等环境变量指向对应目录），不要把 `third-party/` 根目录直接加入 `PYTHONPATH`，也不要使用 `import third_party.<project>`。
+- 若某份第三方代码无法直接安装且必须随 `sr_harness` 发行包一起分发，请将其整理后放入 [`src/sr_harness/_vendor/`](../src/sr_harness/_vendor/)。

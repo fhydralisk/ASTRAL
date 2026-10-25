@@ -1,8 +1,5 @@
 # Copyright (c) 2026-present, Yumeow. Licensed under the MIT License.
-"""基类 Agent 和 Buffer 的定义。
-
-提供符号回归 Agent 的基础框架，包括主循环 Pipeline 和工具调用机制。
-"""
+"""Core R-C-L-K symbolic-regression agent implementation."""
 from __future__ import annotations
 import json
 import logging
