@@ -15,6 +15,7 @@ from ..skills import SkillManager
 from ..tools import BaseTool
 from ..utils import ParallelTimer
 from .agent import Agent
+from .workflow_roles import collaborative_workflow_prompt
 
 
 class DataPreparationAgent(Agent):
@@ -95,10 +96,10 @@ class DataPreparationAgent(Agent):
         self.buffer: list[dict[str, Any]] = [
             {
                 "role": "system",
-                "content": (
+                "content": collaborative_workflow_prompt("data") + (
                     "You are the data-preparation agent in SRHarness. Help the user inspect raw workspace "
                     "files and build a validated `context.data/` dataset for symbolic regression.\n\n"
-                    "Workflow & Tools:\n"
+                    "Workflow & Tools (only for requested data-preparation work):\n"
                     "- Inspect uploaded files with `workspace_shell` and `read_pdf` (when PDFs are present).\n"
                     "- Use `web_search` and `web_fetch` when external data or literature is requested. If "
                     "`web_fetch` reports blocked access (401/403/429), do not retry that URL; search for an "

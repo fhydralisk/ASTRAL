@@ -104,14 +104,14 @@ class WorkspaceShellTool(BaseTool):
                 "- Short flags may be combined or separated: `ls -la`, `ls -al`, "
                 "`ls -l -a`, and `ls -a -l` are equivalent. Options and operands may usually "
                 "be interspersed. Use `--` before a path beginning with `-`.\n"
-                "- Every path must resolve inside the workspace. Absolute paths and paths or "
-                "symbolic links that escape the workspace are rejected.\n"
+                "- Use workspace-relative paths. Registered mounts can be read through their "
+                "workspace names; other symbolic links escaping the workspace are rejected.\n"
                 "- Redirection and other shell operators (`>`, `<`, `;`, `&&`, `||`, `&`) are "
                 "not supported. There is no globbing, variable or tilde expansion, command "
                 "substitution, background execution, or invocation of unlisted commands.\n\n"
                 "## Supported commands\n\n"
                 "```text\n"
-                "ls [-a|--all] [-l] [PATH ...]\n"
+                "ls [-a|--all] [-l] [-L|--dereference] [PATH ...]\n"
                 "cat [-n|--number] [FILE ...]\n"
                 "head [-n N|--lines N|-N] [FILE]\n"
                 "tail [-n N|--lines N|-N] [FILE]\n"
@@ -134,7 +134,8 @@ class WorkspaceShellTool(BaseTool):
                 "syntax. `cut -f` accepts comma-separated, one-based field numbers. `tar` only "
                 "supports extraction and accepts grouped flags such as `-xf` and `-xzf`. When "
                 "a text-processing command has no file operand, it reads the previous pipeline "
-                "stage.\n\n"
+                "stage. `ls -L` reports linked entries using their targets only when workspace "
+                "read access allows it; it does not grant access to other host paths.\n\n"
                 "## Examples\n\n"
                 "```text\n"
                 "ls -la\n"
@@ -158,6 +159,7 @@ class WorkspaceShellTool(BaseTool):
 
         Supports ``ls``, ``cat``, ``head``, ``tail``, ``wc``, ``grep``, ``sort``, ``cut``, ``cp``,
         ``mv``, ``rm``, ``mkdir``, ``gunzip``, ``gzip``, ``unzip``, and ``tar`` (extract only).
+        Common forms include ``ls -laL`` and ``head -n 20`` (or ``head -20``).
         All paths must stay within the workspace root; shell redirection (``>``, ``<``), chaining
         (``;``, ``&&``, ``||``), globbing, and unlisted commands are rejected. Call ``read_skill``
         with ``"workspace-shell"`` for full flag syntax.
@@ -319,8 +321,8 @@ class WorkspaceShellTool(BaseTool):
         configure(parser)
         try:
             return parser.parse_intermixed_args(args)
-        except argparse.ArgumentError as exc:
-            raise CommandParseError(f"{command}: {exc}") from exc
+        except (argparse.ArgumentError, CommandParseError) as exc:
+            raise CommandParseError(f"{exc}\nSupported syntax: {parser.format_usage().strip()}") from exc
 
     def _read_text(self, path: Path) -> str:
         if not path.is_file():
@@ -408,6 +410,7 @@ class WorkspaceShellTool(BaseTool):
         def configure(parser):
             parser.add_argument("-a", "--all", action="store_true")
             parser.add_argument("-l", action="store_true", dest="long")
+            parser.add_argument("-L", "--dereference", action="store_true")
             parser.add_argument("paths", nargs="*")
 
         options = self._parse_args("ls", args, configure)
@@ -427,14 +430,24 @@ class WorkspaceShellTool(BaseTool):
                     ),
                     key=lambda entry: entry.name,
                 )
-                names = [
-                    entry.name + ("@" if entry.is_symlink() else "/" if entry.is_dir() else "")
-                    for entry in entries
-                ]
+                names = []
+                metadata = []
+                for entry in entries:
+                    if options.dereference and entry.is_symlink():
+                        logical = str(Path(target) / entry.name)
+                        resolved = ws.resolve(logical)
+                        if resolved is None or not resolved.exists():
+                            return self._error(f"Cannot dereference workspace entry: {logical}")
+                        info = resolved.stat()
+                        suffix = "/" if stat.S_ISDIR(info.st_mode) else ""
+                    else:
+                        info = entry.lstat()
+                        suffix = "@" if entry.is_symlink() else "/" if entry.is_dir() else ""
+                    names.append(entry.name + suffix)
+                    metadata.append(info)
                 if options.long:
                     rendered = []
-                    for name, entry in zip(names, entries):
-                        info = entry.lstat()
+                    for name, info in zip(names, metadata):
                         modified = datetime.fromtimestamp(info.st_mtime).strftime("%Y-%m-%d %H:%M")
                         rendered.append(
                             f"{stat.filemode(info.st_mode)} {info.st_size:>10} {modified} {name}"

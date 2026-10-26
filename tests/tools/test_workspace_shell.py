@@ -399,6 +399,30 @@ class TestWorkspaceShellTool:
         line = next(line for line in result["stdout"].splitlines() if "external-link@" in line)
         assert line.startswith("l")
 
+    @pytest.mark.parametrize("flags", ["-laL", "-L -l -a", "--dereference -l"])
+    def test_ls_dereference_reads_registered_mount_metadata(self, tmp_path, flags):
+        source = tmp_path / "observations.txt"
+        source.write_text("physical observations\n")
+        self.ws.mount(source)
+        result = self.tool.execute(f"ls {flags}")
+        assert result["success"], result
+        line = next(line for line in result["stdout"].splitlines() if "observations.txt" in line)
+        assert line.startswith("-") and "observations.txt@" not in line
+        assert str(source.stat().st_size) in line
+        assert str(tmp_path) not in result["stdout"]
+        assert self.tool.execute("ls -laL observations.txt")["success"]
+        assert not self.tool.execute("rm observations.txt")["success"]
+        assert source.read_text() == "physical observations\n"
+
+    def test_ls_dereference_rejects_unregistered_external_link(self, tmp_path):
+        source = tmp_path / "outside.txt"
+        source.write_text("external data whose metadata is private")
+        (self.ws.path / "external-link").symlink_to(source)
+        result = self.tool.execute("ls -laL")
+        assert not result["success"]
+        assert "Cannot dereference" in result["error"]
+        assert str(tmp_path) not in str(result)
+
     def test_ls_nonexistent(self):
         """ls 不存在的路径报错。"""
         result = self.tool.execute("ls nonexistent")
@@ -419,6 +443,7 @@ class TestWorkspaceShellTool:
         result = self.tool.execute("ls -z")
         assert result.get("success") is False
         assert "unrecognized arguments" in result.get("error", "")
+        assert "Supported syntax:" in result["error"]
 
     def test_double_dash_allows_dash_prefixed_paths(self):
         (self.ws.path / "-notes").write_text("dash path")

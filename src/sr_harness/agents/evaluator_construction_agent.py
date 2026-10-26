@@ -7,15 +7,17 @@ import math
 import numbers
 import time
 import uuid
-from typing import Any
+from typing import Any, Callable
 
 from ..api import BaseAPI
 from ..core import AgentContext, json_value
 from ..parser import BaseParser
 from ..runtime import InteractionManager
 from ..tools import BaseTool
+from ..tools.configure_variable_roles import VariableRolesTool
 from ..utils import ParallelTimer
 from .agent import Agent
+from .workflow_roles import collaborative_workflow_prompt
 
 
 class EvaluatorConstructionAgent(Agent):
@@ -38,6 +40,7 @@ class EvaluatorConstructionAgent(Agent):
         tool_parser: str = "openai",
         llm_max_tokens: int | None = None,
         max_steps: int = 16,
+        variable_role_updater: Callable[..., dict[str, Any]] | None = None,
     ) -> None:
         """Initialize the evaluator construction agent.
 
@@ -50,6 +53,7 @@ class EvaluatorConstructionAgent(Agent):
             tool_parser: Tool-call parser format name (defaults to ``"openai"``).
             llm_max_tokens: Optional per-response output token cap.
             max_steps: Maximum number of model-tool turns per user instruction.
+            variable_role_updater: Optional workbench callback for explicitly requested role changes.
         """
         self.llm_provider = llm_provider
         self.llm_model = llm_model
@@ -57,6 +61,7 @@ class EvaluatorConstructionAgent(Agent):
         self.llm_max_tokens = llm_max_tokens
         self.max_steps = max_steps
         self.context = context
+        self.variable_role_updater = variable_role_updater
         if not isinstance(interaction_manager, InteractionManager):
             raise TypeError("interaction_manager must be an InteractionManager")
         self.interaction_manager = interaction_manager
@@ -65,6 +70,8 @@ class EvaluatorConstructionAgent(Agent):
         self.tool_box = BaseParser.create(tool_parser, tool_list=tools)
         for tool in self.tool_box.tools:
             tool.cancel_event = self.interaction_manager.cancellation_signal
+            if isinstance(tool, VariableRolesTool):
+                tool.update_roles = self._update_variable_roles
         self.tools_counter = ParallelTimer(unit="call")
         self.api = BaseAPI.create(
             llm_provider,
@@ -75,9 +82,40 @@ class EvaluatorConstructionAgent(Agent):
         self.buffer: list[dict[str, Any]] = [
             {
                 "role": "system",
-                "content": (
+                "content": collaborative_workflow_prompt("evaluator") + (
                     "You build and verify custom `DefaultEvaluator` subclasses for SRHarness using the enabled "
                     "tools and skills.\n\n"
+                    "Scope and stopping rule:\n"
+                    "- Implement the user's evaluation protocol; do not perform symbolic regression or search "
+                    "for a predictive formula. Choose a constant and, only if needed to exercise parameter "
+                    "fitting, one simple parametric smoke test before inspecting its scores. Fit that test "
+                    "on training data only. A low or negative R2, high error, or undefined correlation for a "
+                    "constant is not an evaluator defect. Do not try richer formulas or tune a model to "
+                    "improve those scores. Leave scientific discovery to the symbolic-regression agent.\n"
+                    "- Validate execution, fully bound parameters, metric calculations, sample membership, "
+                    "and compliance with the requested split/error model. Repair implementation errors, "
+                    "including inconsistent train/validation handling. Never relax correctness checks, "
+                    "change data selection/splits/metrics, or retune noise to make a probe score better. "
+                    "Bound parameters may remain parameter nodes: inspect their finite values, not whether "
+                    "the expression contains zero parameter nodes.\n"
+                    "- Once the requested protocol and required code paths pass validation, save the evaluator, "
+                    "report the protocol and smoke-test limitations, and finish. Successful construction does "
+                    "not establish a useful scientific formula. Do not run or optimize on external-test "
+                    "labels during construction.\n\n"
+                    "Variable roles:\n"
+                    "- Use `configure_variable_roles` without arguments to inspect current roles and all "
+                    "context.data variables, descriptions, shapes and axes, including unused variables.\n"
+                    "- Preserve the user's existing roles by default. Change feature/target/unused roles "
+                    "only when the user explicitly asks you to configure them or delegates their selection. "
+                    "A request to build, test or repair an evaluator alone is not permission. If roles are "
+                    "missing, explain what the user must select; do not silently select them.\n"
+                    "- For an authorized change, call that tool with roles and a verbatim `user_request` "
+                    "quote; quoting a generic evaluator request does not authorize role changes. Use the "
+                    "tool rather than editing arrays/manifest or mutating context directly. Re-inspect "
+                    "after changes and report the selected target, features and unused fields.\n\n"
+                    "Unused means excluded as a predictor, not deleted: read grouping IDs, uncertainties "
+                    "and other evaluator-only metadata from context.data files when needed; do not turn "
+                    "them into features merely to make them available to the evaluator.\n\n"
                     "Workflow:\n"
                     "1. Use `read_source` to inspect `src/sr_harness/evaluator/` and `src/sr_harness/evaluator/utils/` "
                     "before writing code. If `context.evaluator/` already exists, inspect it with `workspace_shell` "
@@ -104,11 +142,21 @@ class EvaluatorConstructionAgent(Agent):
                     "fitted RHS from each split's initial observed state (prefer `scipy.integrate.solve_ivp` with "
                     "`t_eval` or `evaluator.utils` helpers over Euler steps), and compare against the observed "
                     "state array (note that a derivative target like `dx_dt` and the state `x` are distinct arrays).\n\n"
-                    f"Authoritative dataset schema:\n```json\n"
+                    f"Dataset schema at construction start (re-inspect after role changes):\n```json\n"
                     f"{json.dumps(json_value(context.schema()), ensure_ascii=False, indent=2)}\n```"
                 ),
             }
         ]
+
+    def _update_variable_roles(self, *, roles: dict[str, str], user_request: str) -> dict[str, Any]:
+        if self.variable_role_updater is None:
+            raise ValueError("Variable role editing is unavailable outside the evaluator workbench")
+        if not user_request or not any(
+            message.get("role") == "user" and user_request in str(message.get("content", ""))
+            for message in self.buffer
+        ):
+            raise ValueError("user_request must quote an actual user instruction in this conversation")
+        return self.variable_role_updater(roles=roles, user_request=user_request)
 
     def _publish(self, kind: str, payload: dict[str, Any]) -> None:
         self.interaction_manager.publish_event(kind, payload)
@@ -152,6 +200,8 @@ class EvaluatorConstructionAgent(Agent):
             self.tool_box = BaseParser.create(self.tool_parser, tool_list=tools)
             for tool in self.tool_box.tools:
                 tool.cancel_event = self.interaction_manager.cancellation_signal
+                if isinstance(tool, VariableRolesTool):
+                    tool.update_roles = self._update_variable_roles
         self.api = BaseAPI.create(
             self.llm_provider,
             model=self.llm_model,

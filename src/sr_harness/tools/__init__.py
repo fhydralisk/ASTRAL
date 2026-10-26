@@ -33,6 +33,7 @@ from .model_test import ModelTestTool
 from .finish_search import FinishSearchTool
 from .read_source import ReadSourceTool
 from .validate_evaluator import ValidateEvaluatorTool
+from .configure_variable_roles import VariableRolesTool
 
 __all__ = [
     "BaseTool", "CodeExecutorTool", "ConstantFitTool",
@@ -43,6 +44,6 @@ __all__ = [
     "ReadSourceTool", "RelationshipAnalysisTool", "SINDyTool", "SR4MDLTool",
     "StatisticsTool", "SubagentTool", "SubmitFormulaTool", "ToolCallResult",
     "ToolMetadata", "ToolRunAbort", "ValidateContextDataTool",
-    "ValidateEvaluatorTool", "WebFetchTool", "WebSearchTool",
+    "ValidateEvaluatorTool", "VariableRolesTool", "WebFetchTool", "WebSearchTool",
     "WorkspaceCodeExecutorTool", "WorkspaceShellTool",
 ]
