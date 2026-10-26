@@ -1647,7 +1647,8 @@ def test_evaluator_configuration_test_and_restricted_agent(platform, monkeypatch
         tool['name'] for tool in capabilities.json()['tools']
     }
     assert capabilities.json()['default_tools'] == [
-        'read_source', 'workspace_shell', 'workspace_code_executor', 'validate_evaluator', 'read_skill',
+        'read_source', 'workspace_shell', 'workspace_code_executor', 'validate_evaluator',
+        'configure_variable_roles', 'read_skill',
     ]
     assert 'discover-symbolic-laws' not in capabilities.json()['default_skills']
     assert 'discover-symbolic-laws' not in session.evaluator_agent_settings['skills']

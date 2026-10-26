@@ -16,6 +16,7 @@ from ..core import APICallSample, AgentContext, CandidateRecord, ToolCall, ToolC
 from ..runtime import PendingMessage, SRInteractionManager
 from ..skills import SkillManager
 from .sr_agent import Message, SRAgent, Usage
+from .workflow_roles import collaborative_workflow_prompt
 from ..parser import BaseParser
 
 _logger = logging.getLogger(f"sr_harness.{__name__}")
@@ -762,7 +763,7 @@ class SRAgentInteractive(SRAgent):
             str: System prompt tailored for interactive symbolic regression.
         """
         mse_goal = self._build_mse_goal(restart_records)
-        return (
+        return collaborative_workflow_prompt("regression") + (
             "You are a Symbolic Regression Agent working with a human researcher. "
             "Your goal is to discover simple, interpretable mathematical formulas that explain "
             "the relationship between feature variables and the target variable.\n\n"

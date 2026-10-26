@@ -19,6 +19,7 @@ from ..utils import ParallelTimer, NamedTimer, Timer
 from ..utils import format_pareto_front, render_markdown, tag2ansi, setup_logging
 from ..core import APICallSample, AgentContext, CandidateRecord, ParentLink, SearchRunState, ToolCall, ToolCallResult
 from .agent import Agent
+from .workflow_roles import collaborative_workflow_prompt
 
 _logger = logging.getLogger(f'sr_harness.{__name__}')
 
@@ -577,7 +578,7 @@ class SRAgent(Agent):
             str: Formatted system prompt text.
         """
         mse_goal = self._build_mse_goal(restart_records)
-        return (
+        return collaborative_workflow_prompt("regression") + (
             "You are a Symbolic Regression Agent. Your goal is to discover mathematical formulas "
             "that explain the relationship between feature variables and the target variable. "
             "DO NOT be satisfied with an accurate but complex formula — prefer simple, interpretable expressions. "

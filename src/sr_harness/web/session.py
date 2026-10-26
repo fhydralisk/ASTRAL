@@ -36,6 +36,7 @@ from ..runtime import InteractionManager, ModelRouter, SRInteractionManager
 from ..runtime.network import proxy_environment
 from ..skills import SkillManager
 from ..tools import BaseTool, ModelTestTool, ValidateEvaluatorTool
+from ..tools.configure_variable_roles import available_variable_context
 from ..runtime.workspace import Workspace
 from .demo_data import build_demo
 
@@ -115,6 +116,7 @@ EVALUATOR_DEFAULT_TOOLS = (
     "workspace_shell",
     "workspace_code_executor",
     "validate_evaluator",
+    "configure_variable_roles",
     "read_skill",
 )
 MESSAGE_ACCEPTING_INTERACTION_STATES = frozenset(
@@ -420,6 +422,7 @@ class InteractiveSession:
                     "evaluator_agent_state": self.evaluator_agent_state,
                     "evaluator_agent_result": self.evaluator_agent_result,
                     "context_target": self.context.target,
+                    "context_features": list(self.context.feature_names()),
                     "evaluator": self._evaluator_metadata(),
                     "run_state": self.run_state.export_state()
                     if self.run_state is not None
@@ -464,7 +467,7 @@ class InteractiveSession:
             "run_state",
             "interactions",
         }
-        if set(snapshot) - {"discovery_task"} != expected_fields:
+        if set(snapshot) - {"discovery_task", "context_features"} != expected_fields:
             raise ValueError("Persisted InteractiveSession does not match the current schema")
         if snapshot["version"] != 1:
             raise ValueError("Unsupported InteractiveSession snapshot version")
@@ -501,6 +504,9 @@ class InteractiveSession:
                 raise ValueError(
                     "Persisted evaluator-agent settings do not match the current schema"
                 )
+            old_default_tools = [name for name in EVALUATOR_DEFAULT_TOOLS if name != "configure_variable_roles"]
+            if restored_evaluator_settings.get("tools") == old_default_tools:
+                restored_evaluator_settings["tools"] = list(EVALUATOR_DEFAULT_TOOLS)
             self.evaluator_agent_settings = restored_evaluator_settings
             self.initial_prompt = str(snapshot["initial_prompt"])
             self.discovery_task = snapshot.get("discovery_task")
@@ -533,6 +539,8 @@ class InteractiveSession:
                 if target is not None and target not in self.context.data:
                     raise ValueError("Persisted context target is missing from context.data")
                 self.context.target = target
+                if target is not None and "context_features" in snapshot:
+                    self.context.update_selection(target=target, features=snapshot["context_features"])
                 if self.variable_descriptions:
                     self.context.variable_descriptions.update(
                         {
@@ -1017,6 +1025,7 @@ class InteractiveSession:
                     llm_max_tokens=settings["llm_max_tokens"],
                     max_steps=settings.get("max_steps", 64),
                     interaction_manager=self.evaluator_interaction_manager,
+                    variable_role_updater=self.configure_variable_roles,
                 )
                 with self.lock:
                     self.evaluator_agent = agent
@@ -1032,6 +1041,11 @@ class InteractiveSession:
             else:
                 self.context.args.enabled_skills = previous_skills
         files = sorted(self._custom_evaluator_files(), key=lambda path: path.lstat().st_mtime_ns)
+        events = result.get("tool_events", [])
+        if not files and any(event["tool"] == "configure_variable_roles" for event in events) and not any(
+            event["tool"] in {"workspace_code_executor", "validate_evaluator"} for event in events
+        ):
+            return result
         if not files:
             raise ValueError(
                 "EvaluatorConstructionAgent did not create a Python file under context.evaluator/"
@@ -1651,6 +1665,60 @@ class InteractiveSession:
                 message["content"] for message in messages if message["role"] == "user"
             ),
         }
+
+    def select_variables(self, *, target: str, features: list[str],
+                         variable_descriptions: dict[str, str] | None = None) -> dict[str, Any]:
+        """Apply a validated selection without deleting unused fields from context.data on disk."""
+        with self.lock:
+            if self.data_state in {"running", "stopping"}:
+                raise ValueError("Wait for the data-preparation agent to finish before changing variable roles")
+            if self.state not in {"idle", "running"} or (
+                self.state == "running" and self.sr_interaction_manager.status()["interaction_state"] != "paused"
+            ):
+                raise ValueError("Pause symbolic regression at a safe boundary before changing variable roles")
+            if not isinstance(target, str) or not target:
+                raise ValueError("Select exactly one target")
+            if (not isinstance(features, list) or any(not isinstance(name, str) for name in features)
+                    or len(set(features)) != len(features) or target in features):
+                raise ValueError("features must be a list of distinct variable names excluding the target")
+            candidate = available_variable_context(self.context)
+            unknown = set([target, *features]) - set(candidate.data)
+            if unknown:
+                raise ValueError(f"Unknown variables: {sorted(unknown)}")
+            descriptions = candidate.variable_descriptions | dict(variable_descriptions or {})
+            candidate.update_selection(target=target, features=features, variable_descriptions=descriptions)
+            self.context.commit_context_data({
+                "data": candidate.data, "variable_descriptions": candidate.variable_descriptions,
+                "variable_axes": candidate.variable_axes,
+                "variable_structures": candidate.variable_structures,
+                "relation_names": candidate.relation_names, "num_nodes": candidate.num_nodes,
+            })
+            self.context.target = target
+            self.variable_descriptions = descriptions
+            return {"revision": self.context.args.data_revision, "target": target,
+                    "features": list(self.context.feature_names()), "selection_changed": True}
+
+    def configure_variable_roles(self, *, roles: dict[str, str], user_request: str) -> dict[str, Any]:
+        """Apply the evaluator agent's explicitly requested patch to feature/target/unused roles."""
+        with self.lock:
+            if not isinstance(roles, dict) or not roles:
+                raise ValueError("roles must be a non-empty mapping of variable names to roles")
+            available = available_variable_context(self.context)
+            if set(roles) - set(available.variable_axes):
+                raise ValueError("Role changes must name variables from the catalogue, not axis coordinates")
+            if any(role not in {"feature", "target", "unused"} for role in roles.values()):
+                raise ValueError("Each role must be feature, target, or unused")
+            active_features = set(self.context.feature_names())
+            updated = {name: "target" if name == self.context.target else
+                       "feature" if name in active_features else "unused"
+                       for name in available.variable_axes}
+            updated.update(roles)
+            targets = [name for name, role in updated.items() if role == "target"]
+            if len(targets) != 1:
+                raise ValueError("The resulting selection must have exactly one target")
+            return self.select_variables(target=targets[0], features=[
+                name for name, role in updated.items() if role == "feature"
+            ])
 
     def _select_context_columns(
         self,

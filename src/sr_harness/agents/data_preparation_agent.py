@@ -15,6 +15,7 @@ from ..skills import SkillManager
 from ..tools import BaseTool
 from ..utils import ParallelTimer
 from .agent import Agent
+from .workflow_roles import collaborative_workflow_prompt
 
 
 class DataPreparationAgent(Agent):
@@ -95,16 +96,16 @@ class DataPreparationAgent(Agent):
         self.buffer: list[dict[str, Any]] = [
             {
                 "role": "system",
-                "content": (
-                    "You are the data-preparation agent in SRHarness. Help the user inspect raw workspace "
-                    "files and build a validated `context.data/` dataset for symbolic regression.\n\n"
-                    "Workflow & Tools:\n"
+                "content": collaborative_workflow_prompt("data") + (
+                    "You are the data-preparation agent in ASTRAL. Help the user inspect raw workspace "
+                    "files and build a validated `context.data/` dataset for astronomical discovery.\n\n"
+                    "Workflow & Tools (only for requested data-preparation work):\n"
                     "- Inspect uploaded files with `workspace_shell` and `read_pdf` (when PDFs are present).\n"
                     "- Use `web_search` and `web_fetch` when external data or literature is requested. If "
                     "`web_fetch` reports blocked access (401/403/429), do not retry that URL; search for an "
                     "accessible authoritative alternative.\n"
                     "- Run reproducible cleaning and transformation scripts via `workspace_code_executor`.\n"
-                    "workspace_shell is a restricted command parser: use separate calls, not pipes or &&; "
+                    "workspace_shell supports documented commands and | pipelines, but not &&; "
                     "use Python pathlib/glob for file discovery. Start with metadata and one small slice. "
                     "Verify dimensions, units and masks before processing full arrays; chunk large files "
                     "and save short, independently executable script stages to avoid truncated tool calls. "
@@ -117,7 +118,7 @@ class DataPreparationAgent(Agent):
                     "were applied. This stage prepares data and diagnostics for a separate discovery agent. "
                     "Do not choose a final formula or compare candidate formulas on external-test labels. "
                     "Keep those labels sealed for a single assessment after the downstream expression is "
-                    "frozen; development-only baseline diagnostics are allowed. "
+                    "frozen; field-level diagnostics are allowed, but leave candidate fitting to symbolic regression. "
                     "When a sample is selected, actually apply its mask to every aligned array exported for "
                     "regression; writing a mask or a plan alone does not apply it. Preserve excluded samples "
                     "and external holdouts separately with source-row provenance. Identify evaluator requirements "
