@@ -1234,7 +1234,18 @@ function trackActivity(e) {
   else if(phases[e.kind])inferredActivity={phase:phases[e.kind],tool:p.call?.name,since:e.timestamp};
   if(e.kind==='context'){latestContext=p;const key=contextKey(p.coord);if(key)contextHistory.set(key,p)}
 }
+function renderEventPreviewNotice(event,feed,scope){
+  if(!event.transport?.truncated||feed.querySelector('[data-preview-sequence="'+event.seq+'"]'))return;
+  const card=el('article',undefined,'event event_generic'),meta=el('div',undefined,'meta'),link=el('a',currentLocale==='en'?'Download full event':'下载完整事件','context-link');
+  card.dataset.previewSequence=String(event.seq);meta.append(el('span',currentLocale==='en'?'Large event: showing a limited preview.':'该事件较大，当前显示受限预览。','small muted'));
+  const routes={search:'/api/control/events/',data:'/api/data/agent/events/',evaluator:'/api/evaluator/agent/events/'};
+  link.href=conversationUrl(routes[scope]+encodeURIComponent(event.seq));link.download=scope+'-event-'+event.seq+'.json';meta.append(link);card.append(meta);feed.hidden=false;feed.append(card);
+}
+function previewAwareContextEvent(event,scope){
+  return event.kind==='context'&&event.transport?.truncated?{...event,payload:{...event.payload,timeline_preview:{sequence:event.seq,scope}}}:event;
+}
 function renderEvent(e) {
+  renderEventPreviewNotice(e,$('feed'),'search');e=previewAwareContextEvent(e,'search');
   if(['execution_completed','execution_failed'].includes(e.kind))settleAssistantCards(assistantCards,e.kind==='execution_failed'?(e.payload?.error||e.payload?.result?.error||_('failed')):null);
   if(e.kind==='prompt_added'){renderPromptAdded(e,$('feed'));return}
   if(e.kind==='state_changed')e={...e,kind:'lifecycle',payload:{state:e.payload?.current}};
@@ -1297,6 +1308,7 @@ function renderEvent(e) {
   if(follow)feed.scrollTop=feed.scrollHeight;else $('follow').hidden=false;
 }
 function renderDataEvent(e){
+  renderEventPreviewNotice(e,$('data-agent-feed'),'data');e=previewAwareContextEvent(e,'data');
   if(e.kind==='prompt_added'){renderPromptAdded(e,$('data-agent-feed'),'data');return}
   if(['state_changed','command_received','workspace_changed','settings_applied','settings_failed'].includes(e.kind)){renderGenericEventCard(e,$('data-agent-feed'));return}
   e=scopedTimelineEvent(e,'data');
@@ -1351,6 +1363,7 @@ function renderDataEvent(e){
   if(!updating)feed.append(card);if(follow)feed.scrollTop=feed.scrollHeight;
 }
 function renderEvaluatorEvent(e){
+  renderEventPreviewNotice(e,$('evaluator-agent-feed'),'evaluator');e=previewAwareContextEvent(e,'evaluator');
   if(e.kind==='prompt_added'){renderPromptAdded(e,$('evaluator-agent-feed'),'evaluator');return}
   if(['state_changed','command_received','workspace_changed','settings_applied','settings_failed'].includes(e.kind)){renderGenericEventCard(e,$('evaluator-agent-feed'));return}
   e=scopedTimelineEvent(e,'evaluator');
@@ -1423,6 +1436,7 @@ function renderActivity() {
 
 function renderContext(p){
   const sig=JSON.stringify(p);if(sig===contextSignature)return;contextSignature=sig;const host=$('context');for(const block of host.querySelectorAll('.reasoning-block'))previewObserver.unobserve(block);host.replaceChildren();
+  if(p.timeline_preview)renderEventPreviewNotice({seq:p.timeline_preview.sequence,transport:{truncated:true}},host,p.timeline_preview.scope);
   const messages=Array.isArray(p.messages)?p.messages:[],characters=messages.reduce((total,message)=>{const content=message?.content;return total+(typeof content==='string'?content.length:pretty(content??'').length)},0),coord=Object.entries(p.coord||{}).map(([key,value])=>key+value).join(' · '),location=p.agent_scope==='data'?_('dataAgentTitle')+' · '+_('dataAgentTurn',{count:p.turn}):coord;
   const overview=el('div',undefined,'context-overview');overview.append(el('strong',_('sentContext')));if(location)overview.append(el('span',location));overview.append(el('span',_('contextStats',{count:messages.length,characters:formatMagnitude(characters)}),'context-size'));host.append(overview);
   const roleInfo={system:['settings',_('systemPrompt')],developer:['settings',_('developerPrompt')],user:['user',_('userPrompt')],assistant:['agent',_('agent')],tool:['tool',_('toolResult')]};
@@ -1608,14 +1622,15 @@ function compactStreamEventBatch(events){
   for(const event of events){const responseId=event.payload?.response_id;if(!responseId)continue;if(['assistant_completed','assistant_failed'].includes(event.kind))terminal.add(responseId);else if(event.kind==='assistant_delta')latestDelta.set(responseId,event)}
   return events.filter(event=>{const responseId=event.payload?.response_id;if(!responseId)return true;if(terminal.has(responseId)&&['assistant_started','assistant_delta'].includes(event.kind))return false;if(event.kind==='assistant_delta')return latestDelta.get(responseId)===event;return true})
 }
-async function pollEvents(){try{
+async function pollEvents(){let pollDelay=1500;try{
   await conversationReady;
-  const searchEvents=await api('/api/control/events?after_seq='+seq),dataEvents=await api('/api/data/agent/events?after_seq='+dataSeq),evaluatorEvents=await api('/api/evaluator/agent/events?after_seq='+evaluatorSeq);lastEventsAt=Date.now();
+  const [searchEvents,dataEvents,evaluatorEvents]=await Promise.all([api('/api/control/events?after_seq='+seq),api('/api/data/agent/events?after_seq='+dataSeq),api('/api/evaluator/agent/events?after_seq='+evaluatorSeq)]);lastEventsAt=Date.now();
+  if([searchEvents,dataEvents,evaluatorEvents].some(batch=>batch.has_more))pollDelay=50;
   if((searchEvents.truncated&&seq)||(dataEvents.truncated&&dataSeq)||(evaluatorEvents.truncated&&evaluatorSeq))notice(_('eventBufferGap'));
   for(const [batch,render] of [[searchEvents,renderEvent],[dataEvents,renderDataEvent],[evaluatorEvents,renderEvaluatorEvent]])for(const e of compactStreamEventBatch(batch.events)){try{render(e)}catch(error){notice(_('eventRenderFailed',{seq:e.seq,message:error.message}))}}
   if(searchEvents.cursor_reset)seq=0;if(dataEvents.cursor_reset)dataSeq=0;if(evaluatorEvents.cursor_reset)evaluatorSeq=0;seq=Math.max(seq,...searchEvents.events.map(event=>event.seq));dataSeq=Math.max(dataSeq,...dataEvents.events.map(event=>event.seq));evaluatorSeq=Math.max(evaluatorSeq,...evaluatorEvents.events.map(event=>event.seq));
   const visibleContext=selectedContextKey?contextHistory.get(selectedContextKey):latestContext;if(visibleContext)renderContext(visibleContext);renderActivity();
-}catch(error){$('connection').title=_('eventSync',{message:error.message})}finally{setTimeout(pollEvents,1500)}}
+}catch(error){pollDelay=1500;$('connection').title=_('eventSync',{message:error.message})}finally{setTimeout(pollEvents,pollDelay)}}
 async function pollFiles(){try{await conversationReady;await refreshFiles()}catch(error){$('files').title=error.message}finally{setTimeout(pollFiles,5000)}}
 $('follow').onclick=()=>{$('feed').scrollTop=$('feed').scrollHeight;$('follow').hidden=true};
 $('feed').addEventListener('scroll',()=>{$('follow').hidden=$('feed').scrollHeight-$('feed').scrollTop-$('feed').clientHeight<100});
