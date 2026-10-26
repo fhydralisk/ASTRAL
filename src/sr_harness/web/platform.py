@@ -19,7 +19,7 @@ from starlette.concurrency import run_in_threadpool
 from ..core import json_value, update_context_data_descriptions
 from ..tools.configure_variable_roles import available_variable_context
 from .session import InteractiveSession, SessionStartError
-from .responses import worker_json_response, worker_event_response
+from .responses import worker_json_response, worker_event_response, worker_event_download
 
 MAX_UPLOAD = 256 * 1024 * 1024
 
@@ -120,6 +120,10 @@ def mount_platform(app, session: InteractiveSession):
     def data_agent_events(after_seq: int = 0):
         return worker_event_response(session.data_interaction_manager, max(0, after_seq))
 
+    @app.get("/api/data/agent/events/{sequence}")
+    def download_data_agent_event(sequence: int):
+        return worker_event_download(session.data_interaction_manager, sequence, "data")
+
     @app.post("/api/data/agent/stop")
     def stop_data_preparation():
         try:
@@ -176,6 +180,10 @@ def mount_platform(app, session: InteractiveSession):
     @app.get("/api/evaluator/agent/events")
     def evaluator_agent_events(after_seq: int = 0):
         return worker_event_response(session.evaluator_interaction_manager, max(0, after_seq))
+
+    @app.get("/api/evaluator/agent/events/{sequence}")
+    def download_evaluator_agent_event(sequence: int):
+        return worker_event_download(session.evaluator_interaction_manager, sequence, "evaluator")
 
     @app.post("/api/evaluator/agent/stop")
     def stop_evaluator_assistance():

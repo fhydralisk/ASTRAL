@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..runtime import SRInteractionManager
-from .responses import worker_json_response, worker_event_response
+from .responses import worker_json_response, worker_event_response, worker_event_download
 from .isolation import RequestWorkPool, RequestBodyLimit, install_route_isolation
 
 WEB_DIR = Path(__file__).resolve().parent
@@ -126,6 +126,11 @@ def create_app(
     def control_events(after_seq: int = Query(0, ge=0)):
         manager = session.sr_interaction_manager if session is not None else app.state.interaction_manager
         return worker_event_response(manager, after_seq)
+
+    @app.get("/api/control/events/{sequence}")
+    def download_control_event(sequence: int):
+        manager = session.sr_interaction_manager if session is not None else app.state.interaction_manager
+        return worker_event_download(manager, sequence, "search")
 
     @app.post("/api/control/command")
     def control_command(payload: dict = Body(...)):
