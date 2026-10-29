@@ -21,11 +21,13 @@ InteractionState: TypeAlias = Literal[
     "interrupting",
     "paused",
 ]
-InteractionAction: TypeAlias = Literal["message", "pause", "force_pause"]
+InteractionAction: TypeAlias = Literal["message", "pause", "force_pause", "resume", "stop"]
 SRInteractionAction: TypeAlias = Literal[
     "message",
     "pause",
     "force_pause",
+    "resume",
+    "stop",
     "next_c",
     "next_r",
 ]
@@ -123,6 +125,8 @@ class InteractionManager:
         self._state: InteractionState = "idle"
         self._messages: deque[PendingMessage] = deque()
         self._events: deque[dict[str, Any]] = deque(maxlen=event_capacity)
+        self._resume_requested = False
+        self._stop_requested = False
         self._next_sequence = 1
         self._discarded_through = 0
         self._cancel_current: Callable[[], str | None] | None = None
@@ -177,7 +181,7 @@ class InteractionManager:
         """Apply a user control command to this agent.
 
         Args:
-            action: Message, pause, or force-pause command.
+            action: Message, pause, force-pause, resume, or stop command.
             message: User guidance required by the ``message`` action.
 
         Returns:
@@ -186,11 +190,20 @@ class InteractionManager:
         Raises:
             ValueError: If the action is invalid or a message is empty.
         """
-        if action not in {"message", "pause", "force_pause"}:
-            raise ValueError("action must be message, pause, or force_pause")
+        if action not in {"message", "pause", "force_pause", "resume", "stop"}:
+            raise ValueError("action must be message, pause, force_pause, resume, or stop")
         cancel: Callable[[], str | None] | None = None
         with self._condition:
-            if action == "message":
+            if action == "resume":
+                if self._state != "paused":
+                    raise ValueError("Agent is not paused")
+                self._resume_requested = True
+            elif action == "stop":
+                self._stop_requested = True
+                if self._state != "idle":
+                    self._set_state_locked("pausing")
+                    cancel = self._cancel_current
+            elif action == "message":
                 content = (message or "").strip()
                 if not content:
                     raise ValueError("message command requires non-empty message")
@@ -235,6 +248,8 @@ class InteractionManager:
         with self._condition:
             if self._state != "idle":
                 raise RuntimeError(f"cannot start agent execution while {self._state}")
+            self._stop_requested = False
+            self._resume_requested = False
             messages = self._consume_messages_locked()
             self._set_state_locked("running")
             return messages
@@ -262,6 +277,9 @@ class InteractionManager:
             RuntimeError: If no agent execution is active.
         """
         with self._condition:
+            if self._stop_requested:
+                self._set_state_locked("idle")
+                raise InterruptedError("Execution stopped")
             if self._state == "running":
                 messages = self._consume_messages_locked()
                 paused = False
@@ -269,8 +287,12 @@ class InteractionManager:
                 if self._state != "paused":
                     self._set_state_locked("paused")
                 self._cancel_current = None
-                while not self._has_boundary_input_locked():
+                while not self._has_boundary_input_locked() and not self._resume_requested and not self._stop_requested:
                     self._condition.wait()
+                if self._stop_requested:
+                    self._set_state_locked("idle")
+                    raise InterruptedError("Execution stopped")
+                self._resume_requested = False
                 messages = self._consume_messages_locked()
                 paused = True
             else:

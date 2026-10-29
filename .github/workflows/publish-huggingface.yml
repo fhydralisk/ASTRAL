@@ -1,11 +1,7 @@
 name: Publish Hugging Face Space
 
+# Legacy single-container publication is manual-only after the service split.
 on:
-  push:
-    branches:
-      - master
-    paths:
-      - pyproject.toml
   workflow_dispatch:
 
 permissions:
@@ -17,7 +13,7 @@ concurrency:
 
 jobs:
   changes:
-    if: github.ref == 'refs/heads/master'
+    if: false # Retired: deploy the separate services with root compose.yaml
     runs-on: ubuntu-latest
     outputs:
       publish: ${{ steps.changes.outputs.publish }}

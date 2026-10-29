@@ -11,6 +11,7 @@ from collections import defaultdict
 from contextlib import contextmanager
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TypeAlias
 from ..api import BaseAPI
+from ..service.environment import agent_environment
 from ..tools import BaseTool
 from ..parser import BaseParser
 from ..skills import SkillManager
@@ -849,7 +850,7 @@ class SRAgent(Agent):
                     route.provider,
                     model=route.model,
                     tool_box=self.tool_box,
-                    environment=getattr(self.context.args, "api_environment", None),
+                    environment=agent_environment(self.context, "search"),
                     save_path=self.save_path,
                 )
             api = self._strong_api

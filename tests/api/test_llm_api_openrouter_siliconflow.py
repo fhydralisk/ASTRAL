@@ -600,9 +600,10 @@ def test_openrouter_implements_n_as_independent_requests(monkeypatch):
     assert returned.token_usage == {"prompt": 21, "answer": 33}
 
 
-def test_openrouter_skips_malformed_native_tool_calls(monkeypatch):
+def test_openrouter_reports_malformed_native_tool_calls(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     monkeypatch.setattr("sr_harness.api.openrouter_api.OpenAI", _FakeOpenRouterClient)
+    monkeypatch.setattr(OpenRouterAPI, "wait_before_retry", lambda self, delay: None)
     _FakeOpenRouterClient.payloads = []
     _FakeOpenRouterClient.message = {
         "content": "ready",
@@ -626,16 +627,11 @@ def test_openrouter_skips_malformed_native_tool_calls(monkeypatch):
     )
     chunks, return_value = _consume(api([{"role": "user", "content": "use the tool"}]))
 
-    expected_call = ToolCall(
-        "demo_tool", {"x": 5}, id="call_good", raw=_FakeOpenRouterClient.message["tool_calls"][1]
-    )
-    assert chunks[0].content == "ready"
-    assert chunks[0].tool_calls == [expected_call]
-    assert chunks[0].message == {
-        "role": "assistant",
-        "content": "ready",
-        "tool_calls": _FakeOpenRouterClient.message["tool_calls"],
-    }
+    # Match the native parser integrity contract: an incomplete call invalidates
+    # the response, rather than silently executing only its remaining calls.
+    assert chunks == []
+    assert return_value.ok is False
+    assert "not complete JSON" in return_value.error
 
 
 def test_openrouter_text_parser_injects_tool_prompt_and_parses_action(monkeypatch):

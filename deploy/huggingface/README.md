@@ -1,3 +1,5 @@
+> Historical single-container deployment. The current architecture requires separate Next.js and Harness services. Use [Compose deployment](../decoupled/README.md); the old Space setup does not deploy the Web application.
+
 # Deploying SRHarness on Hugging Face Spaces
 
 SRHarness can run as a Hugging Face Docker Space using the repository's root

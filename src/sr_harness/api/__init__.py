@@ -12,6 +12,7 @@ from .siliconflow_api import SiliconFlowAPI
 __all__ = [
     "APICallSummary",
     "BaseAPI",
+    "CompatibleAPI",
     "DeepSeekAPI",
     "GeminiAPI",
     "LMStudioAPI",
@@ -20,3 +21,5 @@ __all__ = [
     "OpenRouterAPI",
     "SiliconFlowAPI",
 ]
+
+from .compatible_api import CompatibleAPI

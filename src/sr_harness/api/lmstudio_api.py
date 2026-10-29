@@ -98,7 +98,8 @@ class LMStudioAPI(BaseAPI):
         callback=None,
     ) -> Generator[APICallSample, None, dict[str, Any]]:
         yield from []
-        load_dotenv()
+        if not getattr(self.environment, "strict", False):
+            load_dotenv()
 
         endpoint = self.normalize_endpoint(self.get_env("LMSTUDIO_ENDPOINT", required=True))
         api_key = self.get_env("LMSTUDIO_API_KEY", required=True)

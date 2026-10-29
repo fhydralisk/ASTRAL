@@ -10,6 +10,7 @@ from typing import Any
 from joblib import Parallel, delayed
 
 from ..api import BaseAPI
+from ..service.environment import agent_environment
 from ..core import AgentContext, ToolCall, ToolCallResult
 from ..parser import BaseParser
 from ..tools import BaseTool
@@ -33,6 +34,7 @@ class Agent(ABC, FactoryMixin):
     """
 
     context: AgentContext
+    agent_role: str = "search"
     tool_box: BaseParser | None
     api: BaseAPI | None
 
@@ -57,12 +59,16 @@ class Agent(ABC, FactoryMixin):
         """
         self.context = context
         tools = [tool_cls(context=context) for tool_cls in self.tool_cls_list]
+        for tool in tools:
+            tool.agent_role = self.agent_role
+            tool.llm_provider = self.llm_provider
+            tool.llm_model = self.llm_model
         self.tool_box = BaseParser.create(self.tool_parser, tool_list=tools)
         self.api = BaseAPI.create(
             self.llm_provider,
             model=self.llm_model,
             tool_box=self.tool_box,
-            environment=getattr(context.args, "api_environment", None),
+            environment=agent_environment(context, (self.agent_role)),
             save_path=getattr(self, "save_path", None),
         )
 

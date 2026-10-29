@@ -81,16 +81,14 @@ sr_harness = [
     "*.yaml",
     "**/*.md",
     "**/*.yaml",
-    "web/static/*.html",
-    "web/static/*.svg",
-    "web/static/brands/*.svg",
-    "web/static/brands/*.png",
+    "service/*.json",
 ]
 sr_harness_engine = ["README.zh.md"]
 
 [tool.pytest.ini_options]
 minversion = "7.0"
 testpaths = ["tests"]
+norecursedirs = ["legacy_web", ".venv", "node_modules"]
 python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"

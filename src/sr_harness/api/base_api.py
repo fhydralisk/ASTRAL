@@ -99,7 +99,7 @@ class BaseAPI(ABC, FactoryMixin):
         Returns:
             str | None: Resolved environment variable value, or ``default``.
         """
-        value = self.environment.get(name, os.environ.get(name, default))
+        value = self.environment.get(name, default) if getattr(self.environment, "strict", False) else self.environment.get(name, os.environ.get(name, default))
         if required and value is None:
             raise KeyError(name)
         return value
@@ -242,6 +242,8 @@ class BaseAPI(ABC, FactoryMixin):
         Returns:
             str: Sanitized error message with sensitive tokens redacted.
         """
+        if getattr(self.environment, "strict", False):
+            return "The model request failed. Check the model configuration or provider availability."
         label = description or f"{type(self).__name__}({self.model})"
         formatted_error = "".join(traceback.format_exception(error)).rstrip()
         _logger.error(f"Error requesting {label}:\n{formatted_error}")
@@ -699,7 +701,7 @@ class BaseAPI(ABC, FactoryMixin):
         payload: dict[str, Any],
     ) -> None:
         """Append one final-response or result record when API logging is enabled."""
-        if self.save_path is None:
+        if self.save_path is None or getattr(self.environment, "strict", False):
             return
         path = (
             self.save_path

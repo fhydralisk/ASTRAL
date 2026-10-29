@@ -51,7 +51,7 @@ def proxy_environment(
     Returns:
         dict[str, str]: Updated environment dictionary.
     """
-    result = dict(environment)
+    result = type(environment)(environment) if getattr(environment, "strict", False) else dict(environment)
     for name in ("http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY"):
         result.pop(name, None)
     effective = routed_proxy(user_proxy, egress_proxy)

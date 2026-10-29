@@ -23,11 +23,15 @@
 安装 Node.js 的 `playwright` 包及 Chromium 浏览器后，可在仓库根目录运行前端流式渲染与交互回归测试：
 
 ```bash
-node tests/web/stream_rendering.cjs
+cd web
+npm ci
+npx playwright install chromium
+npm run test:e2e
 ```
 
-- 若 `playwright` 安装在仓库外部目录，可通过环境变量 `NODE_PATH` 指定 `node_modules` 路径，并通过 `CHROMIUM_EXECUTABLE` 指定本地 Chromium 可执行文件。
-- 该测试脚本会拦截所有外部网络请求，在离线环境下验证停止按钮状态切换、未闭合 Markdown 与数学公式的流式渲染、滚动跟随、推理折叠块、输出截断恢复以及响应式宽度布局，不会调用真实的模型服务。
+- 浏览器测试启动真实 Next.js 后端和模拟 Harness，验证登录、上传、科研工作流、暂停继续、会话切换、刷新、主题、语言及导出归档，不调用付费模型。
+- Python HTTP、本地服务、幂等、并发与科研工作流测试位于 `tests/service/`；旧 Python WebUI 测试保留在 `tests/legacy_web/`，不再收集。
+- Windows 下需在 WSL2 的原生 Linux 文件系统或 Docker 中验证 Landlock/openat2，具体命令见 `deploy/decoupled/README.md`。
 
 ## 3. 测试分类与 Pytest 标记
 
@@ -95,7 +99,8 @@ tests/
 ├── parser/              # 工具调用解析器测试
 ├── api/                 # 模型 API 客户端测试
 ├── cli/                 # 命令行入口测试
-├── web/                 # FastAPI 网页工作台与会话恢复测试
+├── service/             # Harness 应用服务、HTTP 契约与科研流程
+├── legacy_web/          # 旧 Python WebUI 测试（仅参考，不再收集）
 └── deploy/              # 部署与发布脚本测试
 ```
 

@@ -8,7 +8,7 @@ import os
 import platform
 from pathlib import Path
 
-_LIBC = ctypes.CDLL(None, use_errno=True)
+_LIBC = ctypes.CDLL(None, use_errno=True) if os.name == "posix" else None
 _SYS_OPENAT2 = {"x86_64": 437, "aarch64": 437}
 _RESOLVE_NO_MAGICLINKS = 0x02
 _RESOLVE_NO_SYMLINKS = 0x04
@@ -28,7 +28,7 @@ def open_beneath(
     relative_path: str | Path,
     *,
     disallow_symlinks: bool = False,
-    flags: int = os.O_RDONLY | os.O_CLOEXEC,
+    flags: int = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0),
 ) -> int:
     """Atomically open ``relative_path`` beneath ``root`` using Linux ``openat2(RESOLVE_BENEATH)``.
 
@@ -44,6 +44,8 @@ def open_beneath(
     Returns:
         int: Open OS file descriptor owned by the caller.
     """
+    if _LIBC is None:
+        raise OSError(errno.ENOSYS, "Secure workspace access requires Linux openat2")
     syscall_number = _SYS_OPENAT2.get(platform.machine())
     if syscall_number is None:
         raise OSError(errno.ENOSYS, "openat2 is unsupported on this architecture")

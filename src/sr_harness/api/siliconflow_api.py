@@ -157,7 +157,8 @@ class SiliconFlowAPI(BaseAPI):
         callback: ProgressCallback | None = None,
     ) -> Generator[APICallSample, None, dict[str, Any]]:
         yield from []
-        load_dotenv()
+        if not getattr(self.environment, "strict", False):
+            load_dotenv()
         url = self.get_env(
             "SILICONFLOW_ENDPOINT",
             "https://api.siliconflow.cn/v1/chat/completions",

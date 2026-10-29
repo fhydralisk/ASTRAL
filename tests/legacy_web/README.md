@@ -1,0 +1,1 @@
+Historical tests for the retired Python WebUI and cookie-selected API. They are retained for reference and excluded from collection. New transport, identity and browser workflows are tested in tests/service and web/tests.

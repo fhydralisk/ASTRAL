@@ -72,7 +72,8 @@ class OpenRouterAPI(BaseAPI):
         top_p=1.0,
         callback: ProgressCallback | None = None,
     ) -> ProviderSampleResult:
-        load_dotenv()
+        if not getattr(self.environment, "strict", False):
+            load_dotenv()
         api_key = self.get_env("OPENROUTER_API_KEY", required=True)
         endpoint = self.get_env("OPENROUTER_ENDPOINT", "https://openrouter.ai/api/v1")
         client = OpenAI(

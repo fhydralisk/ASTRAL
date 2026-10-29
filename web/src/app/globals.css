@@ -1,0 +1,507 @@
+:root {
+  --bg: #f2f4fa;
+  --panel: #fff;
+  --text: #223451;
+  --muted: #697994;
+  --line: #dce2ef;
+  --accent: #214986;
+  --soft: #eaf0fb;
+  --danger: #b3384b;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg: #101827;
+  --panel: #172238;
+  --text: #dbe5f7;
+  --muted: #9dadc7;
+  --line: #2e3c56;
+  --accent: #8aaef2;
+  --soft: #233555;
+  --danger: #ff9ba9;
+  color-scheme: dark;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font:
+    13px/1.6 Inter,
+    system-ui,
+    sans-serif;
+}
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+button,
+a,
+input,
+textarea,
+select {
+  outline-offset: 3px;
+}
+button {
+  cursor: pointer;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 6px 10px;
+}
+button:hover {
+  background: var(--soft);
+  border-color: var(--accent);
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.primary {
+  background: #234a88;
+  color: #fff;
+  border-color: #234a88;
+}
+.link {
+  border: 0;
+  background: none;
+}
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+h1,
+h2,
+h3 {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+h2 {
+  font-size: 19px;
+}
+h3 {
+  font-size: 13px;
+}
+header {
+  height: 64px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+.brand {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 3px;
+}
+.brand span,
+.account h1 span {
+  color: #8c9fcc;
+}
+header small {
+  color: var(--muted);
+}
+nav {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 10px 0;
+}
+label:has(input[type="checkbox"]) {
+  flex-direction: row;
+  align-items: center;
+}
+input,
+textarea,
+select {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 8px;
+  max-width: 100%;
+}
+textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 70px;
+}
+.source,
+.json-editor textarea {
+  font:
+    12px/1.6 Consolas,
+    monospace;
+}
+.account {
+  max-width: 440px;
+  margin: 70px auto;
+}
+.account h1 {
+  font-size: 44px;
+  letter-spacing: 7px;
+}
+.account form {
+  padding: 30px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+}
+.account form > .primary {
+  width: 100%;
+  margin: 15px 0;
+}
+.app-shell {
+  display: flex;
+  min-height: calc(100vh - 64px);
+}
+.conversations {
+  width: 190px;
+  flex-shrink: 0;
+  padding: 15px 12px;
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+}
+.conversation {
+  display: flex;
+  align-items: center;
+  border-radius: 7px;
+  margin: 6px 0;
+}
+.conversation > button {
+  border: 0;
+  background: transparent;
+  flex: 1;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conversation.selected {
+  background: var(--soft);
+}
+details {
+  position: relative;
+}
+summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.conversation details[open],
+.file details[open] {
+  z-index: 5;
+}
+.conversation details a,
+.conversation details button,
+.file details a,
+.file details button {
+  display: block;
+  padding: 5px;
+  background: var(--panel);
+}
+.research-grid {
+  display: grid;
+  grid-template-columns: 210px minmax(350px, 1fr) 250px;
+  flex: 1;
+  min-width: 0;
+}
+.workspace-panel,
+.candidate-panel {
+  padding: 15px;
+  overflow: auto;
+  border-right: 1px solid var(--line);
+}
+.candidate-panel {
+  border-left: 1px solid var(--line);
+  border-right: 0;
+}
+.research-main {
+  background: var(--panel);
+  min-width: 0;
+}
+.stage-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--line);
+  padding: 12px 15px;
+  gap: 10px;
+}
+.stage-tabs button {
+  border: 0;
+  background: transparent;
+}
+.stage-tabs button.active {
+  color: var(--accent);
+  background: var(--soft);
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  padding: 10px 0;
+}
+.toolbar label {
+  flex-direction: row;
+  align-items: center;
+  margin: 0;
+}
+.research-main > .toolbar {
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--line);
+}
+.status {
+  color: var(--muted);
+  font-size: 11px;
+}
+.stage-content {
+  padding: 20px 26px;
+}
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  margin: 10px 0;
+  overflow-wrap: anywhere;
+}
+.card span,
+.card small,
+.card code {
+  display: block;
+}
+.card code {
+  white-space: pre-wrap;
+  margin: 8px 0;
+  color: var(--accent);
+}
+.card button {
+  margin: 7px 5px 0 0;
+}
+.settings-page {
+  max-width: 850px;
+  margin: 30px auto;
+  padding: 25px;
+}
+.json-editor {
+  margin: 12px 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.json-editor textarea {
+  margin: 8px 0;
+}
+.timeline {
+  margin-top: 20px;
+}
+.event {
+  border-left: 2px solid #6b85b9;
+  padding: 7px 14px;
+  margin: 12px 0;
+}
+.event small {
+  color: var(--muted);
+}
+.composer {
+  display: flex;
+  gap: 10px;
+  padding-top: 15px;
+}
+.composer textarea {
+  flex: 1;
+}
+.table-scroll {
+  max-height: 330px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 11px;
+}
+th,
+td {
+  text-align: left;
+  padding: 6px 9px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+th {
+  position: sticky;
+  top: 0;
+  background: var(--soft);
+}
+.file {
+  font-size: 11px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.file > button {
+  max-width: 90%;
+  padding: 4px 1px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.file-children {
+  width: 100%;
+  padding-left: 10px;
+}
+.upload {
+  border: 1px dashed var(--line);
+  padding: 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.upload input {
+  width: 100%;
+  font-size: 10px;
+}
+dialog {
+  position: fixed;
+  inset: 15%;
+  margin: 0;
+  width: 70%;
+  max-height: 70vh;
+  overflow: auto;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  z-index: 20;
+}
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.error {
+  color: var(--danger);
+}
+.notice {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: var(--soft);
+  border-bottom: 1px solid var(--line);
+  padding: 8px 20px;
+}
+.notice button {
+  float: right;
+}
+.empty {
+  padding: 70px;
+}
+.search-tree {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.search-tree button {
+  max-width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.chart {
+  min-height: 280px;
+}
+@media (max-width: 1200px) {
+  .research-grid {
+    grid-template-columns: 170px minmax(300px, 1fr);
+  }
+  .candidate-panel {
+    grid-column: 1/-1;
+  }
+  .conversations {
+    width: 155px;
+  }
+  header small {
+    display: none;
+  }
+}
+@media (max-width: 750px) {
+  header {
+    padding: 8px;
+    height: auto;
+    flex-wrap: wrap;
+  }
+  nav {
+    flex-wrap: wrap;
+  }
+  .app-shell {
+    display: block;
+  }
+  .conversations {
+    width: 100%;
+    display: flex;
+    gap: 6px;
+    overflow: auto;
+  }
+  .conversations h3 {
+    display: none;
+  }
+  .research-grid {
+    display: block;
+  }
+  .workspace-panel {
+    border-bottom: 1px solid var(--line);
+  }
+  .stage-content {
+    padding: 15px;
+  }
+  .account {
+    margin: 30px 15px;
+  }
+}
+
+.settings-form {
+  margin: 15px 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+.fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+.capabilities {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 5px;
+}
+.capabilities label {
+  font-size: 11px;
+  margin: 2px 0;
+}
+
+.tree-scroll {
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin: 12px 0;
+  padding: 8px;
+}
+.tree-scroll g:focus rect,
+.tree-scroll g:hover rect {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.math-formula{overflow-x:auto;max-width:100%;padding:8px 0}.event .katex-display{overflow-x:auto}

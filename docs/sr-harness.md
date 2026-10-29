@@ -4,76 +4,35 @@ SRHarness 命令行工具的通用格式为 `sr-harness <command> [options]`，�
 
 | 子命令 | 用途 |
 |---|---|
-| `run` | 启动交互式网页工作台（WebUI） |
+| `serve` | 启动交互式网页工作台（WebUI） |
 | `synthetic` | 根据给定公式合成数据，并运行非交互式符号回归搜索 |
 | `benchmark` | 在 LLM-SRBench 基准数据集上评测 SRHarness 及其他算法 |
 | `tool` | 查看已注册的工具列表、参数 Schema，或单独调用某个工具 |
 
-## `sr-harness run`
+## `astral serve`
 
-启动交互式 WebUI 工作台，支持在浏览器中完成数据准备、任务配置和符号回归搜索。
-
-```bash
-sr-harness run [options]
-```
-
-| 参数 | 默认值 | 说明 |
-|---|---:|---|
-| `--name` | `run` | 任务名称前缀，用于自动生成实验目录名 `{EXP_NAME}=YYYYMMDD_{NAME}_HHMMSS_{HOSTNAME}` |
-| `--exp-name` | 自动生成 | 完整实验名称，用于拼接 `{SAVE_PATH}={SAVE_DIR}/{EXP_NAME}`；指定后无需再传 `--name` |
-| `--save-dir` | 无 | 实验根目录，用于拼接 `{SAVE_PATH}={SAVE_DIR}/{EXP_NAME}` |
-| `--save-path` | 自动推导 | 运行日志的持久化目录；直接指定后无需再传 `--name`、`--exp-name` 和 `--save-dir` |
-| `--host` | `127.0.0.1` | Web 服务监听地址 |
-| `--port` | `8000` | Web 服务监听端口 |
-| `--workspace-dir` | `{SAVE_PATH}` | 对话列表与各对话工作区的根目录 |
-| `--isolate-users` | 关闭 | 根据浏览器持久 Cookie 隔离不同访客的对话列表 |
-| `--mount` | 空 | 以只读方式挂载到工作区的本地文件或目录，支持传入多个路径（如 `--mount a b c`） |
-| `--read-only` | 关闭 | 只读回放模式：仅浏览已有对话与搜索记录，禁用一切修改接口与后台落盘 |
-
-### 保存路径与工作区 { #save-paths-and-workspaces }
-
-SRHarness 会在 `--workspace-dir` 目录下管理所有对话的工作区文件与会话状态（默认与 `--save-path` 相同；若两者都未指定，则使用系统临时目录，服务退出后不会保留历史记录）。目录结构如下：
-
-```text
-{WORKSPACE_DIR}/
-├── conversations.json          # 已持久化的对话注册表（保存对话 ID 与显示名称）
-├── conversation-visits.jsonl   # 访客与会话持久化事件日志
-├── workspaces/
-│   └── {CONVERSATION_ID}/      # 当前对话的工作区（Agent 工具可读写）
-└── sessions/
-    └── {CONVERSATION_ID}/      # 当前对话的私有配置（对 Agent 工具不可见）
-        ├── .env                # 该对话独立配置的 API Key 与代理地址
-        └── interactive-session.json
-```
-
-关于存储与会话生命周期，有以下几个实用细节：
-
-- **工作区与隐私隔离**：`workspaces/` 下的文件可供 Agent 工具读写；而 `sessions/` 下保存的 `.env`（API Key、代理配置）和会话快照完全独立，不会暴露给 Agent，导出对话压缩包时也会自动剔除 `.env`。对话的显示名称只记录在 `conversations.json` 中，因此重命名对话不会改变底层目录路径。
-- **延迟创建磁盘目录**：刚打开网页或点击“新建对话”时，系统仅在内存中创建临时会话，不会立即更新 `conversations.json` 或在 `workspaces/`、`sessions/`、`runs/` 下创建空目录。只有当上传或修改了工作区文件、重命名了对话，或实际调用了 Agent 后，会话才会写入磁盘。
-- **访客统计与闲置恢复**：每次创建临时会话时，系统会在 `conversation-visits.jsonl` 中追加一条 `visit_started` 事件；当会话正式落盘时，再追加一条记录触发原因的 `conversation_persisted` 事件（方便按 `visitor_id` 统计只浏览未操作的访客）。临时会话连续闲置 1 小时后，服务端会释放其内存对象与系统临时目录；但只要用户未清理浏览器 Cookie，哪怕隔几天再回来继续操作，服务端也会用同一个会话 ID 自动重建环境，无需刷新页面。
-- **断点恢复**：只要显式指定了 `--save-path`（或 `--save-dir`），SRHarness 就会将每次搜索的运行日志写入 `{SAVE_PATH}/runs/{CONVERSATION_ID}`，并定期在 `sessions/` 中保存会话快照。服务重启后，只要传入相同的 `workspace-dir` 和 `save-path`，之前的时间线、数据集、任务设置、自定义 Evaluator 和搜索进度都会自动恢复。
-- **只读浏览模式**：如果只想查看或向他人展示已有的实验记录，可以同时传入 `--save-path`、`--workspace-dir` 和 `--read-only`（要求目录和 `conversations.json` 已存在，且不能与 `--mount` 混用）。`--read-only` 可以与 `--isolate-users` 自由组合。在容器环境中部署只读展示服务时，建议同时将宿主机目录以只读方式（`:ro`）挂载进容器，实现应用层与操作系统层的双重只读保护：
+Run the internal Harness API independently of Next.js:
 
 ```bash
-sr-harness run --save-path /data --workspace-dir /data --read-only --host 0.0.0.0 --port 8000
+export HARNESS_SERVICE_TOKEN='replace-with-at-least-24-random-characters'
+astral serve --host 127.0.0.1 --port 8000 --root ./harness-data
 ```
 
-### 网络监听设置
+| Option | Default | Meaning |
+|---|---|---|
+| `--host` | `127.0.0.1` | Bind address |
+| `--port` | `8000` | Internal HTTP port |
+| `--root` | `./harness-data` | Scientific sessions, workspaces and checkpoints |
+| `--global-tasks` | `8` | Concurrent Agent tasks, including paused tasks |
+| `--per-user-tasks` | `2` | Task limit per correlation tag `user_ref` |
 
-仅在本机访问（默认，最安全）：
+This API does not serve browser pages or authenticate end users. All requests except `/health`
+require the service Bearer token. Next.js owns accounts, conversation permissions and model
+configurations. Browser access is through the Next.js server in `web/`.
 
-```bash
-sr-harness run --host 127.0.0.1 --port 8000
-```
-
-允许局域网或外部机器访问（需同步开放防火墙端口）：
-
-```bash
-sr-harness run --host 0.0.0.0 --port 8000
-```
-
-!!! warning
-    SRHarness 内置 Web 服务不包含用户登录鉴权或网络安全防护。将服务暴露到不可信网络前，请务必配置反向代理、TLS 加密与访问控制。
+See [deployment](../deploy/decoupled/README.md) and the generated `contracts/harness.openapi.json`.
+The former `run`, `--isolate-users`, `--workspace-dir` and `--save-path` WebUI options are retired.
+Scientific `synthetic`, `benchmark` and `tool` commands remain available through `astral`.
 
 ## `sr-harness synthetic`
 

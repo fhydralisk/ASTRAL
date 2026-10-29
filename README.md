@@ -1,3 +1,5 @@
+> Architecture update: the React/Next.js app is in `web/`; run the independent Harness with `astral serve`. See [deployment and development](deploy/decoupled/README.md). The legacy `astral run` WebUI has been removed. Historical data is not migrated.
+
 # ASTRAL
 
 **A human–AI interactive astronomy discovery platform, built on [SRHarness](https://github.com/yuzhTHU/SRHarness).**
@@ -36,17 +38,17 @@ The distribution and CLI are named `astral`. Python imports retain the upstream 
 
 ## Launch the workbench
 
+The Next.js/React frontend and backend live in `web/` and control an independent Harness over internal HTTP. Follow the [deployment and development guide](deploy/decoupled/README.md) to start the root Compose stack with Next.js, Harness and PostgreSQL.
+
+For local development, configure `HARNESS_SERVICE_TOKEN` and start the scientific runtime:
+
 ```bash
-astral run \
-  --host 0.0.0.0 \
-  --port 11002 \
-  --workspace-dir ./workspaces \
-  --save-path ./logs/webui
+astral serve --host 127.0.0.1 --port 8000 --root ./harness-data
 ```
 
-Open `http://localhost:11002` on the server, or `http://SERVER_IP:11002` from another machine. Configure a model provider, model, and API key in the workbench before running an agent. See [.env.sample](.env.sample) for provider configuration examples.
+In a second terminal, enter `web/`, configure `.env.local`, then run `npm ci`, `npm run db:migrate` and `npm run dev`. Open `http://localhost:3000`. Secure Harness workspaces and sandbox execution require Linux.
 
-The workspace and log arguments retain conversations and run artifacts across restarts. Omitting them uses a temporary workspace.
+The workbench uses account login. Registration defaults to open; administrators can switch to invitation-only or administrator-created accounts. Next.js owns model configurations, encrypts keys in its database, and supplies them to Harness on demand. Legacy WebUI data is not migrated.
 
 For a synthetic symbolic-regression example, configure `OPENROUTER_API_KEY`, then run:
 

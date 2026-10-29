@@ -7,7 +7,8 @@ import numpy as np
 import pytest
 
 from sr_harness.runtime import InteractionManager, SRInteractionManager
-from sr_harness.web.app import create_app
+from sr_harness.http.app import create_app
+from sr_harness.service import LocalHarnessService
 from sr_harness.runtime import ModelRouter
 from sr_harness.core import APICallSample, AgentContext, SearchRunState, ToolCall
 from sr_harness.parser import BaseParser
@@ -516,6 +517,11 @@ def test_sr_interaction_manager_transition_resumes_a_paused_boundary():
     manager.finish_agent_execution()
 
 
-def test_create_app_owns_a_viewer_interaction_manager(tmp_path):
-    app = create_app(tmp_path)
-    assert isinstance(app.state.interaction_manager, InteractionManager)
+def test_create_app_owns_a_service_instead_of_a_viewer(tmp_path):
+    service = LocalHarnessService(tmp_path)
+    try:
+        app = create_app(service, token="test-service-token-123456789")
+        assert app.state.work_pool.workers == 16
+        assert not hasattr(app.state, "session")
+    finally:
+        service.close()

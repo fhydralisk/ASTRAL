@@ -2,6 +2,7 @@ FROM python:3.12-slim-bookworm
 
 ARG APP_UID=1000
 ARG APP_GID=1000
+ARG PIP_INDEX_URL=https://pypi.org/simple
 
 LABEL org.opencontainers.image.title="ASTRAL" \
       org.opencontainers.image.description="A human-AI interactive astronomy discovery platform" \
@@ -54,4 +55,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).close()"
 
 ENTRYPOINT ["astral"]
-CMD ["run", "--save-path", "/data", "--workspace-dir", "/data", "--isolate-users", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["serve", "--root", "/data/harness-v2", "--host", "0.0.0.0", "--port", "8000"]

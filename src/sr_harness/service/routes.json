@@ -1,0 +1,236 @@
+[
+  [
+    "GET",
+    "/api/session",
+    "status",
+    ""
+  ],
+  [
+    "GET",
+    "/api/session/capabilities",
+    "capabilities",
+    "agent: str='search'"
+  ],
+  [
+    "POST",
+    "/api/session/start",
+    "start",
+    "payload: dict=Body(...)"
+  ],
+  [
+    "POST",
+    "/api/data/agent",
+    "prepare_data",
+    "payload: dict=Body(...)"
+  ],
+  [
+    "GET",
+    "/api/data/agent/events",
+    "data_agent_events",
+    "after_seq: int=0"
+  ],
+  [
+    "POST",
+    "/api/data/agent/stop",
+    "stop_data_preparation",
+    ""
+  ],
+  [
+    "PUT",
+    "/api/data/agent/settings",
+    "configure_data_agent",
+    "payload: dict=Body(...)"
+  ],
+  [
+    "POST",
+    "/api/data/agent/test",
+    "test_data_agent_model",
+    "payload: dict=Body(...)"
+  ],
+  [
+    "POST",
+    "/api/session/test",
+    "test_model",
+    "payload: dict=Body(...)"
+  ],
+  [
+    "GET",
+    "/api/evaluator",
+    "evaluator_configuration",
+    "selected: str | None=None"
+  ],
+  [
+    "PUT",
+    "/api/evaluator",
+    "configure_evaluator",
+    "payload: dict=Body(...)"
+  ],
+  [
+    "POST",
+    "/api/evaluator/test",
+    "test_evaluator",
+    "payload: dict=Body(...)"
+  ],
+  [
+    "POST",
+    "/api/evaluator/agent/start",
+    "start_evaluator_assistance",
+    "payload: dict=Body(...)"
+  ],
+  [
+    "GET",
+    "/api/evaluator/agent/events",
+    "evaluator_agent_events",
+    "after_seq: int=0"
+  ],
+  [
+    "POST",
+    "/api/evaluator/agent/stop",
+    "stop_evaluator_assistance",
+    ""
+  ],
+  [
+    "PUT",
+    "/api/evaluator/agent/settings",
+    "configure_evaluator_agent",
+    "payload: dict=Body(...)"
+  ],
+  [
+    "POST",
+    "/api/evaluator/agent/test",
+    "test_evaluator_agent_model",
+    "payload: dict=Body(...)"
+  ],
+  [
+    "GET",
+    "/api/data/context",
+    "data_context",
+    "rows: int=300"
+  ],
+  [
+    "GET",
+    "/api/data/context/preview",
+    "data_context_preview",
+    "group: str, limit: int=100"
+  ],
+  [
+    "GET",
+    "/api/data/context/plot",
+    "data_context_plot",
+    "x: str, y: str, hue: str | None=None, size: str | None=None, limit: int=2000"
+  ],
+  [
+    "POST",
+    "/api/data/context/heatmap",
+    "data_context_heatmap",
+    "payload: dict=Body(...)"
+  ],
+  [
+    "POST",
+    "/api/data/context/reload",
+    "reload_data_context",
+    ""
+  ],
+  [
+    "PUT",
+    "/api/data/selection",
+    "update_data_selection",
+    "payload: dict=Body(...)"
+  ],
+  [
+    "PUT",
+    "/api/data/descriptions",
+    "update_data_descriptions",
+    "payload: dict=Body(...)"
+  ],
+  [
+    "POST",
+    "/api/session/settings",
+    "settings",
+    "payload: dict=Body(...)"
+  ],
+  [
+    "GET",
+    "/api/workspace",
+    "files",
+    "path: str='', recursive: bool=False"
+  ],
+  [
+    "GET",
+    "/api/workspace/size",
+    "workspace_item_size",
+    "path: str"
+  ],
+  [
+    "GET",
+    "/api/workspace/download",
+    "download",
+    "path: str"
+  ],
+  [
+    "GET",
+    "/api/workspace/preview",
+    "preview",
+    "path: str"
+  ],
+  [
+    "POST",
+    "/api/workspace/directory",
+    "create_directory",
+    "payload: dict=Body(...)"
+  ],
+  [
+    "PUT",
+    "/api/workspace/lock",
+    "set_workspace_item_lock",
+    "payload: dict=Body(...)"
+  ],
+  [
+    "PATCH",
+    "/api/workspace",
+    "move_workspace_item",
+    "payload: dict=Body(...)"
+  ],
+  [
+    "DELETE",
+    "/api/workspace",
+    "delete_workspace_item",
+    "path: str"
+  ],
+  [
+    "GET",
+    "/api/data/csv-files",
+    "csv_files",
+    ""
+  ],
+  [
+    "GET",
+    "/api/data/preview",
+    "data_preview",
+    "path: str, rows: int=300"
+  ],
+  [
+    "GET",
+    "/api/data/discovery-tasks",
+    "discovery_tasks",
+    ""
+  ],
+  [
+    "POST",
+    "/api/data/discovery-tasks/load",
+    "load_discovery_task",
+    "payload: dict=Body(...)"
+  ],
+  [
+    "POST",
+    "/api/data/demo",
+    "create_demo",
+    "payload: dict | None=Body(default=None)"
+  ],
+  [
+    "POST",
+    "/api/data/prompts",
+    "initial_prompts",
+    "payload: dict=Body(...)"
+  ]
+]

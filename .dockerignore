@@ -14,3 +14,7 @@ dist
 docs
 logs
 tests
+
+web
+harness-data
+contracts

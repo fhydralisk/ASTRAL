@@ -506,6 +506,10 @@ class _SandboxProcessRunner:
             duration = time.monotonic() - start
             result_file = output_directory / "result.json"
             if not result_file.exists():
+                if process.returncode == -signal.SIGXCPU:
+                    raise TimeoutError(
+                        f"Sandbox CPU limit reached: timeout={timeout_seconds} seconds."
+                    )
                 detail = stderr.decode("utf-8", errors="replace").strip()
                 raise SandboxExecutionError(
                     f"Sandbox worker exited with code {process.returncode} without a result"
@@ -535,7 +539,7 @@ class SandboxRunner:
     """Execute Python code with optional workspace access in the OS sandbox."""
 
     def __init__(self) -> None:
-        """Initialize the sandbox runner and verify that the host kernel supports Landlock ABI 3+."""
+        """Initialize the sandbox runner and require Linux Landlock ABI 3+."""
         self._process_runner = _SandboxProcessRunner()
 
     def run(

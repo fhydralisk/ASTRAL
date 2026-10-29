@@ -1,3 +1,5 @@
+> Web deployment now uses separate Next.js and Harness services. See [deployment](../deploy/decoupled/README.md). Provider environment variables below apply to standalone scientific CLI usage; Web model credentials are encrypted in the Next.js database.
+
 # Install
 
 ## Requirements

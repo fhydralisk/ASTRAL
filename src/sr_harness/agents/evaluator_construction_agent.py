@@ -10,6 +10,7 @@ import uuid
 from typing import Any, Callable
 
 from ..api import BaseAPI
+from ..service.environment import agent_environment
 from ..core import AgentContext, json_value
 from ..parser import BaseParser
 from ..runtime import InteractionManager
@@ -98,6 +99,9 @@ class EvaluatorConstructionAgent(Agent):
         self._pending_runtime_settings: dict[str, Any] | None = None
         self.tool_box = BaseParser.create(tool_parser, tool_list=tools)
         for tool in self.tool_box.tools:
+            tool.agent_role = "evaluator"
+            tool.llm_provider = self.llm_provider
+            tool.llm_model = self.llm_model
             tool.cancel_event = self.interaction_manager.cancellation_signal
             if isinstance(tool, VariableRolesTool):
                 tool.update_roles = self._update_variable_roles
@@ -106,7 +110,7 @@ class EvaluatorConstructionAgent(Agent):
             llm_provider,
             model=llm_model,
             tool_box=self.tool_box,
-            environment=getattr(context.args, "api_environment", None),
+            environment=agent_environment(context, "evaluator"),
         )
         self.buffer: list[dict[str, Any]] = [
             {
@@ -228,14 +232,20 @@ class EvaluatorConstructionAgent(Agent):
             tools = [classes[name](context=self.context) for name in settings["tools"]]
             self.tool_box = BaseParser.create(self.tool_parser, tool_list=tools)
             for tool in self.tool_box.tools:
+                tool.agent_role = "evaluator"
+                tool.llm_provider = self.llm_provider
+                tool.llm_model = self.llm_model
                 tool.cancel_event = self.interaction_manager.cancellation_signal
                 if isinstance(tool, VariableRolesTool):
                     tool.update_roles = self._update_variable_roles
+        for tool in self.tool_box.tools:
+            tool.llm_provider = self.llm_provider
+            tool.llm_model = self.llm_model
         self.api = BaseAPI.create(
             self.llm_provider,
             model=self.llm_model,
             tool_box=self.tool_box,
-            environment=getattr(self.context.args, "api_environment", None),
+            environment=agent_environment(self.context, "evaluator"),
         )
 
     def _append_prompt(self, message: dict[str, Any]) -> None:

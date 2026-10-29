@@ -101,6 +101,7 @@ class GeminiAPI(BaseAPI):
         client = genai.Client(
             api_key=api_key,
             http_options=types.HttpOptions(
+                base_url=self.get_env("GEMINI_ENDPOINT"),
                 httpx_client=httpx.Client(
                     proxy=self.proxy_url(),
                     trust_env=False,

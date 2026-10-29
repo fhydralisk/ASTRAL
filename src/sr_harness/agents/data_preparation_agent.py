@@ -27,6 +27,7 @@ class DataPreparationAgent(Agent):
     structured arrays to the shared :class:`~sr_harness.core.AgentContext`.
     """
 
+    agent_role = "data"
     DEFAULT_TOOLS = [
         "workspace_shell",
         "workspace_code_executor",

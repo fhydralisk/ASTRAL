@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS entities (
+  id VARCHAR(36) PRIMARY KEY, kind VARCHAR(32) NOT NULL, owner VARCHAR(64) NOT NULL,
+  entity_key VARCHAR(191) NOT NULL UNIQUE, version INT NOT NULL DEFAULT 0, payload LONGTEXT NOT NULL,
+  INDEX kind_owner(kind, owner)
+) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;

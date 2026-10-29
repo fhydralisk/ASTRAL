@@ -13,7 +13,7 @@ class LandlockUnavailableError(RuntimeError):
     """Raised when the kernel cannot enforce the requested Landlock policy."""
 
 
-_LIBC = ctypes.CDLL(None, use_errno=True)
+_LIBC = ctypes.CDLL(None, use_errno=True) if platform.system() == "Linux" else None
 _SYS_LANDLOCK_CREATE_RULESET = 444
 _SYS_LANDLOCK_ADD_RULE = 445
 _SYS_LANDLOCK_RESTRICT_SELF = 446

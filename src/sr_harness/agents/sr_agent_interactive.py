@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, List, Optional
 
 from ..api import BaseAPI
+from ..service.environment import agent_environment
 from ..core import APICallSample, AgentContext, CandidateRecord, ToolCall, ToolCallResult
 from ..runtime import PendingMessage, SRInteractionManager
 from ..skills import SkillManager
@@ -546,7 +547,7 @@ class SRAgentInteractive(SRAgent):
             api = BaseAPI.create(
                 provider,
                 model=model,
-                environment=getattr(self.context.args, "api_environment", None),
+                environment=agent_environment(self.context, "search"),
             )
             self._stop_review_apis[key] = api
         recent = self._recent_agent_rounds(buffer)

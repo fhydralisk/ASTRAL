@@ -10,6 +10,7 @@ from copy import deepcopy
 from typing import Any, Dict
 from logging import getLogger
 from ..utils import bounded_value, parse_json_with_template
+from ..service.environment import tool_environment
 from .base_tool import BaseTool, ToolMetadata
 
 _logger = getLogger(f"sr_harness.{__name__}")
@@ -190,13 +191,13 @@ class CreateSkill(BaseTool):
                 return {"status": "created", "rounds": round_index, **result}
 
     def _call_configured_llm(self, messages: list[dict[str, str]]) -> str:
-        provider = getattr(self.context.args, "llm_provider", None)
-        model = getattr(self.context.args, "llm_model", None)
+        provider = getattr(self, "llm_provider", None) or getattr(self.context.args, "llm_provider", None)
+        model = getattr(self, "llm_model", None) or getattr(self.context.args, "llm_model", None)
         if not provider or not model:
             raise ValueError("create_skill requires llm_provider/llm_model context or a skill_authoring_callback.")
         from ..api import BaseAPI
 
-        result = BaseAPI.create(provider, model=model)(
+        result = BaseAPI.create(provider, model=model, environment=tool_environment(self))(
             messages, n=1, max_tokens=min(int(getattr(self.context.args, "llm_max_tokens", 4096) or 4096), 4096),
         )
         content = ""

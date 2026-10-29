@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS entities (
+  id TEXT PRIMARY KEY NOT NULL, kind TEXT NOT NULL, owner TEXT NOT NULL,
+  entity_key TEXT NOT NULL UNIQUE, version INTEGER NOT NULL DEFAULT 0, payload TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS kind_owner ON entities(kind, owner);

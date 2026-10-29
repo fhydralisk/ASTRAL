@@ -6,6 +6,7 @@ from typing import Any, Dict, List
 
 import numpy as np
 
+from ..service.environment import tool_environment
 from .base_tool import BaseTool, ToolMetadata
 
 
@@ -76,10 +77,10 @@ class SubagentTool(BaseTool):
 
         provider = getattr(self.context.args, "subagent_llm_provider", None)
         if provider is None:
-            provider = getattr(self.context.args, "llm_provider", None)
+            provider = getattr(self, "llm_provider", None) or getattr(self.context.args, "llm_provider", None)
         model = getattr(self.context.args, "subagent_llm_model", None)
         if model is None:
-            model = getattr(self.context.args, "llm_model", None)
+            model = getattr(self, "llm_model", None) or getattr(self.context.args, "llm_model", None)
         if not isinstance(provider, str) or not provider:
             raise ValueError("A non-empty subagent or primary LLM provider is required")
         if not isinstance(model, str) or not model:
@@ -87,6 +88,7 @@ class SubagentTool(BaseTool):
         api = BaseAPI.create(
             provider,
             model=model,
+            environment=tool_environment(self),
         )
         result = api(messages, n=1, max_tokens=getattr(self.context.args, "llm_max_tokens", None))
         content = ""

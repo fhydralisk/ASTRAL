@@ -18,7 +18,7 @@ from ..utils import log_exception
 
 _logger = logging.getLogger(__name__)
 
-_LIBC = ctypes.CDLL(None, use_errno=True)
+_LIBC = ctypes.CDLL(None, use_errno=True) if os.name == "posix" else None
 _RENAME_NOREPLACE = 1
 
 
@@ -200,6 +200,10 @@ class Workspace:
     def _apply_lock_permissions(self) -> None:
         """Apply explicit lock rules through stable descriptors without following links."""
         if self._read_only:
+            return
+        if os.name != "posix":
+            if self._lock_rules:
+                raise OSError("Workspace lock enforcement requires Linux")
             return
         mount_roots = set(self._mount_map)
         paths = [self._path]

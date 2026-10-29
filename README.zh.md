@@ -1,3 +1,5 @@
+> Architecture update: the React/Next.js app is in `web/`; run the independent Harness with `astral serve`. See [deployment and development](deploy/decoupled/README.md). The legacy `astral run` WebUI has been removed. Historical data is not migrated.
+
 # ASTRAL
 
 **基于 [SRHarness](https://github.com/yuzhTHU/SRHarness) 构建的人机交互天文发现平台。**
@@ -36,17 +38,17 @@ python -m pip install -e .
 
 ## 启动交互式工作台
 
+前后端位于根目录 `web/`，通过内部 HTTP 调用独立的 Harness 服务。推荐按照 [部署与开发指南](deploy/decoupled/README.md) 使用根目录 Compose 启动 Next.js、Harness 和 PostgreSQL。
+
+本地开发时，先配置 `HARNESS_SERVICE_TOKEN` 并启动科学运行时：
+
 ```bash
-astral run \
-  --host 0.0.0.0 \
-  --port 11002 \
-  --workspace-dir ./workspaces \
-  --save-path ./logs/webui
+astral serve --host 127.0.0.1 --port 8000 --root ./harness-data
 ```
 
-在服务器本机打开 `http://localhost:11002`，或在其他机器上访问 `http://服务器IP:11002`。运行智能体之前，在工作台中配置模型服务、模型和 API Key；模型服务配置示例参见 [.env.sample](.env.sample)。
+另一个终端进入 `web/`，配置 `.env.local`，运行 `npm ci`、`npm run db:migrate` 和 `npm run dev`，浏览器访问 `http://localhost:3000`。Harness 的安全文件操作和沙箱执行要求 Linux。
 
-工作区和日志参数用于在重启后保留对话与运行记录；省略这些参数时使用临时工作区。
+工作台使用账号登录。默认开放注册；管理员可以切换为邀请注册或管理员创建账号。模型 Key 与 Endpoint 由 Next.js 管理，Key 在数据库中加密保存，执行时按需下发。旧 WebUI 数据不自动迁移。
 
 配置 `OPENROUTER_API_KEY` 后，也可以运行合成数据的符号回归示例：
 

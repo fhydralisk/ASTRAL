@@ -2,6 +2,7 @@
 """Auxiliary tool for querying an external LLM provider directly."""
 
 from typing import Dict, Any, List
+from ..service.environment import tool_environment
 from .base_tool import BaseTool, ToolMetadata
 
 
@@ -28,7 +29,7 @@ class LLMTool(BaseTool):
         """
         from ..api import BaseAPI
 
-        api = BaseAPI.create(llm_provider, model=llm_model)
+        api = BaseAPI.create(llm_provider, model=llm_model, environment=tool_environment(self))
         content = ""
         for response in (llm_result := api(messages, n=1)):
             content = response.content or ""
