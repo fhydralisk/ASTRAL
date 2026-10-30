@@ -95,6 +95,7 @@ class EventBatch(BaseModel):
     truncated: bool
     discarded_through: int
     cursor_reset: bool
+    has_more: bool = False
 
 
 class ErrorDetail(BaseModel):
@@ -261,6 +262,20 @@ def create_app(service: HarnessService, *, token: str | None = None):
     @app.get("/v1/sessions/{session_id}/control/events", response_model=EventBatch)
     async def events(session_id: str, after_seq: int = 0, role: str = "search"):
         return await invoke(session_id, "control_events", {"after_seq": after_seq, "role": role})
+
+    @app.get("/v1/sessions/{session_id}/control/events/{sequence}")
+    async def download_search_event(session_id: str, sequence: int):
+        return await invoke(session_id, "event_download", {"sequence": sequence, "role": "search"})
+
+    @app.get("/v1/sessions/{session_id}/data/agent/events/{sequence}")
+    async def download_data_event(session_id: str, sequence: int):
+        return await invoke(session_id, "event_download", {"sequence": sequence, "role": "data"})
+
+    @app.get("/v1/sessions/{session_id}/evaluator/agent/events/{sequence}")
+    async def download_evaluator_event(session_id: str, sequence: int):
+        return await invoke(
+            session_id, "event_download", {"sequence": sequence, "role": "evaluator"}
+        )
 
     @app.get("/v1/sessions/{session_id}/records")
     async def records(session_id: str, after_seq: int = 0):

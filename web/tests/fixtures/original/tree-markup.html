@@ -1,0 +1,243 @@
+<header>
+  <h1>ASTRAL Search Viewer</h1>
+  <button id="refresh">Refresh</button>
+  <button id="home">Home</button>
+  <span id="status" class="muted"></span>
+  <div class="agent-control" aria-label="Live agent controls">
+    <input id="guidance" placeholder="Send guidance for the next turn…" />
+    <button id="send-guidance">Send</button>
+    <button id="pause-agent">Pause</button>
+    <button id="stop-agent" class="danger">Stop</button>
+    <span id="agent-status" class="muted">agent: running</span>
+  </div>
+</header>
+<main>
+  <nav id="run-panel" class="run-panel" aria-label="Runs">
+    <div class="run-tabs" role="tablist" aria-label="Left panel">
+      <button
+        id="runs-tab"
+        class="run-tab active"
+        type="button"
+        data-run-tab="runs"
+      >
+        Runs
+      </button>
+      <button
+        id="controls-tab"
+        class="run-tab"
+        type="button"
+        data-run-tab="controls"
+      >
+        Controls
+      </button>
+    </div>
+    <div id="runs-panel" class="run-tab-panel">
+      <div id="run-panel-header" class="run-panel-header">
+        <span class="run-toggle"></span>
+        <span class="run-panel-title">Runs</span>
+      </div>
+      <div id="run-tree" class="run-tree"></div>
+    </div>
+    <div id="controls-panel" class="run-tab-panel hidden">
+      <div class="display-controls">
+        <div class="control-actions">
+          <button id="layout" type="button">Auto Layout</button>
+          <button id="weak-edges" type="button">Hide Weak Edges</button>
+          <button id="labels" type="button">Hide Labels</button>
+        </div>
+        <label class="control-bar">
+          <span>Node</span>
+          <input
+            id="node-size"
+            type="range"
+            min="5"
+            max="18"
+            step="1"
+            value="9"
+          />
+          <span id="node-size-value" class="control-value">9</span>
+        </label>
+        <label class="control-bar">
+          <span>Gap</span>
+          <input
+            id="level-gap"
+            type="range"
+            min="70"
+            max="220"
+            step="4"
+            value="118"
+          />
+          <span id="level-gap-value" class="control-value">118</span>
+        </label>
+        <label class="control-bar">
+          <span>Horiz</span>
+          <input
+            id="horizontal-scale"
+            type="range"
+            min="50"
+            max="200"
+            step="5"
+            value="100"
+          />
+          <span id="horizontal-scale-value" class="control-value">100</span>
+        </label>
+        <div class="color-control">
+          <label class="color-control-row">
+            <span>Color</span>
+            <select id="color-metric" aria-label="Color metric">
+              <option value="r2">R2</option>
+              <option value="mse">MSE</option>
+              <option value="rmse">RMSE</option>
+              <option value="smape">SMAPE</option>
+              <option value="mape">MAPE</option>
+              <option value="mae">MAE</option>
+              <option value="spearman_r">Spearman r</option>
+              <option value="pearson_r">Pearson r</option>
+            </select>
+          </label>
+          <div class="color-control-row">
+            <span class="range-pair">
+              <input
+                id="r2-color-min"
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                value="0"
+              />
+              <input
+                id="r2-color-max"
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                value="1"
+              />
+            </span>
+          </div>
+          <div class="color-control-row color-input-row">
+            <input
+              id="r2-color-min-value"
+              class="range-input"
+              type="number"
+              step="0.001"
+              value="0"
+              aria-label="R2 color minimum"
+            />
+            <span>~</span>
+            <input
+              id="r2-color-max-value"
+              class="range-input"
+              type="number"
+              step="0.001"
+              value="1"
+              aria-label="R2 color maximum"
+            />
+          </div>
+        </div>
+        <div class="export-row">
+          <select id="export-format" aria-label="Export format">
+            <option value="png">PNG</option>
+            <option value="svg">SVG</option>
+            <option value="pdf">PDF</option>
+          </select>
+          <button id="export" type="button">Export</button>
+        </div>
+      </div>
+    </div>
+  </nav>
+  <div id="run-resizer" class="run-resizer" title="Drag to resize runs panel">
+    <div class="run-resizer-tabs">
+      <button class="run-resizer-tab active" type="button" data-run-tab="runs">
+        Runs
+      </button>
+      <button class="run-resizer-tab" type="button" data-run-tab="controls">
+        Controls
+      </button>
+    </div>
+  </div>
+  <section id="graph-wrap">
+    <div id="legend" class="legend">
+      <strong id="legend-title"
+        ><span class="legend-toggle"></span><span>Legend</span></strong
+      >
+      <div class="legend-body">
+        <div class="legend-row">
+          <span class="sample node-dot"></span
+          ><span>Node: one sampled step (R, C, L, K) in the search tree.</span>
+        </div>
+        <div class="legend-row">
+          <span class="sample line"></span
+          ><span>Solid edge: primary conversation continuation.</span>
+        </div>
+        <div class="legend-row">
+          <span class="sample line weak"></span
+          ><span>Dashed edge: shared tool outputs from a sibling sample.</span>
+        </div>
+        <div class="legend-row">
+          <span></span
+          ><span
+            >Color: node score mapped from red (worse) to green (better) on the
+            selected metric.</span
+          >
+        </div>
+      </div>
+    </div>
+    <svg
+      id="graph"
+      width="1200"
+      height="760"
+      role="img"
+      aria-label="Search graph"
+    ></svg>
+  </section>
+  <div
+    id="side-resizer"
+    class="side-resizer"
+    title="Drag to resize details panel"
+  ></div>
+  <aside>
+    <section class="side-section">
+      <strong id="node-title">No node selected</strong>
+      <div id="node-subtitle" class="muted"></div>
+      <div id="metrics" class="metric-grid"></div>
+    </section>
+    <section class="side-section">
+      <strong>Formula</strong>
+      <div id="formula-latex" class="formula-box muted">
+        (no candidate formula)
+      </div>
+      <button
+        id="formula-editor-toggle"
+        class="formula-editor-toggle"
+        type="button"
+      >
+        LaTeX editor
+      </button>
+      <div id="formula-editor" class="formula-editor hidden">
+        <div class="formula-editor-actions">
+          <span id="formula-editor-status" class="muted"></span>
+          <button id="copy-latex" type="button">Copy</button>
+        </div>
+        <textarea
+          id="latex-source"
+          spellcheck="false"
+          aria-label="LaTeX source"
+        ></textarea>
+      </div>
+      <pre id="formula-code" class="formula-code"></pre>
+    </section>
+    <section class="side-section">
+      <strong>Preview</strong>
+      <div id="preview" class="preview-chat muted"></div>
+    </section>
+    <section class="side-section">
+      <strong>Tool Call</strong>
+      <div id="tool-call" class="tool-grid"></div>
+    </section>
+    <section class="side-section">
+      <strong>Detail</strong>
+      <div id="detail" class="json-viewer muted"></div>
+    </section>
+  </aside>
+</main>

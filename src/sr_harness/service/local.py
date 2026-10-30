@@ -15,6 +15,7 @@ import zipfile
 
 from .base import Download, HarnessService, ServiceError
 from .environment import StrictEnvironment
+from .events import event_batch, event_download
 from .operations import build_operations
 from .records import _number_records, _with_core_derivatives, _strip_detail
 from .session import InteractiveSession
@@ -217,6 +218,7 @@ class LocalHarnessService(HarnessService):
             "records",
             "record",
             "control_status",
+            "event_download",
             "candidates",
         } or operation.endswith("_events"):
             return scrub(self._execute(session, operation, parameters))
@@ -283,7 +285,7 @@ class LocalHarnessService(HarnessService):
     def _execute(self, session, operation, parameters):
         if operation == "control_status":
             return session.sr_interaction_manager.status()
-        if operation == "control_events":
+        if operation in {"control_events", "event_download"}:
             role = parameters.get("role", "search")
             if role not in ROLES:
                 raise ServiceError(422, "Unknown agent role")
@@ -295,7 +297,9 @@ class LocalHarnessService(HarnessService):
                     "evaluator": "evaluator_interaction_manager",
                 }[role],
             )
-            return manager.get_recent_events(max(0, int(parameters.get("after_seq", 0))), limit=32)
+            if operation == "event_download":
+                return event_download(manager, int(parameters["sequence"]), role)
+            return event_batch(manager, max(0, int(parameters.get("after_seq", 0))))
         if operation == "control_command":
             role = parameters.get("role", "search")
             if role not in ROLES:

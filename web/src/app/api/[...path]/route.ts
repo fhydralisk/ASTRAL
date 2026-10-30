@@ -32,6 +32,7 @@ import {
 } from "@/server/conversations";
 import { harness, harnessJSON } from "@/server/harness";
 import { scientificRoutes } from "@/lib/scientific-routes";
+import { projectVersion } from "@/lib/project-version";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -80,6 +81,7 @@ async function handler(
       route = path.join("/"),
       method = request.method;
     if (route === "health" && method === "GET") return json({ status: "ok" });
+    if (route === "version" && method === "GET") return json({ version: projectVersion });
     if (route === "auth/mode" && method === "GET")
       return json({ mode: await registrationMode() });
     if (

@@ -1,0 +1,921 @@
+<header>
+  <div class="brand">
+    <div class="logo">
+      <img
+        src="/static/favicon.svg?v=astral-2"
+        alt=""
+        width="30"
+        height="30"
+      />ASTRAL
+    </div>
+    <span id="app-version" class="app-version"></span>
+  </div>
+  <span class="spacer"></span><span id="connection">正在连接</span
+  ><a
+    id="documentation-link"
+    class="header-toggle header-documentation"
+    href="https://yuzhthu.github.io/SRHarness/"
+    target="_blank"
+    rel="noopener"
+    aria-label="打开文档"
+    title="打开文档"
+    ><svg viewBox="0 0 18 18" aria-hidden="true">
+      <path
+        d="M3 3.5h4.2c1 0 1.8.8 1.8 1.8v9.2c0-1-.8-1.8-1.8-1.8H3zM15 3.5h-4.2c-1 0-1.8.8-1.8 1.8v9.2c0-1 .8-1.8 1.8-1.8H15z"
+      /></svg></a
+  ><a
+    id="github-link"
+    class="header-toggle header-github"
+    href="https://github.com/yuzhTHU/ASTRAL"
+    target="_blank"
+    rel="noopener"
+    aria-label="打开 GitHub 仓库"
+    title="打开 GitHub 仓库"
+    ><svg viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3.3-.4 6.8-1.6 6.8-7A5.4 5.4 0 0 0 19.4 4 5 5 0 0 0 19.3.5S18.2.1 15 1.8a13.4 13.4 0 0 0-7 0C4.8.1 3.7.5 3.7.5A5 5 0 0 0 3.6 4a5.4 5.4 0 0 0-1.4 3.7c0 5.4 3.5 6.6 6.8 7A4.8 4.8 0 0 0 8 18v4M8 19c-3 .9-3-1.5-4-2"
+      /></svg></a
+  ><button
+    id="theme-toggle"
+    class="header-toggle"
+    type="button"
+    aria-label="切换到暗色主题"
+    title="切换到暗色主题"
+  >
+    ☾</button
+  ><button
+    id="language-toggle"
+    class="header-toggle language-toggle"
+    type="button"
+    aria-label="Switch to English"
+    title="Switch to English"
+  >
+    EN</button
+  ><span id="status">连接中</span>
+</header>
+<div id="toast-stack" class="toast-stack" aria-live="polite"></div>
+<main>
+  <aside class="panel left" id="workspace">
+    <div class="bar">
+      <span id="workspace-title">工作区</span><span class="spacer"></span>
+      <div class="workspace-actions">
+        <button
+          id="new-folder"
+          class="icon-button"
+          type="button"
+          title="新建文件夹"
+          aria-label="新建文件夹"
+        >
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M2.5 4.5h4l1.2 1.4h5.8v6.6h-11zM8 8v3M6.5 9.5h3" />
+          </svg></button
+        ><button
+          id="refresh"
+          class="icon-button"
+          type="button"
+          title="刷新文件"
+          aria-label="刷新文件"
+        >
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M12.7 6.2A5 5 0 1 0 13 9M12.7 3.5v2.8H9.9" />
+          </svg>
+        </button>
+      </div>
+    </div>
+    <form id="workspace-name-editor" class="workspace-name-editor" hidden>
+      <span
+        id="workspace-editor-icon"
+        class="workspace-editor-icon workspace-item-icon"
+        aria-hidden="true"
+        ><svg viewBox="0 0 18 16">
+          <path d="M1.8 3.6h5l1.5 1.7h7.9v8.2H1.8z" /></svg></span
+      ><input
+        id="workspace-name-input"
+        autocomplete="off"
+        spellcheck="false"
+      /><button id="workspace-name-confirm" type="submit" aria-label="确认">
+        ✓</button
+      ><button id="workspace-name-cancel" type="button" aria-label="取消">
+        ×
+      </button>
+    </form>
+    <div id="files" role="tree"></div>
+    <div class="drop" id="drop">
+      <div class="drop-copy">
+        <span id="drop-title">拖放文件以上传 · 单文件 ≤ 256 MiB</span>
+      </div>
+      <button id="upload" type="button">上传</button
+      ><input type="file" id="file-input" multiple hidden />
+    </div>
+  </aside>
+  <div
+    id="left-resizer"
+    class="panel-resizer"
+    role="separator"
+    aria-label="调整工作区宽度"
+    aria-orientation="vertical"
+    tabindex="0"
+  >
+    <button class="panel-toggle" type="button" aria-label="折叠工作区">
+      ‹
+    </button>
+  </div>
+  <section class="panel center">
+    <div class="bar">
+      <div class="tabs">
+        <button class="active" id="prepare-tab">数据准备</button
+        ><button id="data-tab">任务配置</button
+        ><button id="timeline-tab">符号回归</button>
+      </div>
+      <span id="tab-hint" class="tab-hint" hidden></span
+      ><span class="spacer"></span
+      ><button id="context-tab" type="button" hidden>当前上下文</button>
+    </div>
+    <div id="data-preparation" class="data-view">
+      <div class="data-intro">
+        <div>
+          <h2>数据准备</h2>
+          <p>
+            上传原始数据或加载内置样例，让 Agent 帮你清洗并整理为标准数据集。
+          </p>
+        </div>
+      </div>
+      <div class="data-layout">
+        <section class="data-card wide data-ingest-card" id="data-ingest">
+          <div class="ingest-heading">
+            <span class="ingest-mark" aria-hidden="true">↑</span>
+            <div>
+              <h3 id="data-upload-title">添加数据</h3>
+              <p>
+                <span id="data-upload-help-prefix">拖放数据文件，也可以从</span
+                ><a
+                  id="create-demo"
+                  href="#"
+                  title="选择并生成内置的科学发现示例数据集"
+                  >样例数据</a
+                ><span id="data-upload-help-suffix">开始。</span>
+              </p>
+            </div>
+          </div>
+          <div class="ingest-drop" id="data-drop">
+            <span id="data-drop-copy">将文件拖到此处</span
+            ><button id="data-upload" type="button">选择文件</button
+            ><input id="data-file-input" type="file" multiple hidden />
+          </div>
+        </section>
+        <section class="data-card wide data-agent-card">
+          <div class="data-agent-heading">
+            <div>
+              <div class="data-agent-title-row">
+                <h3 id="data-agent-title">数据准备 Agent</h3>
+                <a
+                  id="data-agent-safety"
+                  class="data-agent-safety"
+                  href="https://yuzhthu.github.io/SRHarness/web-ui/#agent-safety"
+                  target="_blank"
+                  rel="noopener"
+                  >安全与数据权限说明</a
+                >
+              </div>
+              <div class="data-agent-help-row">
+                <p id="data-agent-help">
+                  直接用自然语言让 Agent
+                  帮你检查、清洗数据或构造衍生变量。整理好的数据保存在
+                  context.data/ 目录下：manifest.json
+                  记录变量、坐标轴及图/超图关系，&lt;name&gt;.npy
+                  保存各变量的数组取值
+                </p>
+                <span class="data-agent-details"
+                  >（<a
+                    id="context-data-guide-link"
+                    href="https://yuzhthu.github.io/SRHarness/context-data/"
+                    target="_blank"
+                    rel="noopener"
+                    >详情</a
+                  >）</span
+                >
+              </div>
+            </div>
+            <div class="data-agent-heading-actions">
+              <span id="data-agent-state" class="small muted">准备就绪</span>
+            </div>
+          </div>
+          <div id="data-agent-feed" class="data-agent-feed" hidden></div>
+          <div class="data-agent-compose">
+            <textarea
+              id="data-agent-input"
+              rows="3"
+              placeholder="例如：提取人口数量作为因变量，并整理其它数值列作为自变量…"
+            ></textarea>
+            <div class="data-agent-compose-toolbar">
+              <button
+                id="data-agent-settings-toggle"
+                class="composer-settings-button"
+                type="button"
+                aria-expanded="false"
+              >
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M2.5 4h5m2 0h4M2.5 8h2m2 0h7M2.5 12h7m2 0h2" />
+                  <circle cx="8.5" cy="4" r="1" />
+                  <circle cx="5.5" cy="8" r="1" />
+                  <circle cx="10.5" cy="12" r="1" /></svg
+                ><span id="data-agent-settings-toggle-label">设置</span></button
+              ><span class="spacer"></span
+              ><button
+                id="data-agent-send"
+                class="data-agent-send"
+                type="button"
+                aria-label="交给 Agent"
+                title="交给 Agent"
+              >
+                <svg viewBox="0 0 18 18" aria-hidden="true">
+                  <path d="M9 14V4M5 8l4-4 4 4" />
+                </svg>
+              </button>
+            </div>
+            <div
+              id="data-agent-settings"
+              class="settings-panel data-agent-settings"
+              hidden
+            >
+              <div class="settings-heading">
+                <div>
+                  <b id="data-agent-settings-title">数据准备设置</b
+                  ><span id="data-agent-settings-subtitle"
+                    >修改后下一轮 Agent 回复时生效</span
+                  >
+                </div>
+                <button
+                  id="data-agent-settings-close"
+                  class="quiet"
+                  type="button"
+                  aria-label="关闭"
+                >
+                  ×
+                </button>
+              </div>
+              <nav class="settings-tabs">
+                <button
+                  class="active"
+                  type="button"
+                  data-data-settings-tab="model"
+                >
+                  模型</button
+                ><button type="button" data-data-settings-tab="capabilities">
+                  能力
+                </button>
+              </nav>
+              <div class="settings-scroll">
+                <div
+                  class="settings-pane active"
+                  data-data-settings-pane="model"
+                >
+                  <div class="settings-form">
+                    <label
+                      ><span id="data-provider-label">Provider</span
+                      ><select id="data-provider" aria-label="Provider">
+                        <option>openrouter</option>
+                        <option>openai</option>
+                        <option>deepseek</option>
+                        <option>siliconflow</option>
+                        <option>gemini</option>
+                        <option>lmstudio</option>
+                      </select></label
+                    ><label
+                      ><span id="data-model-label">Model</span
+                      ><input
+                        id="data-model"
+                        aria-label="Model"
+                        placeholder="Model" /></label
+                    ><label
+                      ><span id="data-proxy-label">代理</span
+                      ><input
+                        id="data-proxy"
+                        type="url"
+                        autocomplete="off"
+                        spellcheck="false"
+                        placeholder="http://127.0.0.1:7890" /></label
+                    ><label class="api-key-setting"
+                      ><span
+                        ><b id="data-api-key-label">API Key</b
+                        ><small id="data-api-key-env"></small></span
+                      ><span class="api-key-control"
+                        ><input
+                          id="data-api-key"
+                          type="password"
+                          autocomplete="new-password"
+                          spellcheck="false"
+                        /><button id="data-api-key-visibility" type="button">
+                          显示
+                        </button></span
+                      ><small id="data-api-key-status"></small></label
+                    ><label
+                      ><span id="data-tool-parser-label">工具调用格式</span
+                      ><select id="data-tool-parser">
+                        <option value="openai">OpenAI Native</option>
+                        <option value="text">Text</option>
+                        <option value="json">JSON</option>
+                        <option value="xml">XML</option>
+                      </select></label
+                    ><label
+                      ><span id="data-max-tokens-label">最大输出 Token</span
+                      ><input
+                        id="data-max-tokens"
+                        type="number"
+                        placeholder="Auto"
+                        min="1"
+                        max="1000000"
+                    /></label>
+                  </div>
+                </div>
+                <div
+                  class="settings-pane"
+                  data-data-settings-pane="capabilities"
+                  hidden
+                >
+                  <div class="capability-columns">
+                    <section>
+                      <div class="capability-heading">
+                        <h4 id="data-tools-settings-title">可用工具</h4>
+                        <span id="data-tools-count"></span>
+                      </div>
+                      <div
+                        id="data-tool-options"
+                        class="capability-options"
+                      ></div>
+                    </section>
+                    <section>
+                      <div class="capability-heading">
+                        <h4 id="data-skills-settings-title">可用 Skill</h4>
+                        <span id="data-skills-count"></span>
+                      </div>
+                      <div
+                        id="data-skill-options"
+                        class="capability-options"
+                      ></div>
+                    </section>
+                  </div>
+                </div>
+              </div>
+              <div class="settings-actions">
+                <span id="data-settings-hint" class="small muted"
+                  >修改后下一轮Agent回复时生效</span
+                ><span class="spacer"></span
+                ><span
+                  id="data-model-test-status"
+                  class="model-test-status"
+                  role="status"
+                ></span
+                ><button id="data-model-test" type="button">测试</button
+                ><button id="data-settings-cancel" type="button">取消</button
+                ><button id="data-settings-apply" class="primary" type="button">
+                  确认
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+    <div id="data-setup" class="data-view" style="display: none">
+      <div class="data-intro">
+        <div>
+          <h2>任务配置</h2>
+          <p>
+            指定因变量与自变量、补充各变量的物理或背景含义，并设置建模目标与公式评测方式。
+          </p>
+        </div>
+      </div>
+      <div class="data-layout">
+        <section
+          class="data-card wide variable-workbench"
+          id="variable-config-card"
+        >
+          <div class="variable-card-heading">
+            <div>
+              <h3>配置变量描述</h3>
+              <p class="variable-help">
+                点击左侧色标切换变量角色（因变量 / 自变量 /
+                暂不参与），点击描述直接编辑，拖动 ⠿ 可调整顺序
+              </p>
+            </div>
+            <div class="variable-card-actions">
+              <button
+                id="data-refresh"
+                class="data-refresh-button"
+                type="button"
+              >
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M12.7 6.2A5 5 0 1 0 13 9M12.7 3.5v2.8H9.9" /></svg
+                ><span id="data-refresh-label">刷新</span>
+              </button>
+            </div>
+          </div>
+          <div class="variable-table-head">
+            <span></span><span>角色</span><span>变量</span><span>描述</span>
+          </div>
+          <div id="variable-role-table" class="variable-role-table">
+            <div id="variable-role-body" class="variable-role-body"></div>
+          </div>
+        </section>
+        <section
+          class="data-card wide task-problem-card"
+          id="task-problem-card"
+        >
+          <h3 id="task-problem-title">配置问题描述</h3>
+          <p id="task-problem-help">
+            简要说明你的研究背景与建模目标（将自动加入初始提示词，上方已填写的变量说明无需重复）。
+          </p>
+          <textarea
+            id="problem-description"
+            rows="5"
+            placeholder="例如：研究人口数量与其它变量之间的关系，并寻找可解释的数学表达式。"
+          >
+Find an interpretable formula explaining the selected target from the selected features.</textarea>
+        </section>
+      </div>
+    </div>
+    <div id="run-setup" class="data-view run-setup" style="display: none">
+      <div class="data-intro">
+        <div>
+          <h2 id="run-setup-title">准备探索</h2>
+          <p id="run-setup-help">
+            核对变量配置与初始提示词，点击右下角按钮启动符号回归搜索
+          </p>
+        </div>
+      </div>
+      <div class="data-layout">
+        <section
+          class="data-card wide variable-workbench variable-workbench-preview"
+          id="run-variable-preview"
+        >
+          <h3>确认变量配置</h3>
+          <p class="variable-preview-help">
+            本次探索将使用以下变量配置（如需修改请返回“任务配置”选项卡）。
+          </p>
+          <div class="variable-table-head">
+            <span></span><span>角色</span><span>变量</span><span>描述</span>
+          </div>
+          <div class="variable-role-table">
+            <div id="run-variable-role-body" class="variable-role-body"></div>
+          </div>
+        </section>
+      </div>
+    </div>
+    <div id="feed" style="display: none">
+      <div class="welcome" id="welcome">
+        <div class="orb">✳</div>
+        <div class="eyebrow">SYMBOLIC REGRESSION WORKSPACE</div>
+        <h1>从数据出发，<br />寻找可解释的公式。</h1>
+        <p class="muted">
+          上传数据并描述你的科学问题。Agent
+          的思考过程、工具调用与公式探索进展将在这里实时更新。
+        </p>
+      </div>
+    </div>
+    <div id="context"></div>
+    <button id="follow" hidden>↓ 回到最新事件</button>
+    <div id="composer" class="composer data-mode">
+      <input id="target" type="hidden" value="y" />
+      <div id="composer-purpose" class="composer-purpose">
+        <b id="composer-purpose-title">确认问题描述</b
+        ><span id="composer-purpose-help"
+          >已根据任务配置自动生成，可在发送前直接编辑（点击右侧按钮可重新生成）。</span
+        >
+      </div>
+      <textarea
+        id="prompt"
+        aria-label="用户提示词"
+        placeholder="等待根据任务配置生成用户提示词…"
+      ></textarea>
+      <div class="row">
+        <span id="pending"></span><span class="spacer"></span
+        ><button id="next-c" class="advance-button" type="button" hidden>
+          下一个 C</button
+        ><button id="next-r" class="advance-button" type="button" hidden>
+          下一个 R</button
+        ><button
+          id="initial-prompt-toggle"
+          class="composer-settings-button initial-prompt-toggle"
+          type="button"
+          aria-expanded="false"
+        >
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M3 2.5h7l3 3v8H3zM10 2.5v3h3M5.5 8h5M5.5 10.5h5" /></svg
+          ><span id="initial-prompt-toggle-label">系统提示词</span></button
+        ><button
+          id="settings-toggle"
+          class="composer-settings-button"
+          type="button"
+          aria-expanded="false"
+        >
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M2.5 4h5m2 0h4M2.5 8h2m2 0h7M2.5 12h7m2 0h2" />
+            <circle cx="8.5" cy="4" r="1" />
+            <circle cx="5.5" cy="8" r="1" />
+            <circle cx="10.5" cy="12" r="1" /></svg
+          ><span id="settings-toggle-label">设置</span></button
+        ><button id="send" class="primary" disabled>开始探索 ↗</button>
+      </div>
+      <div
+        id="initial-prompt-panel"
+        class="settings-panel initial-prompt-panel"
+        hidden
+      >
+        <div class="settings-heading">
+          <div><b id="initial-prompt-title">系统提示词</b></div>
+          <button
+            id="initial-prompt-close"
+            class="quiet"
+            type="button"
+            aria-label="关闭"
+          >
+            ×
+          </button>
+        </div>
+        <div class="initial-prompt-body">
+          <div class="initial-prompt-note">
+            <b id="system-prompt-confirm-title">确认系统提示词</b
+            ><span id="system-prompt-confirm-help"
+              >定义 Agent 的工作规范与搜索策略，可在发送前直接编辑。</span
+            >
+          </div>
+          <textarea
+            id="system-prompt"
+            class="prompt-editor"
+            aria-label="System Prompt"
+          ></textarea>
+        </div>
+      </div>
+      <div id="settings-panel" class="settings-panel" hidden>
+        <div class="settings-heading">
+          <div>
+            <b id="settings-title">运行设置</b
+            ><span id="settings-subtitle">确认后从下一轮开始生效</span>
+          </div>
+          <button
+            id="settings-close"
+            class="quiet"
+            type="button"
+            aria-label="关闭"
+          >
+            ×
+          </button>
+        </div>
+        <nav class="settings-tabs" aria-label="设置分类">
+          <button
+            id="settings-tab-model"
+            class="active"
+            type="button"
+            data-settings-tab="model"
+          >
+            模型</button
+          ><button
+            id="settings-tab-search"
+            type="button"
+            data-settings-tab="search"
+          >
+            搜索</button
+          ><button
+            id="settings-tab-capabilities"
+            type="button"
+            data-settings-tab="capabilities"
+          >
+            能力
+          </button>
+        </nav>
+        <div class="settings-scroll">
+          <div
+            id="settings-pane-model"
+            class="settings-pane active"
+            data-settings-pane="model"
+          >
+            <div class="settings-form">
+              <label
+                ><span>Provider</span
+                ><select id="provider">
+                  <option>openrouter</option>
+                  <option>openai</option>
+                  <option>deepseek</option>
+                  <option>siliconflow</option>
+                  <option>gemini</option>
+                  <option>lmstudio</option>
+                </select></label
+              ><label
+                ><span>Model</span
+                ><input id="model" value="qwen/qwen3.5-flash-02-23" /></label
+              ><label class="api-key-setting"
+                ><span
+                  ><b id="api-key-label">API Key</b
+                  ><small id="api-key-env"></small></span
+                ><span class="api-key-control"
+                  ><input
+                    id="api-key"
+                    type="password"
+                    autocomplete="new-password"
+                    spellcheck="false"
+                  /><button id="api-key-visibility" type="button">
+                    显示
+                  </button></span
+                ><small id="api-key-status"></small></label
+              ><label
+                ><span id="strong-provider-label">强模型 Provider</span
+                ><select id="strong-provider">
+                  <option value="">跟随基础模型</option>
+                  <option>openrouter</option>
+                  <option>openai</option>
+                  <option>deepseek</option>
+                  <option>siliconflow</option>
+                  <option>gemini</option>
+                  <option>lmstudio</option>
+                </select></label
+              ><label
+                ><span id="strong-model-label">强模型</span
+                ><input id="strong-model" placeholder="留空表示不启用" /></label
+              ><label
+                ><span id="tool-parser-label">工具调用格式</span
+                ><select id="tool-parser">
+                  <option value="openai">OpenAI Native</option>
+                  <option value="text">Text</option>
+                  <option value="json">JSON</option>
+                  <option value="xml">XML</option>
+                </select></label
+              ><label
+                ><span id="max-tokens-label">最大输出 Token</span
+                ><input
+                  id="max-tokens"
+                  type="number"
+                  placeholder="Auto"
+                  min="1"
+                  max="1000000"
+              /></label>
+            </div>
+            <label class="switch-row"
+              ><span
+                ><b id="auto-routing-label">自动模型路由</b
+                ><small id="auto-routing-help"
+                  >根据任务复杂度与搜索进展，在基础模型与强模型之间自动切换</small
+                ></span
+              ><input id="auto-routing" type="checkbox"
+            /></label>
+          </div>
+          <div
+            id="settings-pane-search"
+            class="settings-pane"
+            data-settings-pane="search"
+            hidden
+          >
+            <div class="settings-form compact">
+              <label
+                ><span>R · 重启次数</span
+                ><input
+                  id="R"
+                  type="number"
+                  min="1"
+                  max="1000"
+                  value="1" /></label
+              ><label
+                ><span>C · 独立分支</span
+                ><input
+                  id="C"
+                  type="number"
+                  min="1"
+                  max="1000"
+                  value="1" /></label
+              ><label
+                ><span>L · 对话深度</span
+                ><input
+                  id="L"
+                  type="number"
+                  min="1"
+                  max="1000"
+                  value="50" /></label
+              ><label
+                ><span>K · 每轮采样</span
+                ><input
+                  id="K"
+                  type="number"
+                  min="1"
+                  max="1000"
+                  value="1" /></label
+              ><label
+                ><span id="restart-top-k-label">重启保留候选数</span
+                ><input
+                  id="restart-top-k"
+                  type="number"
+                  min="1"
+                  max="1000"
+                  value="1" /></label
+              ><label
+                ><span id="max-workers-label">工具并行进程</span
+                ><input
+                  id="max-workers"
+                  type="number"
+                  min="0"
+                  max="1000"
+                  value="0"
+              /></label>
+            </div>
+            <div class="switch-list">
+              <label class="switch-row"
+                ><span
+                  ><b id="initial-diagnostics-label">强制初始诊断</b
+                  ><small id="initial-diagnostics-help"
+                    >每条新分支第 1 步自动运行基础统计、相关性分析并加载符号发现
+                    Skill</small
+                  ></span
+                ><input id="initial-diagnostics" type="checkbox"
+              /></label>
+            </div>
+          </div>
+          <div
+            id="settings-pane-capabilities"
+            class="settings-pane"
+            data-settings-pane="capabilities"
+            hidden
+          >
+            <div class="capability-columns">
+              <section>
+                <div class="capability-heading">
+                  <h4 id="tools-settings-title">可用工具</h4>
+                  <span id="tools-count"></span>
+                </div>
+                <div id="tool-options" class="capability-options"></div>
+              </section>
+              <section>
+                <div class="capability-heading">
+                  <h4 id="skills-settings-title">可用 Skill</h4>
+                  <span id="skills-count"></span>
+                </div>
+                <div id="skill-options" class="capability-options"></div>
+              </section>
+            </div>
+          </div>
+        </div>
+        <div class="settings-actions">
+          <span id="settings-hint" class="small muted"
+            >运行中将在下一次对话前生效</span
+          ><span class="spacer"></span
+          ><button id="settings-cancel" type="button">取消</button
+          ><button id="apply" class="primary" disabled>确认</button>
+        </div>
+      </div>
+    </div>
+  </section>
+  <div
+    id="right-resizer"
+    class="panel-resizer"
+    role="separator"
+    aria-label="调整搜索结果宽度"
+    aria-orientation="vertical"
+    tabindex="0"
+  >
+    <button class="panel-toggle" type="button" aria-label="折叠搜索结果">
+      ›
+    </button>
+  </div>
+  <aside class="panel right" id="insights-panel">
+    <div id="search-insights" class="insights-view search-insights">
+      <div class="bar">
+        <span id="tree-title">搜索树</span
+        ><button id="tree-latest" title="跟随最新节点">最新</button
+        ><button id="tree-fit" title="显示整棵搜索树">总览</button
+        ><button id="tree-retry" title="重新连接搜索树">↻</button
+        ><span class="spacer"></span
+        ><a id="full-tree" href="/viewer" target="_blank" rel="noopener"
+          >完整查看器 ↗</a
+        >
+      </div>
+      <div class="tree-wrap">
+        <p id="tree-status" class="muted small">任务开始后显示搜索树</p>
+        <iframe id="tree" title="Agent 搜索树" src="about:blank"></iframe>
+      </div>
+      <div class="bar candidate-bar">
+        <span id="candidate-title">候选公式</span>
+        <div class="candidate-mode" role="group" aria-label="候选公式范围">
+          <button id="candidate-topk" class="active" type="button">Topk</button
+          ><button id="candidate-pareto" type="button">Pareto Front</button>
+        </div>
+        <span class="spacer"></span
+        ><span class="eyebrow" id="count">0 RECORDS</span>
+      </div>
+      <div id="topk">
+        <p class="muted small">
+          搜索过程中评估得到的候选公式与各项指标将显示在此处。
+        </p>
+      </div>
+    </div>
+    <div id="data-insights" class="insights-view data-insights" hidden>
+      <div class="bar relationship-preview-bar">
+        <span id="relationship-preview-title">数据预览</span
+        ><select id="relationship-preview-mode" aria-label="预览模式">
+          <option value="table">表格</option>
+          <option value="structure">结构</option>
+          <option value="scatter">散点图</option>
+          <option value="distribution">分布</option>
+          <option value="heatmap">热图</option></select
+        ><span class="spacer"></span>
+      </div>
+      <div
+        id="data-table-preview"
+        class="data-insights-scroll data-table-preview"
+        hidden
+      >
+        <div class="data-preview-toolbar">
+          <label class="data-preview-picker"
+            ><span id="data-preview-group-label">预览变量</span
+            ><select id="data-preview-group" aria-label="预览变量"></select
+          ></label>
+          <div class="data-number-format">
+            <span id="data-number-format-label">数值格式</span
+            ><select id="data-number-format-mode">
+              <option value="decimal">小数</option>
+              <option value="scientific">科学计数法</option></select
+            ><label class="data-number-digits"
+              ><input
+                id="data-number-format-digits"
+                type="number"
+                min="0"
+                max="12"
+                step="1"
+                value="3"
+              /><span id="data-number-digits-label">位</span></label
+            >
+          </div>
+        </div>
+        <div id="data-table" class="data-table-wrap"></div>
+        <div id="tensor-preview" class="tensor-preview"></div>
+      </div>
+      <div class="data-insights-scroll relationship-preview-scroll">
+        <div id="plot-variable-palette" class="plot-variable-palette">
+          <span class="plot-palette-empty">暂无可用变量。</span>
+        </div>
+        <div class="plot-fields">
+          <div class="plot-slot" data-channel="x">
+            <b>X</b><span class="plot-slot-value"></span>
+          </div>
+          <div class="plot-slot" data-channel="y">
+            <b>Y</b><span class="plot-slot-value"></span>
+          </div>
+          <div class="plot-slot" data-channel="hue">
+            <b>HUE</b><span class="plot-slot-value"></span>
+          </div>
+          <div class="plot-slot" data-channel="size">
+            <b>SIZE</b><span class="plot-slot-value"></span>
+          </div>
+        </div>
+        <div
+          id="distribution-bin-control"
+          class="distribution-bin-control"
+          hidden
+        >
+          <label
+            ><span id="distribution-bin-label">直方条数量</span>
+            <input
+              id="distribution-bin-count"
+              type="number"
+              min="2"
+              max="100"
+              value="20"
+          /></label>
+        </div>
+        <div id="heatmap-z-control" class="heatmap-z-control" hidden></div>
+        <div id="plot-stage" class="plot-stage">
+          <div
+            id="plot-broadcast-info"
+            class="plot-broadcast-info"
+            hidden
+          ></div>
+          <svg id="scatter" role="img" aria-label="变量关系散点图"></svg>
+          <div id="plot-empty" class="plot-empty">将数值变量拖入 X 和 Y</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+</main>
+<dialog id="preview">
+  <div class="row">
+    <b id="preview-title"></b><span class="spacer"></span
+    ><button id="close-preview">关闭</button>
+  </div>
+  <div id="preview-meta" class="preview-meta"></div>
+  <pre id="preview-text"></pre>
+</dialog>
+<dialog id="demo-picker" class="demo-picker">
+  <div class="demo-picker-header">
+    <div>
+      <h3 id="demo-picker-title">选择样例数据</h3>
+      <p id="demo-picker-help">生成后将作为当前 context.data 加载。</p>
+    </div>
+    <button
+      id="demo-picker-close"
+      class="demo-picker-close"
+      type="button"
+      aria-label="关闭"
+    >
+      ×
+    </button>
+  </div>
+  <div id="demo-picker-status" role="status" aria-live="polite"></div>
+  <div class="demo-options"></div>
+</dialog>

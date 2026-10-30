@@ -63,6 +63,7 @@ class HttpHarnessService(HarnessService):
             "records": ("GET", "/records"),
             "record": ("GET", "/records/{node_id}"),
             "operation_status": ("GET", "/operations/{operation_id}"),
+            "event_download": ("GET", "/control/events/{sequence}"),
         }
         if operation in extra:
             method, path = extra[operation]
@@ -74,6 +75,16 @@ class HttpHarnessService(HarnessService):
         else:
             raise ServiceError(404, "Unknown operation")
         parameters = dict(parameters)
+        if operation == "event_download":
+            role = parameters.pop("role", "search")
+            prefixes = {
+                "search": "/control",
+                "data": "/data/agent",
+                "evaluator": "/evaluator/agent",
+            }
+            if role not in prefixes:
+                raise ServiceError(422, "Unknown agent role")
+            path = f"{prefixes[role]}/events/{int(parameters.pop('sequence'))}"
         if operation == "record":
             path = path.replace("{node_id}", quote(parameters.pop("node_id"), safe=""))
         elif operation == "operation_status":

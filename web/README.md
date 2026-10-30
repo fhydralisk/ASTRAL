@@ -20,6 +20,8 @@ The root Compose stack defaults to PostgreSQL. See [deployment](../deploy/decoup
 ## Boundaries
 
 - `src/app` and `src/components`: React workbench, account and administration UI.
+- `src/components/research`: original `main` workbench layout and interaction controllers,
+  mounted and disposed by React. See its README for the migration boundary and reference commit.
 - `src/server`: authentication, ownership, encrypted model storage, ORM repository and HTTP client.
 - `src/lib/harness-schema.d.ts`: generated from the checked-in OpenAPI contract.
 - `src/lib/scientific-routes.ts`: generated allowlist; credentials and user tags have no browser proxy.
@@ -45,3 +47,9 @@ The browser suite uses the real Next.js backend and a test-only remote Harness d
 Python service tests independently exercise the real Harness HTTP adapter. Linux CI additionally
 runs the actual scientific workspace/search workflow. MySQL/PostgreSQL integration jobs use
 real database service containers. No test requires a paid model API.
+
+The restored workbench is based on `origin/main` at `1ee6cff`, including observational
+evaluators/tools/skills and the large-event timeline fix. Browser tests compare the original
+and migrated panel geometry at desktop and mobile widths and exercise the original three-stage
+workflow. Account/model management lives in a dialog; each Agent's original settings surface
+selects complete encrypted model profiles instead of handling raw provider credentials.

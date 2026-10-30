@@ -13,14 +13,13 @@ from ..core import json_value, update_context_data_descriptions
 from ..tools.configure_variable_roles import available_variable_context
 from .session import SessionStartError
 from .base import ServiceError, Download
+from .events import event_batch
 
 
 def plain_result(value):
     return value
 
 
-def event_batch(manager, after):
-    return manager.get_recent_events(after, limit=32)
 
 
 def stream_download(chunks, *, media_type, headers=None, background=None):
@@ -247,6 +246,7 @@ def build_operations(session):
                 **{name: "variable" for name in context.data if name not in all_axis_names},
             },
             "rows": total,
+            "has_manifest": (session.workspace / "context.data" / "manifest.json").is_file(),
             "variable_descriptions": descriptions,
             "data": records,
             "truncated": total > count,
@@ -555,6 +555,8 @@ def build_operations(session):
         try:
             return session.reload_context_data()
         except ValueError as exc:
+            if str(exc) == "context.data/manifest.json does not exist":
+                raise ServiceError(409, str(exc), code="context_data_missing") from exc
             raise ServiceError(400, str(exc)) from exc
 
     def update_data_selection(payload: dict = None):

@@ -22,6 +22,18 @@ export const scientificRoutes = [
   },
   {
     "method": "GET",
+    "path": "/control/events/{sequence}"
+  },
+  {
+    "method": "GET",
+    "path": "/data/agent/events/{sequence}"
+  },
+  {
+    "method": "GET",
+    "path": "/evaluator/agent/events/{sequence}"
+  },
+  {
+    "method": "GET",
     "path": "/records"
   },
   {

@@ -1,0 +1,18 @@
+---
+name: fit-before-ranking
+description: Experimental guidance for the symbolic-regression agent comparing noisy observational relations. Preserve conditional information, verify train-only coefficient fitting, and distinguish structural search from validation-driven parameter tuning. Does not select a scientific function family.
+---
+
+# Separate structure discovery from coefficient fitting
+
+For observational tasks, explicitly select ObservationalEvaluator and use evaluate_observational_formula / submit_observational_formula, with observational_statistics for frozen training summaries. Ordinary formula and statistics tools retain their original behavior. Read the reviewed User Prompt; no contract message is appended by the generic agent. Obey the declared variables, selection, measure, split and objective. Never change them to improve a score. Read engine syntax once; declare every adjustable coefficient with an explicit finite initial value and use fit=true.
+
+1. Preserve conditional information. A derived variable can be redundant with a complete set of its ingredients but informative when only some ingredients are present. A small numerical range or high pairwise correlation is not proof of irrelevance. Before discarding an allowed predictor, compare a fitted single-predictor baseline with a fitted joint candidate. Center and scale with training-only statistics or declared constants; insert substitutions into the expression rather than inventing dataset columns. If training statistics are unavailable, say so.
+
+2. Treat fitting as a required check, not a success flag. Save the initial and returned fitted expressions, train loss, validation loss, and fit errors. For a model linear in its adjustable coefficients, prefer a provided stable linear solver; otherwise retry the same structure in centered/scaled coordinates when fitting looks suspect. A nested model's best training loss cannot be worse than its parent if it can reproduce the parent. Resolve violations before rejecting the structure. A constant prediction from a nominally varying model is a fitting warning.
+
+3. Fit coefficients on training rows only. Validation may select among independently train-fitted structures; never scan hard-coded slopes, intercepts, widths, thresholds or weights against validation scores. Replacing a fitted parameter by a sequence of numeric literals is still parameter fitting. Use a small predeclared set of training-only starts and pick the start by training objective, then score validation once. Preserve the best valid fitted candidate.
+
+4. Separate measurement adequacy from symbolic structure. Large standardized residuals can indicate missing scatter, calibration differences or misspecification. Report this; do not compensate by chasing expressions that fit a few high-weight validation points. Error-model changes belong in a separately authorized data/evaluation intervention shared by comparison arms. If uncertainty or group diagnostics are inaccessible, explicitly record that limitation rather than inventing evidence.
+
+5. For distributions, track the declared integration measure and support. A family expressed in a transformed coordinate is not automatically the same family in the original coordinate; include the Jacobian only when changing the density measure. Keep amplitudes identifiable after normalization and check positivity/integrability. Retain a simpler competing structure when its validation difference is too small to establish the extra terms; distinguish predictive agreement, structural recovery, and numerical coefficient compatibility in the final report.

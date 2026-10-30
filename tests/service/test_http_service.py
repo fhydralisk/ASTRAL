@@ -56,6 +56,17 @@ def test_auth_explicit_session_and_contract(client):
     assert len(client.get("/openapi.json").json()["paths"]) >= 40
 
 
+def test_empty_context_is_explicit_and_reload_has_safe_error_code(client):
+    sid = client.post(
+        "/v1/sessions", json={"tags": {}, "idempotency_key": "empty-context"}
+    ).json()["id"]
+    base = f"/v1/sessions/{sid}/data/context"
+    assert client.get(base).json()["has_manifest"] is False
+    result = client.post(base + "/reload")
+    assert result.status_code == 409
+    assert result.json()["error"]["code"] == "context_data_missing"
+
+
 def test_credentials_are_role_scoped_and_never_persisted(client, service, tmp_path, monkeypatch):
     sid = client.post("/v1/sessions", json={"tags": {}, "idempotency_key": "key-test"}).json()["id"]
     monkeypatch.setenv("COMPATIBLE_API_KEY", "process-key-must-not-be-used")

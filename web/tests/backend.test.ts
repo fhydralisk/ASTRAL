@@ -182,7 +182,7 @@ describe("accounts, ownership and credentials", () => {
     await s.login("api-user", "replacement-password-123");
   });
   it("never trusts browser ownership tags or exposes credential endpoints", async () => {
-    const { POST, PUT } = await import("../src/app/api/[...path]/route");
+    const { POST, PUT, GET } = await import("../src/app/api/[...path]/route");
     const { NextRequest } = await import("next/server");
     const { requireUser } = await import("../src/server/security");
     const identity = await requireUser();
@@ -228,6 +228,28 @@ describe("accounts, ownership and credentials", () => {
       );
       expect(forbidden.status).toBe(404);
       expect(mock).toHaveBeenCalledTimes(1);
+      mock.mockImplementationOnce(
+        async () =>
+          new Response(
+            JSON.stringify({ seq: 1, payload: { content: "Full event" } }),
+            { headers: { "content-type": "application/json" } },
+          ),
+      );
+      const eventPath = [
+        "conversations",
+        id,
+        "harness",
+        "control",
+        "events",
+        "1",
+      ];
+      const event = await GET(
+        new NextRequest("http://localhost:3000/api/" + eventPath.join("/")),
+        { params: Promise.resolve({ path: eventPath }) },
+      );
+      expect(event.status).toBe(200);
+      expect((await event.json()).payload.content).toBe("Full event");
+      expect(mock).toHaveBeenCalledTimes(2);
     } finally {
       mock.mockRestore();
     }

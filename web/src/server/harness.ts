@@ -20,7 +20,14 @@ export async function harness(
     if (!response.ok) {
       // Internal errors may contain provider responses; never reflect arbitrary bodies.
       const status = response.status;
-      await response.body?.cancel();
+      if (status === 409) {
+        const error = await response.json().catch(() => null);
+        if (error?.error?.code === "context_data_missing")
+          throw new ApiError(
+            409,
+            "context.data/manifest.json does not exist; prepare data first",
+          );
+      } else await response.body?.cancel();
       throw new ApiError(
         status,
         status === 429
